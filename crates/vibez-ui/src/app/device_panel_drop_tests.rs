@@ -241,7 +241,7 @@ async fn the_implied_sampler_and_its_sample_survive_save_and_reopen() {
     save_project_async(project_path.clone(), None, app.project_for_save())
         .await
         .unwrap();
-    let loaded = load_project_async(project_path, None, app.state.transport.sample_rate)
+    let loaded = load_project_async(project_path, app.state.transport.sample_rate)
         .await
         .unwrap();
     assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);

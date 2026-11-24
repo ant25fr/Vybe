@@ -183,26 +183,60 @@ pub fn analyse_loop_tempo(audio: &DecodedAudio, source_name: &str) -> Option<Loo
     })
 }
 
+/// Loop analysis for the browser preview. Onset detection cost grows with
+/// file length, so the BPM is detected on a bounded window of the audio;
+/// the bar-count fit still uses the full length, so the result is the same
+/// as [`analyse_loop_tempo`] at a fraction of the cost for long files.
+pub fn analyse_loop_tempo_bounded(audio: &DecodedAudio, source_name: &str) -> Option<LoopGridFit> {
+    const WINDOW_SECS: f64 = 30.0;
+    let cap = (audio.sample_rate as f64 * WINDOW_SECS) as usize;
+    let windowed = audio.num_frames() > cap && cap > 0;
+    analyse_loop_tempo_frames(
+        audio.num_frames(),
+        audio.sample_rate as f64,
+        source_name,
+        || {
+            if windowed {
+                let window = DecodedAudio {
+                    channels: audio
+                        .channels
+                        .iter()
+                        .map(|channel| channel[..cap.min(channel.len())].to_vec())
+                        .collect(),
+                    sample_rate: audio.sample_rate,
+                };
+                vibez_core::onset::detect_bpm(&window, window.sample_rate).map(|value| value.bpm)
+            } else {
+                vibez_core::onset::detect_bpm(audio, audio.sample_rate).map(|value| value.bpm)
+            }
+        },
+    )
+}
+
 fn analyse_loop_tempo_with(
     audio: &DecodedAudio,
     source_name: &str,
     detect: impl FnOnce() -> Option<f64>,
 ) -> Option<LoopGridFit> {
-    let cheap_decision = fit_loop_tempo_decision(
+    analyse_loop_tempo_frames(
         audio.num_frames(),
         audio.sample_rate as f64,
         source_name,
-        None,
-    )?;
+        detect,
+    )
+}
+
+fn analyse_loop_tempo_frames(
+    source_frames: usize,
+    sample_rate: f64,
+    source_name: &str,
+    detect: impl FnOnce() -> Option<f64>,
+) -> Option<LoopGridFit> {
+    let cheap_decision = fit_loop_tempo_decision(source_frames, sample_rate, source_name, None)?;
     if cheap_decision.filename_hint_decided {
         return Some(cheap_decision.fit);
     }
-    fit_loop_tempo(
-        audio.num_frames(),
-        audio.sample_rate as f64,
-        source_name,
-        detect(),
-    )
+    fit_loop_tempo(source_frames, sample_rate, source_name, detect())
 }
 
 /// Deterministic warped length for a clip: the naive proportional

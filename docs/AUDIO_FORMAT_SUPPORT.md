@@ -1,8 +1,7 @@
 # Audio format support
 
-Vibez uses one import contract for Local Browser results, Dropbox Remote
-Catalog eligibility, native audio pickers, Audition, Arrange/device import,
-and Project Media reopen.
+Vibez uses one import contract for Local Browser results, native audio
+pickers, Audition, Arrange/device import, and Project Media reopen.
 
 The executable source of truth is
 `vibez_core::audio_format::SUPPORTED_AUDIO_FORMATS`. The Symphonia features in

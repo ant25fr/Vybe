@@ -9,6 +9,11 @@ use vibez_core::id::TrackId;
 
 /// An app with one MIDI track holding one note clip, and whether that
 /// clip is open in the piano roll.
+
+/// Test shim: route through the default shortcut map.
+fn gkh(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    super::keyboard::global_key_handler(key, modifiers, &crate::shortcuts::Shortcuts::default())
+}
 fn app_with_note_clip(open: bool) -> App {
     let mut app = super::test_support::app();
     app.state.view.workspace = crate::state::Workspace::Arrange;
@@ -61,8 +66,7 @@ fn narrow_grid(app: &mut App) {
     } else {
         Modifiers::CTRL
     };
-    let message = global_key_handler(Key::Character("1".into()), command)
-        .expect("Command+1 is a global shortcut");
+    let message = gkh(Key::Character("1".into()), command).expect("Command+1 is a global shortcut");
     let _ = app.update(message);
 }
 
@@ -109,8 +113,8 @@ fn command_one_with_the_perform_pads_focused_edits_no_grid() {
 }
 
 fn press(app: &mut App, key: &str) {
-    let message = global_key_handler(Key::Character(key.into()), Modifiers::empty())
-        .expect("Z and X are global shortcuts");
+    let message =
+        gkh(Key::Character(key.into()), Modifiers::empty()).expect("Z and X are global shortcuts");
     let _ = app.update(message);
 }
 

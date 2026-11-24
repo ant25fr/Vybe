@@ -43,6 +43,19 @@ const NEW_TRACK_ROW_HEIGHT: f32 = 54.0;
 /// pinned footer can never squeeze the track list out of the window.
 const CHANNEL_FOOTER_MAX_HEIGHT: f32 = 240.0;
 
+/// The height of one return or master channel row in the pinned footer.
+const CHANNEL_ROW_HEIGHT: f32 = 26.0;
+
+/// The least height the Arrange workspace card keeps when the detail panel
+/// below it is dragged tall: the overview, the ruler, one minimum-height
+/// track lane, the master channel row and the time ruler, so one track
+/// stays visible however tall the rack grows.
+pub(super) const ARRANGE_ONE_TRACK_VISIBLE_HEIGHT: f32 = OVERVIEW_HEIGHT
+    + ARRANGE_RULER_HEIGHT
+    + vibez_project::TrackHeight::MIN.pixels()
+    + CHANNEL_ROW_HEIGHT
+    + TIME_RULER_HEIGHT;
+
 impl App {
     /// Width of the clip lanes, right of the track headers.
     pub(super) fn arrange_lane_width(&self) -> f32 {
@@ -156,6 +169,7 @@ impl App {
 
         // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
+            wheel_zoom: self.wheel_zoom(),
             playhead_beats,
             play_start_beats: Some(play_start_beats),
             zoom_level,
@@ -209,6 +223,7 @@ impl App {
             loop_enabled: self.state.transport.loop_enabled,
             loop_start_beats: self.state.transport.loop_start_beats,
             loop_end_beats: self.state.transport.loop_end_beats,
+            wheel_zoom: self.wheel_zoom(),
             tracks: self
                 .state
                 .project_tracks
@@ -338,47 +353,51 @@ impl App {
 
             // Clip canvas for this track
             let refusal = self.state.browser.lane_refusal(track.kind);
-            let mut clip_canvas_widget = TrackClipCanvas::from_track(
-                track,
-                content,
-                playhead_beats,
-                zoom_level,
-                self.state.view.arrange_grid,
-                scroll_offset,
-                (self.state.view.window_width
-                    - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
-                    .max(1.0),
-                total_beats,
-                sample_rate,
-                selected,
-                track_color,
-                bpm,
-                track.id,
-                track_ids.clone(),
-                selected_clips,
-                self.state.transport.loop_enabled,
-                self.state.transport.loop_start_beats,
-                self.state.transport.loop_end_beats,
-                timeline.time_selection_active,
-                timeline.selection_start_beats,
-                timeline.selection_end_beats,
-                timeline.time_selection_track,
-                browser_drag_active,
-            )
-            .with_marquee(
-                row_spans.clone(),
-                timeline.marquee.as_ref().map(|marquee| marquee.rect),
-            )
-            .with_snap_targets(snap_targets.clone())
-            .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
-            .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
-            .with_drop_ghost(
-                self.state
-                    .browser
-                    .lane_drop_ghost(track.id, bpm)
-                    .map(|ghost| LaneGhost::new(&ghost, geometry.pixels_per_beat())),
-            )
-            .with_drop_refusal(refusal.clone());
+            let mut clip_canvas_widget = {
+                let mut canvas = TrackClipCanvas::from_track(
+                    track,
+                    content,
+                    playhead_beats,
+                    zoom_level,
+                    self.state.view.arrange_grid,
+                    scroll_offset,
+                    (self.state.view.window_width
+                        - crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH)
+                        .max(1.0),
+                    total_beats,
+                    sample_rate,
+                    selected,
+                    track_color,
+                    bpm,
+                    track.id,
+                    track_ids.clone(),
+                    selected_clips,
+                    self.state.transport.loop_enabled,
+                    self.state.transport.loop_start_beats,
+                    self.state.transport.loop_end_beats,
+                    timeline.time_selection_active,
+                    timeline.selection_start_beats,
+                    timeline.selection_end_beats,
+                    timeline.time_selection_track,
+                    browser_drag_active,
+                )
+                .with_marquee(
+                    row_spans.clone(),
+                    timeline.marquee.as_ref().map(|marquee| marquee.rect),
+                )
+                .with_snap_targets(snap_targets.clone())
+                .with_clip_drag(timeline.clip_drag.as_ref().map(|drag| drag.preview.clone()))
+                .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                .with_drop_ghost(
+                    self.state
+                        .browser
+                        .lane_drop_ghost(track.id, bpm)
+                        .map(|ghost| LaneGhost::new(&ghost, geometry.pixels_per_beat())),
+                )
+                .with_drop_refusal(refusal.clone());
+                canvas.wheel_zoom = self.wheel_zoom();
+                canvas
+            };
             if let Some(preview) = self.state.audio_recording.preview_for_track(track.id) {
                 let name = match preview.source {
                     crate::domains::audio_recording::AudioRecordingSource::HardwareInput => {
@@ -555,7 +574,7 @@ impl App {
                     .width(Length::Fixed(
                         crate::widgets::track_header::TRACK_HEADER_TOTAL_WIDTH,
                     ))
-                    .height(Length::Fixed(26.0))
+                    .height(Length::Fixed(CHANNEL_ROW_HEIGHT))
                     .align_y(iced::alignment::Vertical::Center)
                     .style(move |_theme: &Theme| container::Style {
                         background: Some(if selected {
@@ -576,7 +595,7 @@ impl App {
 
             let filler = container(column![])
                 .width(Length::Fill)
-                .height(Length::Fixed(26.0))
+                .height(Length::Fixed(CHANNEL_ROW_HEIGHT))
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::bg_dark().into()),
                     border: iced::Border {
@@ -587,7 +606,8 @@ impl App {
                     ..Default::default()
                 });
 
-            channel_rows = channel_rows.push(row![header, filler].height(Length::Fixed(26.0)));
+            channel_rows =
+                channel_rows.push(row![header, filler].height(Length::Fixed(CHANNEL_ROW_HEIGHT)));
             if expanded {
                 channel_rows =
                     self.push_automation_lanes(channel_rows, timeline, channel, chan_color);

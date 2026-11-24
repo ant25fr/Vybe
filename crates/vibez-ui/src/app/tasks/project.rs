@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use vibez_audio_io::file_io;
 use vibez_core::track::{ClipInfo, InstrumentStateInfo, MediaSourceRef};
-use vibez_dropbox::{DropboxCache, DropboxClient, DropboxEntry};
 use vibez_project::Project;
 
 pub(in crate::app) async fn save_project_async(
@@ -159,7 +158,6 @@ fn classify_legacy_project_load_error(
 
 pub(in crate::app) async fn load_project_async(
     path: PathBuf,
-    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
     sample_rate: u32,
 ) -> Result<ProjectLoadResult, crate::message::ProjectLoadError> {
     let load_path = path.clone();
@@ -185,7 +183,7 @@ pub(in crate::app) async fn load_project_async(
     })
     .await
     .map_err(|err| crate::message::ProjectLoadError::other(format!("load task failed: {err}")))??;
-    Ok(hydrate_project_async(path, project, container_path, dropbox, sample_rate).await)
+    Ok(hydrate_project_async(path, project, container_path, sample_rate).await)
 }
 
 /// Converts `project` to `sample_rate` and decodes every clip and device
@@ -194,7 +192,6 @@ pub(in crate::app) async fn hydrate_project_async(
     path: PathBuf,
     mut project: Project,
     container_path: Option<PathBuf>,
-    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
     sample_rate: u32,
 ) -> ProjectLoadResult {
     project.convert_sample_rate(sample_rate);
@@ -210,7 +207,6 @@ pub(in crate::app) async fn hydrate_project_async(
             match clip.resolved_source().cloned() {
                 Some(source) => match hydrate_saved_source(
                     container_path.as_ref(),
-                    dropbox.as_ref(),
                     &source,
                     &clip.name,
                     sample_rate,
@@ -254,7 +250,6 @@ pub(in crate::app) async fn hydrate_project_async(
                     ..
                 } => match hydrate_saved_source(
                     container_path.as_ref(),
-                    dropbox.as_ref(),
                     source,
                     &track.name,
                     sample_rate,
@@ -280,7 +275,6 @@ pub(in crate::app) async fn hydrate_project_async(
                         let label = format!("drum pad {} on '{}'", pad_index + 1, track.name);
                         match hydrate_saved_source(
                             container_path.as_ref(),
-                            dropbox.as_ref(),
                             source,
                             &label,
                             sample_rate,
@@ -317,7 +311,6 @@ pub(in crate::app) async fn hydrate_project_async(
 
 pub(in crate::app) async fn hydrate_saved_source(
     container_path: Option<&PathBuf>,
-    dropbox: Option<&(Arc<DropboxClient>, DropboxCache)>,
     source: &MediaSourceRef,
     label: &str,
     sample_rate: u32,
@@ -354,7 +347,9 @@ pub(in crate::app) async fn hydrate_saved_source(
             .await
             .map_err(|error| format!("Project Media decode task failed: {error}"))?
         }
-        MediaSourceRef::DropboxFile { .. } => hydrate_dropbox_source(dropbox, source, label).await,
+        MediaSourceRef::DropboxFile { display_path, .. } => Err(format!(
+            "Skipped '{label}' ('{display_path}' lives on a remote cloud connection that is no longer available)"
+        )),
     }?;
     super::at_engine_rate(audio, sample_rate).await
 }
@@ -369,47 +364,6 @@ pub(in crate::app) async fn decode_blocking(
     .map_err(|e| format!("decode task failed: {e}"))?
 }
 
-pub(in crate::app) async fn hydrate_dropbox_source(
-    dropbox: Option<&(Arc<DropboxClient>, DropboxCache)>,
-    source: &MediaSourceRef,
-    label: &str,
-) -> Result<vibez_core::audio_buffer::DecodedAudio, String> {
-    let MediaSourceRef::DropboxFile {
-        path_lower,
-        display_path,
-        rev,
-    } = source
-    else {
-        return Err(format!(
-            "Skipped '{label}' (expected Dropbox source reference)"
-        ));
-    };
-    let Some((client, cache)) = dropbox else {
-        return Err(format!(
-            "Skipped '{label}' (not connected to Dropbox - reconnect in Settings)"
-        ));
-    };
-    let file_name = display_path
-        .rsplit_once('/')
-        .map(|(_, n)| n.to_string())
-        .unwrap_or_else(|| display_path.clone());
-    let entry = DropboxEntry {
-        path_lower: path_lower.clone(),
-        path_display: display_path.clone(),
-        name: file_name,
-        is_folder: false,
-        rev: rev.clone(),
-        size: None,
-    };
-    let local_path = client
-        .download_to_cache(&entry, cache)
-        .await
-        .map_err(|e| format!("Skipped '{label}' ({e})"))?;
-    decode_blocking(local_path)
-        .await
-        .map_err(|e| format!("Skipped '{label}' ({e})"))
-}
-
 /// The open project, counted at the rate it was playing at, bound for `sample_rate`.
 pub(in crate::app) struct SampleRateConversion {
     pub(in crate::app) project: Project,
@@ -420,7 +374,6 @@ pub(in crate::app) struct SampleRateConversion {
 
 pub(in crate::app) async fn convert_project_sample_rate_async(
     conversion: SampleRateConversion,
-    dropbox: Option<(Arc<DropboxClient>, DropboxCache)>,
 ) -> crate::message::ConvertedProject {
     let SampleRateConversion {
         project,
@@ -432,7 +385,6 @@ pub(in crate::app) async fn convert_project_sample_rate_async(
         path.clone().unwrap_or_default(),
         project,
         path.clone(),
-        dropbox,
         sample_rate,
     )
     .await;
@@ -452,7 +404,7 @@ mod project_load_error_tests {
         let directory = tempfile::tempdir().unwrap();
         let missing = directory.path().join("removed.vzp");
 
-        let error = load_project_async(missing, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        let error = load_project_async(missing, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap_err();
 
@@ -468,7 +420,7 @@ mod project_load_error_tests {
         let invalid = directory.path().join("invalid.vzp");
         std::fs::write(&invalid, "not a Vibez project").unwrap();
 
-        let error = load_project_async(invalid, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        let error = load_project_async(invalid, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap_err();
 

@@ -59,7 +59,9 @@ impl MidiLanding {
                 onto: preferred.filter(|track_id| midi_track(*track_id)),
                 beat: ctx.playhead_beats,
             }),
-            BrowserImportTarget::ArrangementNewTrackAt { position_samples } => Ok(Self::Arrange {
+            BrowserImportTarget::ArrangementNewTrackAt {
+                position_samples, ..
+            } => Ok(Self::Arrange {
                 onto: None,
                 beat: beat(position_samples),
             }),

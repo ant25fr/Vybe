@@ -48,11 +48,26 @@ impl App {
             }
             Message::CloseSettings => {
                 self.state.settings_open = false;
+                self.state.view.shortcut_capture = None;
                 self.state.perform.key_rebind_target = None;
                 let _ = self.state.plugin_settings.save();
             }
             Message::SelectSettingsTab(tab) => {
                 self.state.settings_tab = tab;
+            }
+            Message::BeginShortcutCapture(action) => {
+                // Clicking the row of the action being captured cancels.
+                self.state.view.shortcut_capture =
+                    if self.state.view.shortcut_capture == Some(action) {
+                        None
+                    } else {
+                        Some(action)
+                    };
+            }
+            Message::ResetShortcut(action) => {
+                self.shortcuts.set_binding(action, Vec::new());
+                self.persist_ui_settings();
+                self.state.status_text = format!("{} reset to its default binding", action.label());
             }
             Message::SelectAudioBackend(backend) => {
                 return self.handle_select_audio_backend(backend);
@@ -289,17 +304,133 @@ impl App {
             Message::ClickLocalBrowserEntry(source) => {
                 return self.on_click_local_browser_entry(source)
             }
-            Message::BeginPendingBrowserDrag(source, label) => {
-                let action = self.state.browser.update(BrowserMsg::BeginPendingDrag {
-                    source,
-                    label,
-                    origin_x: self.state.view.cursor_x,
-                    origin_y: self.state.view.cursor_y,
+            Message::BrowserEntryReleased {
+                source,
+                ctrl,
+                shift,
+            } => return self.on_browser_entry_released(source, ctrl, shift),
+            Message::BrowserEntryDoubleClicked(source) => {
+                return self.on_browser_entry_double_clicked(source)
+            }
+            Message::BrowserEntryRightPressed(source) => {
+                return self.on_browser_entry_right_pressed(source)
+            }
+            Message::BrowserTagRightPressed(id) => {
+                let x = self.state.view.cursor_x;
+                let y = self.state.view.cursor_y;
+                return self.update(Message::View(
+                    crate::domains::view::ViewMsg::ShowContextMenu {
+                        x,
+                        y,
+                        target: crate::state::ContextMenuTarget::BrowserTag { id },
+                    },
+                ));
+            }
+            Message::BrowserTagFolderRightPressed(id) => {
+                let x = self.state.view.cursor_x;
+                let y = self.state.view.cursor_y;
+                return self.update(Message::View(
+                    crate::domains::view::ViewMsg::ShowContextMenu {
+                        x,
+                        y,
+                        target: crate::state::ContextMenuTarget::BrowserTagFolder { id },
+                    },
+                ));
+            }
+            Message::BrowserTaggableRightPressed(item) => {
+                let x = self.state.view.cursor_x;
+                let y = self.state.view.cursor_y;
+                return self.update(Message::View(
+                    crate::domains::view::ViewMsg::ShowContextMenu {
+                        x,
+                        y,
+                        target: crate::state::ContextMenuTarget::BrowserTaggable { item },
+                    },
+                ));
+            }
+            Message::DeviceParamRightPressed {
+                track_id,
+                slot,
+                param_index,
+            } => {
+                let target = self.state.project_tracks.find(track_id).and_then(|track| {
+                    crate::domains::automation::automation_target_for(&slot, param_index, track)
                 });
+                let Some(target) = target else {
+                    return Task::none();
+                };
+                let x = self.state.view.cursor_x;
+                let y = self.state.view.cursor_y;
+                return self.update(Message::View(
+                    crate::domains::view::ViewMsg::ShowContextMenu {
+                        x,
+                        y,
+                        target: crate::state::ContextMenuTarget::AutomationParam {
+                            track_id,
+                            target,
+                        },
+                    },
+                ));
+            }
+            Message::BrowserEntryHover(source) => return self.on_browser_entry_hover(source),
+            Message::ToggleBrowserRowAudition(source) => {
+                return self.on_toggle_browser_row_audition(source)
+            }
+            Message::BeginPendingBrowserDrag(source, label) => {
+                // Pressing a selected row drags the whole selection.
+                let sources = {
+                    let browser = &self.state.browser;
+                    if browser.selection_count() > 1 && browser.is_selected(&source) {
+                        browser.selection_sources(&self.visible_browser_results())
+                    } else {
+                        vec![source.clone()]
+                    }
+                };
+                let msg = if sources.len() > 1 {
+                    BrowserMsg::BeginPendingDragMany {
+                        sources,
+                        label,
+                        origin_x: self.state.view.cursor_x,
+                        origin_y: self.state.view.cursor_y,
+                    }
+                } else {
+                    BrowserMsg::BeginPendingDrag {
+                        source,
+                        label,
+                        origin_x: self.state.view.cursor_x,
+                        origin_y: self.state.view.cursor_y,
+                    }
+                };
+                let action = self.state.browser.update(msg);
                 return self.apply_browser_action(action);
             }
+            Message::BeginPendingTaggableDrag(item, label) => {
+                let action = self
+                    .state
+                    .browser
+                    .update(BrowserMsg::BeginPendingTaggableDrag {
+                        item,
+                        label,
+                        origin_x: self.state.view.cursor_x,
+                        origin_y: self.state.view.cursor_y,
+                    });
+                return self.apply_browser_action(action);
+            }
+            Message::TaggableDragReleased { item: _, click } => {
+                // A real drag is dropped by the global release on the hovered
+                // tag row; only a plain click runs the row's action.
+                if self.state.browser.tag_drag.is_some() {
+                    return Task::none();
+                }
+                if let Some(click) = click {
+                    return self.update(*click);
+                }
+                return Task::none();
+            }
             Message::PreviewLocalEntry(source) => return self.on_preview_local_entry(source),
+            Message::SampleMapHover(source) => return self.on_sample_map_hover(source),
             Message::StopBrowserPreview => return self.on_stop_browser_preview(),
+            Message::SeekBrowserPreview(fraction) => return self.on_seek_browser_preview(fraction),
             Message::ToggleAuditionEnabled => return self.on_toggle_audition_enabled(),
             Message::SetAuditionGain(gain) => {
                 self.state.browser.set_audition_gain(gain);
@@ -349,6 +480,9 @@ impl App {
             Message::BrowserWaveformReady(source, Ok(audio)) => {
                 return self.on_browser_waveform_ready(source, audio)
             }
+            Message::BrowserLoopFitReady(source, fit) => {
+                return self.on_browser_loop_fit_ready(source, fit)
+            }
             Message::BrowserWaveformReady(source, Err(err)) => {
                 self.state.browser.fail_waveform_load(&source, err);
             }
@@ -388,12 +522,6 @@ impl App {
             Message::BrowserSampleDecoded(target, treatment, audio, name, source) => {
                 return self.on_browser_sample_decoded(target, treatment, audio, name, source)
             }
-            Message::RemoteImportReady {
-                request_id,
-                target,
-                treatment,
-                result,
-            } => return self.on_remote_import_ready(request_id, target, treatment, result),
             Message::BrowserImportPrepared {
                 target,
                 generation,
@@ -407,67 +535,75 @@ impl App {
             Message::BrowserSampleDecodeError(err) => {
                 return self.on_browser_sample_decode_error(err)
             }
-
-            // -- Dropbox / remote catalog --
-            Message::SaveDropboxAppKey => return self.on_save_dropbox_app_key(),
-            Message::ConnectDropbox => {
-                return self.handle_connect_dropbox();
+            Message::OpenQuickAdd => {
+                if self.state.view.quick_add.is_some() {
+                    self.close_quick_add();
+                    return iced::Task::none();
+                }
+                self.state.view.quick_add = Some(crate::state::QuickAddState {
+                    query: std::mem::take(&mut self.state.view.quick_add_last_query),
+                    selected: 0,
+                    kind: crate::state::QuickAddKind::All,
+                });
+                return iced::widget::text_input::focus(
+                    super::views_quick_add::quick_add_input_id(),
+                );
             }
-            Message::DropboxConnected(Ok(outcome)) => return self.on_dropbox_connected(outcome),
-            Message::DropboxConnected(Err(err)) => {
-                self.state.browser.remote.auth_in_progress = false;
-                self.state.browser.remote.last_error = Some(err.clone());
-                self.state.status_text = format!("Dropbox connect failed: {err}");
+            Message::CloseQuickAdd => {
+                self.close_quick_add();
             }
-            Message::DisconnectDropbox => return self.on_disconnect_dropbox(),
-            Message::RemoteCatalogStartupLoaded(result) => {
-                return self.on_remote_catalog_startup_loaded(result)
+            Message::QuickAddQueryChanged(query) => {
+                if let Some(state) = &mut self.state.view.quick_add {
+                    state.query = query;
+                    state.selected = 0;
+                }
             }
-            Message::RefreshRemoteConnection => {
-                return self.handle_remote_catalog_refresh();
+            Message::QuickAddMove(delta) => {
+                let count = self
+                    .state
+                    .view
+                    .quick_add
+                    .as_ref()
+                    .map(|state| self.quick_add_items(state).len())
+                    .unwrap_or(0);
+                if let Some(state) = &mut self.state.view.quick_add {
+                    if count > 0 {
+                        let next = state.selected as i64 + delta as i64;
+                        state.selected = next.rem_euclid(count as i64) as usize;
+                    }
+                }
             }
-            Message::RemoteCatalogPageFetched {
-                generation,
-                completed_pages,
-                result,
-            } => return self.on_remote_catalog_page_fetched(generation, completed_pages, result),
-            Message::RemoteCatalogRefreshPrepared(result) => {
-                return self.on_remote_catalog_refresh_prepared(result)
+            Message::QuickAddSetKind(kind) => {
+                if let Some(state) = &mut self.state.view.quick_add {
+                    state.kind = kind;
+                    state.selected = 0;
+                }
             }
-            Message::RemoteCatalogSaved {
-                generation,
-                next_checkpoint,
-                result,
-            } => return self.on_remote_catalog_saved(generation, next_checkpoint, result),
-            Message::SetMediaCacheBudgetGiB(gib) => return self.on_set_media_cache_budget(gib),
-            Message::ToggleMediaCacheAutomaticEviction => {
-                return self.on_toggle_media_cache_automatic_eviction()
+            Message::QuickAddSubmit => {
+                let item = self
+                    .state
+                    .view
+                    .quick_add
+                    .as_ref()
+                    .and_then(|state| self.quick_add_items(state).get(state.selected).cloned());
+                self.close_quick_add();
+                if let Some(item) = item {
+                    return self.quick_add_apply(item);
+                }
             }
-            Message::MediaCacheMaintenanceComplete(result) => {
-                return self.on_media_cache_maintenance_complete(result)
-            }
-            Message::ClearMediaCache => return self.on_clear_media_cache(),
-            Message::MediaCacheCleared(result) => return self.on_media_cache_cleared(result),
-            Message::ClickRemoteBrowserEntry(entry) => {
-                return self.on_click_remote_browser_entry(entry)
-            }
-            Message::RemoteAuditionReady {
-                request_id,
-                generation,
-                source,
-                result,
-            } => return self.on_remote_audition_ready(request_id, generation, source, result),
-            Message::DropboxPreview(entry) => {
-                return self.start_remote_audition(entry, false);
-            }
-            Message::DropboxImportToArrangement(entry) => {
-                return self.handle_dropbox_import_to_arrangement(entry);
-            }
-            Message::DropboxImportToDevice(entry) => {
-                return self.handle_dropbox_import_to_device(entry);
-            }
+            Message::QuickAddDevice(item) => return self.quick_add_apply(item),
             _ => unreachable!("service messages are routed by App::update"),
         }
         Task::none()
     }
+}
+
+/// Hands a compile-time-constant link to the system browser.
+///
+/// `open::that` blocks while it spawns the handler, so it runs on a
+/// blocking thread: the UI thread must never wait on a browser launch.
+async fn open_url_async(url: &'static str) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || open::that(url).map_err(|error| error.to_string()))
+        .await
+        .map_err(|error| error.to_string())?
 }

@@ -17,6 +17,7 @@ struct LocalResultsKey {
     query: String,
     scope: BrowserSearchScope,
     current_folder: Option<PathBuf>,
+    tag_filters: Vec<u32>,
 }
 
 /// Indices into [`BrowserState::folders`] / [`BrowserState::entries`],
@@ -41,6 +42,7 @@ impl BrowserState {
                 && key.query == normalized_query
                 && key.scope == self.search_scope
                 && key.current_folder == self.current_folder
+                && key.tag_filters == self.tag_filters
         });
         if fresh {
             return cached;
@@ -65,7 +67,10 @@ impl BrowserState {
             .entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| self.local_entry_is_result(entry, normalized_query))
+            .filter(|(_, entry)| {
+                self.local_entry_is_result(entry, normalized_query)
+                    && self.passes_tag_filters(&entry.source)
+            })
             .map(|(index, entry)| (entry.name.to_lowercase(), index))
             .collect();
         entries.sort_by(|(a_name, a), (b_name, b)| {
@@ -82,6 +87,7 @@ impl BrowserState {
                 query: normalized_query.to_owned(),
                 scope: self.search_scope,
                 current_folder: self.current_folder.clone(),
+                tag_filters: self.tag_filters.clone(),
             }),
             folders: folders.into_iter().map(|(_, index)| index).collect(),
             entries: entries.into_iter().map(|(_, index)| index).collect(),

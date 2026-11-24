@@ -571,6 +571,7 @@ impl TimelineEditorState {
                             loop_start_beats: clip.loop_start_beats,
                             loop_end_beats: clip.loop_end_beats,
                             groove_grid: clip.groove_grid,
+                            color_index: clip.color_index,
                         });
                     }
                 }
@@ -719,6 +720,25 @@ impl TimelineEditorState {
                     ctx,
                     track_id,
                 );
+            }
+            ArrangementMsg::CreateNoteClipAt {
+                track_id,
+                position_beats,
+            } => {
+                return self.op_create_note_clip_at(
+                    project_tracks,
+                    engine,
+                    ctx,
+                    track_id,
+                    position_beats,
+                );
+            }
+            ArrangementMsg::SetNoteClipColor {
+                track_id,
+                clip_id,
+                color_index,
+            } => {
+                return self.op_set_note_clip_color(track_id, clip_id, color_index);
             }
             ArrangementMsg::AudioClipInspectorInputChanged {
                 clip_id,

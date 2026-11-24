@@ -199,6 +199,8 @@ impl App {
             stack![base_layout, self.view_file_menu_overlay()].into()
         } else if self.state.view.edit_menu_open {
             stack![base_layout, self.view_edit_menu_overlay()].into()
+        } else if self.state.view.quick_add.is_some() {
+            stack![base_layout, self.view_quick_add_overlay()].into()
         } else if self.state.view.context_menu.is_some() {
             stack![base_layout, self.view_context_menu_overlay()].into()
         } else if self.state.view.editing_clip_name.is_some()

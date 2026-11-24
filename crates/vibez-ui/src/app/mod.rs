@@ -13,9 +13,6 @@ use vibez_audio_io::audio_host::{AudioBackend, AudioHost};
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_core::constants::UI_TICK_MS;
 use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::{
-    load_app_key_with_env_override, DropboxCache, DropboxClient, DropboxEntry, DropboxSettings,
-};
 use vibez_engine::commands::EngineCommand;
 use vibez_engine::engine::AudioEngine;
 use vibez_engine::events::EngineEvent;
@@ -41,6 +38,10 @@ struct App {
     /// Follows the pointer during another app's drag.
     pointer_poll: desktop_pointer::PointerPoll,
     edge_shortcuts: EdgeShortcutState,
+    /// Effective key bindings (defaults + user overrides from ui.json).
+    /// The global key handler routes through this, and Settings →
+    /// Shortcuts edits it.
+    pub(crate) shortcuts: crate::shortcuts::Shortcuts,
     cmd_tx: crate::domains::EngineCommandQueue,
     event_rx: Option<Consumer<EngineEvent>>,
     _stream: Option<AudioOutputStream>,
@@ -61,6 +62,8 @@ struct App {
     filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
     gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
     card_panels: device_panels::DevicePanels<crate::domains::device_card::CardPanelState>,
+    multiband_panels:
+        device_panels::DevicePanels<crate::domains::multiband_dynamics::MultibandPanelState>,
     instrument_panels: std::collections::HashMap<
         vibez_core::id::TrackId,
         crate::domains::instrument_card::InstrumentPanel,
@@ -79,26 +82,12 @@ struct App {
     export_plugin_return_rx:
         Option<std::sync::mpsc::Receiver<vibez_engine::render::OfflinePlugins>>,
 
-    // Dropbox
-    dropbox_settings: DropboxSettings,
-    dropbox_cache: DropboxCache,
-    dropbox_client: Option<Arc<DropboxClient>>,
-    remote_materialization_request: tracked_request::TrackedRequest,
-    remote_import_request: tracked_request::TrackedRequest,
-    remote_audition_cache_lease: Option<vibez_dropbox::CacheLease>,
-    pending_remote_audition: Option<DropboxEntry>,
-    /// Generation for the whole Browser import pipeline (local and
-    /// remote). Bumped on cancellation and project reset so an
-    /// in-flight WARP preparation cannot land a clip afterwards.
+    /// Generation for the whole Browser import pipeline. Bumped on
+    /// cancellation and project reset so an in-flight WARP preparation
+    /// cannot land a clip afterwards.
     browser_import_request: tracked_request::TrackedRequest,
-    /// Bumped on every refresh start and on disconnect, so catalog pages
-    /// fetched for a previous connection are dropped instead of reconciled.
-    remote_catalog_request: tracked_request::TrackedRequest,
     /// Cancellable preparation for the next resident Section launch.
     section_residency_request: tracked_request::TrackedRequest,
-    /// Catalog changes accumulated since the last reconcile flush; applied in
-    /// batches so each page does not re-sort the whole catalog in update().
-    remote_catalog_pending: Vec<crate::remote_provider::RemoteChange>,
 
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
@@ -206,7 +195,6 @@ pub(crate) use audio_tasks::*;
 use drum_rack_preparation::*;
 pub(crate) use keyboard::*;
 use tasks::*;
-mod dropbox_io;
 mod media;
 mod media_import;
 mod plugins;
@@ -216,6 +204,7 @@ mod project_replay;
 mod project_sample_rate;
 mod project_sections;
 mod project_serialization;
+mod quick_add;
 mod save_runtime;
 mod section_record;
 mod sidechain;
@@ -226,7 +215,6 @@ mod update_audio_edits;
 mod update_media;
 mod update_policy;
 mod update_project;
-mod update_remote;
 mod update_services;
 mod update_timeline;
 mod update_view;
@@ -236,8 +224,9 @@ mod views_audio_clip;
 mod views_automation;
 mod views_browser;
 mod views_browser_audition;
+mod views_browser_category;
 mod views_browser_places;
-mod views_browser_remote;
+mod views_browser_sample_map;
 mod views_browser_style;
 mod views_clip_swing;
 mod views_close_confirm;
@@ -259,13 +248,14 @@ mod views_perform_pads;
 mod views_perform_playhead;
 mod views_perform_record;
 mod views_perform_sections;
+mod views_quick_add;
 mod views_settings;
 mod views_settings_appearance;
 mod views_settings_audio;
-mod views_settings_dropbox;
 mod views_settings_perform;
 mod views_settings_project;
 mod views_settings_rows;
+mod views_settings_shortcuts;
 mod views_settings_updates;
 mod views_shell;
 mod views_transient_analysis;
@@ -303,6 +293,8 @@ mod new_track_drop_tests;
 mod empty_space_drop_tests;
 #[cfg(test)]
 mod view_harness;
+#[cfg(test)]
+mod wheel_zoom_view_tests;
 
 mod midi_audition;
 mod midi_file_drop;
@@ -369,6 +361,8 @@ impl App {
         let interface_scale = ui_settings.clamped_interface_scale();
         let recent_project_paths =
             crate::ui_settings::normalize_recent_projects(ui_settings.recent_project_paths.clone());
+        let shortcuts =
+            crate::shortcuts::Shortcuts::from_overrides(ui_settings.shortcut_overrides.clone());
 
         let preferred_audio_backend = if ui_settings.audio_backend.is_available() {
             ui_settings.audio_backend
@@ -413,29 +407,6 @@ impl App {
                 }
             };
         let input_bridge = output_stream.input_bridge();
-
-        let dropbox_settings = DropboxSettings::load();
-        let dropbox_cache = DropboxCache::with_policy(vibez_dropbox::MediaCachePolicy {
-            budget_bytes: ui_settings.media_cache_budget_bytes,
-            automatic_eviction: ui_settings.media_cache_automatic_eviction,
-        });
-        let resolved_key = load_app_key_with_env_override(&dropbox_settings);
-        let dropbox_client = match (&resolved_key, &dropbox_settings.tokens) {
-            (Some(key), Some(tokens)) => {
-                Some(Arc::new(DropboxClient::new(key.clone(), tokens.clone())))
-            }
-            _ => None,
-        };
-        let remote_ui_state = crate::state::RemoteUiState {
-            connected: dropbox_client.is_some(),
-            account_email: dropbox_settings.account_email.clone(),
-            app_key_input: dropbox_settings.app_key.clone().unwrap_or_default(),
-            has_app_key: resolved_key.is_some(),
-            catalog_state: crate::state::RemoteCatalogState::Loading,
-            cache_budget_bytes: ui_settings.media_cache_budget_bytes,
-            cache_automatic_eviction: ui_settings.media_cache_automatic_eviction,
-            ..Default::default()
-        };
 
         let mut state = AppState {
             transport: crate::state::TransportState {
@@ -485,8 +456,38 @@ impl App {
                 audition_enabled: ui_settings.audition_enabled,
                 audition_gain: ui_settings.audition_gain.clamp(0.0, 2.0),
                 roots: ui_settings.sample_library_roots,
-                remote: remote_ui_state,
+                pins: ui_settings
+                    .browser_pins
+                    .iter()
+                    .map(|path| MediaSourceRef::LocalFile {
+                        path: PathBuf::from(path),
+                    })
+                    .collect(),
+                recent: ui_settings
+                    .browser_recent
+                    .iter()
+                    .map(|path| MediaSourceRef::LocalFile {
+                        path: PathBuf::from(path),
+                    })
+                    .collect(),
+                tags: if ui_settings.browser_tags.is_empty() {
+                    crate::state::BrowserState::default_tags()
+                } else {
+                    ui_settings.browser_tags
+                },
+                tag_tree: ui_settings.browser_tag_tree,
+                top_tag_ids: ui_settings.browser_top_tag_ids,
+                item_tags: ui_settings
+                    .browser_item_tags
+                    .into_iter()
+                    .map(|stored| (stored.path, stored.tags))
+                    .collect(),
                 ..Default::default()
+            },
+            automation_ui: {
+                let mut automation_ui = crate::domains::automation::AutomationState::default();
+                automation_ui.set_saved_lane_heights(ui_settings.automation_lane_heights);
+                automation_ui
             },
             ..Default::default()
         };
@@ -541,6 +542,7 @@ impl App {
         let mut app = Self {
             state,
             edge_shortcuts: EdgeShortcutState::default(),
+            shortcuts,
             cmd_tx: crate::domains::EngineCommandQueue::new(cmd_tx, transport),
             event_rx: Some(event_rx),
             _stream: Some(output_stream),
@@ -555,6 +557,7 @@ impl App {
             filter_panels: Default::default(),
             gate_panels: Default::default(),
             card_panels: Default::default(),
+            multiband_panels: Default::default(),
             instrument_panels: Default::default(),
             gain_devices: Default::default(),
             eq_devices: eq_devices::EqDevices {
@@ -574,17 +577,8 @@ impl App {
             export_job: None,
             export_render_progress: None,
             export_plugin_return_rx: None,
-            dropbox_settings,
-            dropbox_cache,
-            dropbox_client,
-            remote_materialization_request: Default::default(),
-            remote_import_request: Default::default(),
-            remote_audition_cache_lease: None,
-            pending_remote_audition: None,
             browser_import_request: Default::default(),
-            remote_catalog_request: Default::default(),
             section_residency_request: Default::default(),
-            remote_catalog_pending: Vec::new(),
             midi_input,
             hardware_keys: Default::default(),
             midi_input_ports: Vec::new(),
@@ -614,8 +608,6 @@ impl App {
                 })
             })
         }));
-        let remote_startup_task =
-            dropbox_io::remote_catalog_startup_task(app.dropbox_cache.clone());
         let plugin_catalog_startup_task = if app.state.plugin_settings.cache_needs_refresh() {
             Task::done(Message::ScanPlugins)
         } else {
@@ -673,7 +665,6 @@ impl App {
             app,
             Task::batch([
                 local_startup_task,
-                remote_startup_task,
                 plugin_catalog_startup_task,
                 update_check_task,
                 open_task,
@@ -803,9 +794,63 @@ impl App {
         self.interface_scale as f64
     }
 
+    /// Wall-clock interval for the UI tick. iced rebuilds the whole view
+    /// and redraws the window after every message, so the tick rate is
+    /// the redraw rate: a 60 fps tick costs a full redraw 60 times a
+    /// second even when nothing moves. The interval therefore follows
+    /// what the UI actually has to animate:
+    ///
+    /// - [`UI_TICK_MS`] (60 fps) while interacting: an edit drag, a
+    ///   recording, an export, an open plugin GUI window, or an open
+    ///   hardware MIDI input (key latency must stay sub-frame-ish), so
+    ///   edge auto-scroll, plugin timers and MIDI stay smooth;
+    /// - 33 ms (30 fps) while the transport plays: the playhead and
+    ///   meters still move smoothly, at half the redraw cost;
+    /// - 100 ms (10 fps) when idle: only time-based housekeeping runs
+    ///   (meter decay, pad flashes, auto-save, draining the engine event
+    ///   ring, which is empty of position changes while stopped).
+    ///
+    /// Every poll the tick performs still runs on every tick — only less
+    /// often — so behavior is unchanged, just sampled less frequently.
+    fn ui_tick_interval(&self) -> std::time::Duration {
+        /// Playback tick: 30 fps.
+        const PLAY_TICK_MS: u64 = 33;
+        /// Idle tick: 10 fps.
+        const IDLE_TICK_MS: u64 = 100;
+        let playing = !matches!(
+            self.state.transport.playback,
+            crate::state::PlaybackPhase::Stopped,
+        );
+        let hot = self.state.audio_recording.is_recording()
+            || self.state.perform.clip_record.session.is_some()
+            || self.state.arrangement.edit_drag.is_active()
+            || (self.state.view.workspace == crate::state::Workspace::Perform
+                && self.state.perform.timeline_editor().edit_drag.is_active())
+            || self.export_render_progress.is_some()
+            || self
+                .plugin_window_manager
+                .as_ref()
+                .is_some_and(|manager| manager.any_open())
+            || self.midi_input.is_some();
+        let ms = if hot {
+            UI_TICK_MS
+        } else if playing {
+            PLAY_TICK_MS
+        } else {
+            IDLE_TICK_MS
+        };
+        std::time::Duration::from_millis(ms)
+    }
+    /// The rebindable wheel-zoom bindings plus the modifiers currently
+    /// held, handed to the timeline widgets (overview, ruler, lanes, clip
+    /// editors) so the same wheel gesture zooms everywhere.
+    pub(super) fn wheel_zoom(&self) -> crate::shortcuts::WheelZoom {
+        crate::shortcuts::wheel_zoom(&self.shortcuts, self.state.view.held_modifiers)
+    }
+
     fn subscription(&self) -> Subscription<Message> {
         Subscription::batch([
-            iced::time::every(std::time::Duration::from_millis(UI_TICK_MS)).map(|_| Message::Tick),
+            iced::time::every(self.ui_tick_interval()).map(|_| Message::Tick),
             local_watcher::subscription(self.state.browser.roots.clone()),
             iced::event::listen_with(|event, _status, _id| match event {
                 iced::Event::Keyboard(event) => keyboard_input_message(event, _status),
@@ -815,6 +860,9 @@ impl App {
                 iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
                     iced::mouse::Button::Left,
                 )) => Some(Message::View(ViewMsg::MouseReleased)),
+                iced::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                    Some(Message::GlobalWheelScrolled(delta))
+                }
                 iced::Event::Window(iced::window::Event::Resized(size)) => Some(Message::View(
                     ViewMsg::WindowResized(size.width, size.height),
                 )),
@@ -832,11 +880,23 @@ impl App {
 }
 
 #[cfg(test)]
+mod browser_multi_drag_tests;
+#[cfg(test)]
+mod browser_places_tests;
+#[cfg(test)]
+mod browser_taggable_drag_tests;
+#[cfg(test)]
+mod browser_tags_tests;
+#[cfg(test)]
 mod clip_launch_options_tests;
 mod clip_launcher;
 #[cfg(test)]
 mod clip_launcher_resume_tests;
 mod clip_record;
+#[cfg(test)]
+mod quick_add_tests;
+#[cfg(test)]
+mod ui_tick_tests;
 mod views_clip_launcher;
 mod views_clip_launcher_new_track;
 
@@ -856,6 +916,8 @@ mod fade_drag_cancel_tests;
 
 #[cfg(test)]
 mod clip_shortcut_tests;
+#[cfg(test)]
+mod duplicate_shortcut_tests;
 
 #[cfg(test)]
 mod grid_shortcut_tests;
@@ -881,6 +943,8 @@ mod sidechain_sync;
 #[cfg(test)]
 mod sidechain_sync_tests;
 
+#[cfg(test)]
+mod browser_preview_flow_tests;
 #[cfg(test)]
 mod browser_replay_tests;
 

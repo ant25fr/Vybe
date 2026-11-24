@@ -241,9 +241,7 @@ mod tests {
         };
         vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
 
-        let reopened = load_project_async(project_path, None, 48_000)
-            .await
-            .unwrap();
+        let reopened = load_project_async(project_path, 48_000).await.unwrap();
         assert_eq!(reopened.project.arrange.clips[0].position, 12_345);
         assert_eq!(reopened.clips[0].audio.num_frames(), 960);
         assert!(matches!(

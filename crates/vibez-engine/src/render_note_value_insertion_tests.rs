@@ -52,6 +52,7 @@ fn offline_channel_note_values_cross_full_notes_and_cache_at_seven_boundaries() 
                 loop_start_beats: clip.loop_start_beats,
                 loop_end_beats: clip.loop_end_beats,
                 groove_grid: clip.groove_grid,
+                color_index: None,
             })
             .collect();
         let request = BounceRequest {

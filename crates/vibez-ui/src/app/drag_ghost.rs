@@ -35,7 +35,19 @@ impl App {
             return Task::none();
         };
         Task::perform(
-            async move { audio_ghost(name, source, decode_local_for_preview_async(path).await).await },
+            async move {
+                audio_ghost(
+                    name,
+                    source,
+                    decode_local_for_preview_async(path)
+                        .await
+                        .map(|(audio, _name)| AnalysedBrowserAudio {
+                            audio,
+                            loop_fit: None,
+                        }),
+                )
+                .await
+            },
             finished,
         )
     }

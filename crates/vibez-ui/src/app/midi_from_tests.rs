@@ -61,7 +61,7 @@ async fn midi_from_reopens_with_the_project() {
     super::save_project_async(path.clone(), None, app.project_from_state())
         .await
         .unwrap();
-    let loaded = super::load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+    let loaded = super::load_project_async(path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
         .await
         .unwrap();
     let mut reopened = super::test_support::app();

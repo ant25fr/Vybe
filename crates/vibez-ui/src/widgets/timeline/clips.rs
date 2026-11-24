@@ -2,6 +2,7 @@
 //! interaction, sample drop targets.
 
 use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
 use iced::mouse;
 use iced::widget::canvas;
@@ -18,7 +19,8 @@ use crate::state::{
 };
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::{SnapContext, SnapTargets};
-use crate::widgets::drag_phase::{past_click_slop, DragPhase};
+use crate::widgets::double_click::DoubleClick;
+use crate::widgets::drag_phase::{past_click_slop, DragPhase, CLICK_SLOP_PX};
 use crate::widgets::local_drag::LocalDrag;
 use crate::widgets::timeline::marquee;
 use vibez_core::id::{ClipId, TrackId};
@@ -38,6 +40,10 @@ use hit_test::ClipHit;
 /// horizontal drag near a row boundary would flicker between tracks.
 const CROSS_TRACK_MIN_PX: f32 = 20.0;
 
+/// Max delay between two left-presses on an empty lane for them to count
+/// as one double-click (which drops a new pattern at that beat).
+const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
+
 /// Where an unmodified vertical wheel gesture should be handled.
 ///
 /// Arrange treats it as timeline panning. Section construction lives inside
@@ -54,6 +60,8 @@ enum VerticalWheelRouting {
 pub struct ClipInteractionState {
     pub drag: Option<ClipDragAction>,
     pub shift_held: bool,
+    /// Quick second press on an empty lane: drops a new pattern there.
+    pub double_click: DoubleClick,
     /// Bypasses all snapping, read live through drags, as Alt does in
     /// Ableton.
     pub alt_held: bool,
@@ -120,6 +128,10 @@ pub struct TrackClipCanvas {
     pub drop_zone: Option<crate::domains::drop_zone::DropZone>,
     /// The Clip a Browser drag would land on this lane.
     pub drop_ghost: Option<super::LaneGhost>,
+    /// Wheel-zoom bindings (rebindable, Ctrl+Wheel by default) plus the
+    /// modifiers currently held: a matching wheel turn zooms around the
+    /// cursor, as Shift+wheel already does.
+    pub wheel_zoom: crate::shortcuts::WheelZoom,
 }
 
 impl TrackClipCanvas {
@@ -227,6 +239,7 @@ impl TrackClipCanvas {
             })
             .map(|c| TimelineNoteClip {
                 clip_id: c.id,
+                color: c.color_index.map(crate::theme::clip_color),
                 position_beats: c.position_beats,
                 duration_beats: c.duration_beats,
                 name: c.name.clone(),
@@ -274,6 +287,7 @@ impl TrackClipCanvas {
             clip_drag: None,
             drop_zone: None,
             drop_ghost: None,
+            wheel_zoom: Default::default(),
         };
         lane_timing::finish(timing, lane_timing::Phase::Build);
         lane
@@ -500,6 +514,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         duration_beats: dur_beats,
                     }) = self.hit_test(pos.x)
                     {
+                        state.double_click.clear();
                         let in_title_bar = pos.y < CLIP_Y + CLIP_TITLE_HEIGHT;
                         let grabbed = in_title_bar || edge.is_some();
 
@@ -570,6 +585,24 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     // browser imports / dropdowns know which lane is "active".
                     if bounds.width > 0.0 {
                         let beat = self.geometry().x_to_beat(pos.x);
+                        if state.double_click.press(
+                            Instant::now(),
+                            pos,
+                            DOUBLE_CLICK_WINDOW,
+                            Some(CLICK_SLOP_PX),
+                        ) {
+                            // Double-click on empty lane: drop a new one-bar
+                            // pattern starting at the clicked beat.
+                            state.double_click.clear();
+                            state.drag = None;
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::Arrangement(ArrangementMsg::CreateNoteClipAt {
+                                    track_id,
+                                    position_beats: self.snapped_beat(beat),
+                                })),
+                            );
+                        }
                         state.drag = Some(ClipDragAction::PendingSeek {
                             beat,
                             start_x: pos.x,
@@ -663,6 +696,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     Point::new(*start_x, *anchor_column_y),
                                     Point::new(local_x, column_y),
                                 ) {
+                                    state.double_click.clear();
                                     let anchor_snapped = self.snapped_beat(*anchor);
                                     let anchor_y = *anchor_column_y;
                                     state.drag = Some(ClipDragAction::RegionSelect {
@@ -872,8 +906,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                             ))),
                         );
                     }
-                    // Shift+scroll for zoom
-                    if state.shift_held && dy.abs() > 0.0 {
+                    // Shift+scroll, or the bound wheel combo, zooms
+                    let zoom_bound = self.wheel_zoom.matches(dy > 0.0, cfg!(target_os = "macos"));
+                    if dy.abs() > 0.0 && (state.shift_held || zoom_bound) {
                         let anchor_x = cursor
                             .position_in(bounds)
                             .map(|position| position.x)

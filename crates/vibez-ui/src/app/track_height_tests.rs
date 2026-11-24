@@ -60,7 +60,7 @@ async fn reopen(path: PathBuf, project: Project) -> App {
         .unwrap();
     let mut app = super::test_support::app();
     app.rebuild_from_loaded_project(
-        load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        load_project_async(path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap(),
     );
@@ -98,7 +98,7 @@ async fn opening_another_project_forgets_the_last_ones_heights() {
         .unwrap();
 
     app.rebuild_from_loaded_project(
-        load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        load_project_async(path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap(),
     );

@@ -20,6 +20,7 @@ pub enum EffectType {
     Echo,
     Saturator,
     Limiter,
+    MultibandDynamics,
 }
 
 impl EffectType {
@@ -39,6 +40,7 @@ impl EffectType {
             EffectType::Gate => "Gate",
             EffectType::Phaser => "Phaser",
             EffectType::Eq => "EQ",
+            EffectType::MultibandDynamics => "Multiband Dynamics",
         }
     }
 
@@ -58,6 +60,7 @@ impl EffectType {
             EffectType::Reverb,
             EffectType::Phaser,
             EffectType::AutoPan,
+            EffectType::MultibandDynamics,
         ]
     }
 }
@@ -105,6 +108,9 @@ pub struct DynamicsMeter {
     pub peak_reduction_db: [f32; 2],
     /// Linear post-filter detector peaks accumulated since the last drain.
     pub detector_peak: [f32; 2],
+    /// Per-band peak reduction for multiband devices (low, mid, high);
+    /// zero on every band for single-band dynamics.
+    pub band_reduction_db: [f32; 3],
     pub gate: Option<GateMeter>,
 }
 
@@ -163,7 +169,7 @@ mod tests {
     #[test]
     fn effect_type_all() {
         let all = EffectType::all();
-        assert_eq!(all.len(), 14);
+        assert_eq!(all.len(), 15);
     }
 
     #[test]

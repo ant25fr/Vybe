@@ -88,6 +88,7 @@ fn note_clip(position_beats: f64) -> crate::state::UiNoteClip {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: GrooveGrid::Off,
+        color_index: None,
     }
 }
 
@@ -224,6 +225,7 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
     lane.zoom_level = 3.0;
     lane.scroll_offset_beats = 9.5;
     let ruler = RulerWidget {
+        wheel_zoom: Default::default(),
         playhead_beats: -1.0,
         play_start_beats: None,
         zoom_level: 3.0,
@@ -470,6 +472,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
         loop_enabled: false,
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
+        color: None,
     });
 
     assert_eq!(
@@ -1277,8 +1280,12 @@ fn one_clip_edit_key_press_emits_one_message_whatever_the_lane_count() {
                 .1
             })
             .count();
-        let from_global =
-            crate::app::global_key_handler(Key::Character(letter.into()), command).is_some();
+        let from_global = crate::app::global_key_handler(
+            Key::Character(letter.into()),
+            command,
+            &crate::shortcuts::Shortcuts::default(),
+        )
+        .is_some();
 
         assert_eq!(
             from_lanes + usize::from(from_global),

@@ -120,6 +120,16 @@ impl AuditionBus {
         self.stop_active(fade_frames);
     }
 
+    /// Move the playing voice to `position_frames`, clamped to its source.
+    /// A queued (not yet started) voice is left alone: it starts at zero.
+    pub(super) fn seek(&mut self, position_frames: u64) {
+        if let Some(voice) = self.active.as_mut() {
+            let last = voice.audio.num_frames().saturating_sub(1) as u64;
+            voice.position = position_frames.min(last);
+            voice.fade_out_remaining = None;
+        }
+    }
+
     fn stop_active(&mut self, fade_frames: usize) {
         if let Some(mut active) = self.active.take() {
             if active.position > 0 {

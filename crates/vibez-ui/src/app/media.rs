@@ -41,14 +41,12 @@ fn browser_results_scroll_offset(row_index: usize, visible_rows: usize) -> f32 {
 pub(super) fn browser_results_scroll_id(mode: crate::state::SampleBrowserMode) -> scrollable::Id {
     let id = match mode {
         crate::state::SampleBrowserMode::Local => "browser-local-results",
-        crate::state::SampleBrowserMode::Remote => "browser-remote-results",
     };
     scrollable::Id::new(id)
 }
 
 struct BrowserNavigableResult {
     source: MediaSourceRef,
-    remote: Option<crate::remote_provider::RemoteCatalogEntry>,
     row_index: usize,
     visible_rows: usize,
 }
@@ -57,6 +55,37 @@ struct BrowserNavigableResult {
 const SECTION_DROP_GONE: &str = "Section drop target no longer exists";
 
 impl App {
+    /// The media rows the results pane currently lists, in display order:
+    /// a special place's flat list, or the searched/filtered catalog.
+    /// Folders and roots are layout rows, not selectable media.
+    pub(super) fn visible_browser_results(&self) -> Vec<MediaSourceRef> {
+        let browser = &self.state.browser;
+        if let Some(place) = &browser.special_place {
+            return browser.special_place_sources(place);
+        }
+        let query = browser.search.trim().to_ascii_lowercase();
+        let mut entries: Vec<&crate::state::SampleBrowserEntry> = browser
+            .entries
+            .iter()
+            .filter(|entry| {
+                browser.local_entry_is_result(entry, &query)
+                    && browser.passes_tag_filters(&entry.source)
+            })
+            .collect();
+        entries.sort_by(|left, right| {
+            (left.name.to_lowercase(), &left.relative_path)
+                .cmp(&(right.name.to_lowercase(), &right.relative_path))
+        });
+        let media_limit = browser
+            .results_visible_limit
+            .saturating_sub(browser.visible_folder_row_count(&query));
+        entries
+            .into_iter()
+            .take(media_limit)
+            .map(|entry| entry.source.clone())
+            .collect()
+    }
+
     pub(super) fn select_adjacent_browser_result(&mut self, direction: i8) -> Task<Message> {
         if !self.state.browser.open || direction == 0 {
             return Task::none();
@@ -65,150 +94,69 @@ impl App {
         let query = browser.search.trim().to_ascii_lowercase();
         let searching = !query.is_empty();
         let mode = browser.mode;
-        let results: Vec<BrowserNavigableResult> = match mode {
-            crate::state::SampleBrowserMode::Local => {
-                let root_results = if !searching && browser.current_folder.is_none() {
-                    browser.roots.len()
-                } else if searching && browser.search_scope_path().is_none() {
-                    browser
-                        .roots
+        let results: Vec<BrowserNavigableResult> = if let Some(place) = &browser.special_place {
+            let sources = browser.special_place_sources(place);
+            let visible_rows = sources.len().min(browser.results_visible_limit);
+            sources
+                .into_iter()
+                .take(visible_rows)
+                .enumerate()
+                .map(|(index, source)| BrowserNavigableResult {
+                    source,
+                    row_index: index,
+                    visible_rows,
+                })
+                .collect()
+        } else {
+            match mode {
+                crate::state::SampleBrowserMode::Local => {
+                    let root_results = if !searching && browser.current_folder.is_none() {
+                        browser.roots.len()
+                    } else if searching && browser.search_scope_path().is_none() {
+                        browser
+                            .roots
+                            .iter()
+                            .filter(|root| {
+                                root.display().to_string().to_lowercase().contains(&query)
+                            })
+                            .count()
+                    } else {
+                        0
+                    };
+                    let folder_results = browser
+                        .folders
                         .iter()
-                        .filter(|root| root.display().to_string().to_lowercase().contains(&query))
-                        .count()
-                } else {
-                    0
-                };
-                let folder_results = browser
-                    .folders
-                    .iter()
-                    .filter(|folder| browser.local_folder_is_result(folder, &query))
-                    .count();
-                let media_limit = browser
-                    .results_visible_limit
-                    .saturating_sub(root_results + folder_results);
-                let mut entries: Vec<_> = browser
-                    .entries
-                    .iter()
-                    .filter(|entry| browser.local_entry_is_result(entry, &query))
-                    .collect();
-                entries.sort_by(|left, right| {
-                    (left.name.to_lowercase(), &left.relative_path)
-                        .cmp(&(right.name.to_lowercase(), &right.relative_path))
-                });
-                let prefix_rows =
-                    (root_results + folder_results).min(browser.results_visible_limit);
-                let entries: Vec<_> = entries.into_iter().take(media_limit).collect();
-                let visible_rows = prefix_rows + entries.len();
-                entries
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, entry)| BrowserNavigableResult {
-                        source: entry.source.clone(),
-                        remote: None,
-                        row_index: prefix_rows + index,
-                        visible_rows,
-                    })
-                    .collect()
-            }
-            crate::state::SampleBrowserMode::Remote => {
-                let current = browser.remote.current_path.as_str();
-                let in_current_tree = |entry: &crate::remote_provider::RemoteCatalogEntry| {
-                    current.is_empty()
-                        || entry.provider_item_id == current
-                        || entry
-                            .provider_item_id
-                            .strip_prefix(current)
-                            .is_some_and(|rest| rest.starts_with('/'))
-                };
-                let mut remote: Vec<_> = if searching {
-                    browser
-                        .remote
-                        .catalog
+                        .filter(|folder| browser.local_folder_is_result(folder, &query))
+                        .count();
+                    let media_limit = browser
+                        .results_visible_limit
+                        .saturating_sub(root_results + folder_results);
+                    let mut entries: Vec<_> = browser
                         .entries
                         .iter()
-                        .filter(|entry| entry.is_folder || entry.is_supported_audio())
                         .filter(|entry| {
-                            let in_scope = match browser.search_scope {
-                                crate::state::BrowserSearchScope::SelectedFolder => {
-                                    in_current_tree(entry)
-                                }
-                                crate::state::BrowserSearchScope::Root
-                                | crate::state::BrowserSearchScope::Everywhere => true,
-                            };
-                            in_scope
-                                && (entry.name.to_ascii_lowercase().contains(&query)
-                                    || entry.path.to_ascii_lowercase().contains(&query))
+                            browser.local_entry_is_result(entry, &query)
+                                && browser.passes_tag_filters(&entry.source)
                         })
-                        .cloned()
-                        .collect()
-                } else {
-                    browser
-                        .remote
-                        .catalog_child_indices(current)
-                        .iter()
-                        .filter_map(|&index| browser.remote.catalog.entries.get(index))
-                        .filter(|entry| entry.is_folder || entry.is_supported_audio())
-                        .cloned()
-                        .collect()
-                };
-                if searching {
-                    remote.sort_by(|left, right| {
-                        (!left.is_folder, left.name.to_ascii_lowercase())
-                            .cmp(&(!right.is_folder, right.name.to_ascii_lowercase()))
+                        .collect();
+                    entries.sort_by(|left, right| {
+                        (left.name.to_lowercase(), &left.relative_path)
+                            .cmp(&(right.name.to_lowercase(), &right.relative_path))
                     });
-                }
-                let remote_visible = remote.len().min(browser.results_visible_limit);
-                let mut combined: Vec<_> = remote
-                    .into_iter()
-                    .take(remote_visible)
-                    .enumerate()
-                    .filter(|(_, entry)| !entry.is_folder)
-                    .map(|(row_index, entry)| BrowserNavigableResult {
-                        source: MediaSourceRef::DropboxFile {
-                            path_lower: entry.provider_item_id.clone(),
-                            display_path: entry.path.clone(),
-                            rev: entry.revision.clone(),
-                        },
-                        remote: Some(entry),
-                        row_index,
-                        visible_rows: 0,
-                    })
-                    .collect();
-                let mut local_visible = 0;
-                if searching && browser.search_scope == crate::state::BrowserSearchScope::Everywhere
-                {
-                    let mut local: Vec<_> = browser
-                        .entries
-                        .iter()
-                        .filter(|entry| {
-                            entry.name.to_ascii_lowercase().contains(&query)
-                                || entry
-                                    .relative_path
-                                    .to_string_lossy()
-                                    .to_ascii_lowercase()
-                                    .contains(&query)
-                        })
-                        .collect();
-                    local.sort_by_key(|entry| entry.name.to_ascii_lowercase());
-                    let local: Vec<_> = local
+                    let prefix_rows =
+                        (root_results + folder_results).min(browser.results_visible_limit);
+                    let entries: Vec<_> = entries.into_iter().take(media_limit).collect();
+                    let visible_rows = prefix_rows + entries.len();
+                    entries
                         .into_iter()
-                        .take(browser.results_visible_limit - remote_visible)
-                        .collect();
-                    local_visible = local.len();
-                    combined.extend(local.into_iter().enumerate().map(|(index, entry)| {
-                        BrowserNavigableResult {
+                        .enumerate()
+                        .map(|(index, entry)| BrowserNavigableResult {
                             source: entry.source.clone(),
-                            remote: None,
-                            row_index: remote_visible + index,
-                            visible_rows: 0,
-                        }
-                    }));
+                            row_index: prefix_rows + index,
+                            visible_rows,
+                        })
+                        .collect()
                 }
-                let visible_rows = remote_visible + local_visible;
-                combined
-                    .iter_mut()
-                    .for_each(|entry| entry.visible_rows = visible_rows);
-                combined
             }
         };
         if results.is_empty() {
@@ -221,10 +169,7 @@ impl App {
             .and_then(|selected| results.iter().position(|entry| &entry.source == selected));
         let index = adjacent_result_index(results.len(), current, direction).unwrap();
         let result = results.into_iter().nth(index).unwrap();
-        let selection = match result.remote {
-            Some(entry) => self.update(Message::ClickRemoteBrowserEntry(entry)),
-            None => self.update(Message::ClickLocalBrowserEntry(result.source)),
-        };
+        let selection = self.update(Message::ClickLocalBrowserEntry(result.source));
         let scroll = scrollable::snap_to(
             browser_results_scroll_id(mode),
             scrollable::RelativeOffset {
@@ -280,6 +225,14 @@ impl App {
             start: playback_mode.engine_start(),
             looped: playback_mode.loops(),
         });
+        // A playhead dragged while stopped starts playback there; the
+        // queued command lands before the first rendered frame.
+        let position = self.state.browser.audition_position_frames;
+        if position > 0 {
+            self.send_command(EngineCommand::SeekAudition {
+                position_frames: position,
+            });
+        }
         self.audition_requested(playback_mode);
     }
 
@@ -569,11 +522,33 @@ impl App {
                 track_id,
                 position_samples,
             } => self.add_audio_clip_to_section_at(section_id, track_id, position_samples, payload),
-            BrowserImportTarget::ArrangementNewTrackAt { position_samples } => {
-                let Some(track_id) = self.ensure_audio_track_for_import(None) else {
-                    self.state.status_text =
-                        crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
-                    return Task::none();
+            BrowserImportTarget::ArrangementNewTrackAt {
+                position_samples,
+                group,
+            } => {
+                // A grouped multi-row drop reuses the track the group's first
+                // source created; the memo is cleared when a drag begins.
+                let grouped = group.and_then(|g| {
+                    self.state
+                        .browser
+                        .new_track_group
+                        .filter(|(memo, _)| *memo == g)
+                        .map(|(_, track_id)| track_id)
+                        .filter(|track_id| self.state.find_track(*track_id).is_some())
+                });
+                let track_id = match grouped {
+                    Some(track_id) => track_id,
+                    None => {
+                        let Some(track_id) = self.ensure_audio_track_for_import(None) else {
+                            self.state.status_text =
+                                crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
+                            return Task::none();
+                        };
+                        if let Some(g) = group {
+                            self.state.browser.new_track_group = Some((g, track_id));
+                        }
+                        track_id
+                    }
                 };
                 self.add_audio_clip_to_track_at(track_id, position_samples, payload)
             }

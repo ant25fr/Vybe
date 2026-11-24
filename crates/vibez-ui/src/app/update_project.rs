@@ -136,18 +136,13 @@ impl App {
         if let Some(path) = path {
             self.state.status_text = format!("Opening {}...", path.display());
             let completed_path = path.clone();
-            let dropbox = self
-                .dropbox_client
-                .clone()
-                .map(|client| (client, self.dropbox_cache.clone()));
             let sample_rate = self.state.transport.sample_rate;
-            return Task::perform(
-                load_project_async(path, dropbox, sample_rate),
-                move |result| Message::ProjectLoaded {
+            return Task::perform(load_project_async(path, sample_rate), move |result| {
+                Message::ProjectLoaded {
                     path: completed_path.clone(),
                     result: Box::new(result),
-                },
-            );
+                }
+            });
         }
         Task::none()
     }

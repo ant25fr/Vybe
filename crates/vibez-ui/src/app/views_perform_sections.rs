@@ -125,6 +125,7 @@ impl App {
                 self.state.perform.section_editor.edit_cursor_beats(),
             ));
             let ruler = RulerWidget {
+                wheel_zoom: self.wheel_zoom(),
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,
                 zoom_level: viewport.zoom_level,
@@ -158,6 +159,7 @@ impl App {
                 loop_enabled: selected_section.looping,
                 loop_start_beats: 0.0,
                 loop_end_beats: total_beats,
+                wheel_zoom: self.wheel_zoom(),
                 tracks: self
                     .state
                     .project_tracks
@@ -342,51 +344,55 @@ impl App {
                     })
                     .collect();
                 let refusal = self.state.browser.lane_refusal(track.kind);
-                let mut clip_canvas = TrackClipCanvas::from_track(
-                    track,
-                    content,
-                    self.state.perform.section_editor.edit_cursor_beats(),
-                    viewport.zoom_level,
-                    self.state.view.arrange_grid,
-                    viewport.scroll_offset_beats,
-                    viewport_width,
-                    total_beats,
-                    self.state.transport.sample_rate,
-                    selected_track,
-                    track_color,
-                    self.state.transport.bpm,
-                    track.id,
-                    track_ids.clone(),
-                    selected_clips,
-                    false,
-                    0.0,
-                    total_beats,
-                    editor.time_selection_active,
-                    editor.selection_start_beats,
-                    editor.selection_end_beats,
-                    editor.time_selection_track,
-                    self.state.browser.drag_source.is_some(),
-                )
-                .with_marquee(
-                    row_spans.clone(),
-                    editor.marquee.as_ref().map(|marquee| marquee.rect),
-                )
-                .with_snap_targets(snap_targets.clone())
-                .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
-                .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
-                .with_drop_ghost(
-                    self.state
-                        .browser
-                        .lane_drop_ghost(track.id, self.state.transport.bpm)
-                        .map(|ghost| {
-                            crate::widgets::timeline::LaneGhost::new(
-                                &ghost,
-                                viewport.geometry().pixels_per_beat(),
-                            )
-                        }),
-                )
-                .with_drop_refusal(refusal.clone())
-                .with_vertical_track_scrolling();
+                let mut clip_canvas = {
+                    let mut canvas = TrackClipCanvas::from_track(
+                        track,
+                        content,
+                        self.state.perform.section_editor.edit_cursor_beats(),
+                        viewport.zoom_level,
+                        self.state.view.arrange_grid,
+                        viewport.scroll_offset_beats,
+                        viewport_width,
+                        total_beats,
+                        self.state.transport.sample_rate,
+                        selected_track,
+                        track_color,
+                        self.state.transport.bpm,
+                        track.id,
+                        track_ids.clone(),
+                        selected_clips,
+                        false,
+                        0.0,
+                        total_beats,
+                        editor.time_selection_active,
+                        editor.selection_start_beats,
+                        editor.selection_end_beats,
+                        editor.time_selection_track,
+                        self.state.browser.drag_source.is_some(),
+                    )
+                    .with_marquee(
+                        row_spans.clone(),
+                        editor.marquee.as_ref().map(|marquee| marquee.rect),
+                    )
+                    .with_snap_targets(snap_targets.clone())
+                    .with_clip_drag(editor.clip_drag.as_ref().map(|drag| drag.preview.clone()))
+                    .with_drop_zone(self.state.browser.lane_drop_zone(track.id))
+                    .with_drop_ghost(
+                        self.state
+                            .browser
+                            .lane_drop_ghost(track.id, self.state.transport.bpm)
+                            .map(|ghost| {
+                                crate::widgets::timeline::LaneGhost::new(
+                                    &ghost,
+                                    viewport.geometry().pixels_per_beat(),
+                                )
+                            }),
+                    )
+                    .with_drop_refusal(refusal.clone())
+                    .with_vertical_track_scrolling();
+                    canvas.wheel_zoom = self.wheel_zoom();
+                    canvas
+                };
                 if let Some(preview) = recording_preview.as_ref().filter(|preview| {
                     preview.target_id == section_id && preview.track_id == track.id
                 }) {
@@ -413,6 +419,7 @@ impl App {
                         loop_enabled: false,
                         loop_start_beats: 0.0,
                         loop_end_beats: 0.0,
+                        color: None,
                     });
                 }
                 clip_canvas = clip_canvas.with_playback_playhead(playback_playhead_beats);

@@ -127,7 +127,14 @@ pub fn view_effect_slot<'a>(
         // panel scrolls horizontally and stacked rows clip.
         let mut knob_row = row![].spacing(6);
         for (i, descriptor) in effect.descriptors.iter().enumerate() {
-            let value = effect.params.get(i).copied().unwrap_or(descriptor.default);
+            let manual = effect.params.get(i).copied().unwrap_or(descriptor.default);
+            let value = crate::widgets::device_controls::automation_display_value(
+                track_id,
+                crate::domains::device_params::DeviceSlot::Effect(effect.id),
+                i,
+                descriptor,
+                manual,
+            );
             let knob = EffectKnobWidget::new(
                 track_id,
                 effect.id,

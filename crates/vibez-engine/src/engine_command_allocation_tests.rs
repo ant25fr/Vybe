@@ -121,6 +121,7 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::SetNoteClipStartMarker { .. }
         | C::StartAudition { .. }
         | C::StopAudition
+        | C::SeekAudition { .. }
         | C::SetAuditionGain(_)
         | C::StartMidiAudition { .. }
         | C::SetAuditionVoice(_)
@@ -836,6 +837,9 @@ fn cases() -> Vec<Case> {
             looped: false,
         }),
         case!("StopAudition", false, |_| C::StopAudition),
+        case!("SeekAudition", false, |_| C::SeekAudition {
+            position_frames: 128
+        }),
         case!("SetAuditionGain", false, |_| C::SetAuditionGain(0.5)),
         case!("StartMidiAudition", false, |f| C::StartMidiAudition {
             pattern: Arc::new(crate::midi_audition::MidiAuditionPattern::new(

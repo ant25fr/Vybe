@@ -32,6 +32,7 @@ async fn a_raw_browser_import_arrives_at_the_device_rate() {
 
     let (audio, _, _) = prepare_browser_import_audio_async(
         crate::message::BrowserImportTarget::ArrangementNewTrackAt {
+            group: None,
             position_samples: 0,
         },
         treatment,
@@ -59,6 +60,7 @@ async fn a_warp_browser_import_and_its_original_arrive_at_the_device_rate() {
 
     let (warped, original, _) = prepare_browser_import_audio_async(
         crate::message::BrowserImportTarget::ArrangementNewTrackAt {
+            group: None,
             position_samples: 0,
         },
         treatment,

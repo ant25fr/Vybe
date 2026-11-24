@@ -21,6 +21,7 @@ fn starts_at_its_window(widget: &mut AudioClipDetailWidget) {
 
 fn widget() -> AudioClipDetailWidget {
     AudioClipDetailWidget {
+        wheel_zoom: Default::default(),
         location: vibez_project::TimelineLocation::Arrange,
         track_id: TrackId::new(),
         clip_id: ClipId::new(),

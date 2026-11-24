@@ -6,7 +6,6 @@ use vibez_core::effect::EffectType;
 use vibez_core::id::{ClipId, EffectId, SectionId, TrackId};
 use vibez_core::midi::InstrumentKind;
 use vibez_core::track::{AudioInputRoute, InputMonitoring, MediaSourceRef};
-use vibez_dropbox::DropboxEntry;
 use vibez_plugin_host::gui::PluginGuiKey;
 use vibez_plugin_host::PluginId;
 use vibez_project::TimelineLocation;
@@ -41,10 +40,41 @@ impl std::fmt::Debug for ResidentSection {
 }
 
 use crate::domains::audio_settings::{AudioDeviceChoice, AudioSampleRate};
-use crate::state::{AuditionImportInput, AuditionMode, GridCommand, SettingsTab, UndoGestureId};
+use crate::state::{
+    AuditionImportInput, AuditionMode, BrowserTaggable, GridCommand, SettingsTab, UndoGestureId,
+};
 
 /// Menus and dialogs whose lifecycle is owned by their overlay rather than
 /// inferred from unrelated application messages.
+/// One row of the quick-add palette.
+#[derive(Debug, Clone)]
+pub enum QuickAddItem {
+    Instrument(InstrumentKind),
+    Effect(EffectType),
+    Plugin(vibez_plugin_host::PluginInfo),
+    Sample(MediaSourceRef),
+}
+
+impl QuickAddItem {
+    pub fn label(&self) -> String {
+        match self {
+            QuickAddItem::Instrument(kind) => kind.name().to_string(),
+            QuickAddItem::Effect(effect) => effect.name().to_string(),
+            QuickAddItem::Plugin(plugin) => plugin.name.clone(),
+            QuickAddItem::Sample(source) => source.display_name(),
+        }
+    }
+
+    pub fn kind_label(&self) -> &'static str {
+        match self {
+            QuickAddItem::Instrument(_) => "INSTRUMENT",
+            QuickAddItem::Effect(_) => "EFFECT",
+            QuickAddItem::Plugin(_) => "PLUGIN",
+            QuickAddItem::Sample(_) => "SAMPLE",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuOverlay {
     ArrangementContext,
@@ -147,6 +177,10 @@ pub enum Message {
         event: iced::keyboard::Event,
         occurred_at: std::time::Instant,
     },
+    /// Every mouse-wheel turn, seen app-wide. Widgets handle their own wheel
+    /// through canvas events; this exists so Settings → Shortcuts can capture
+    /// a wheel turn as a binding while rebinding a wheel action.
+    GlobalWheelScrolled(iced::mouse::ScrollDelta),
     View(crate::domains::view::ViewMsg),
 
     // Workspace
@@ -244,6 +278,9 @@ pub enum Message {
     /// Command+A. Context-resolved in `update`, like [`Self::DeleteKeyPressed`]:
     /// the open piano roll's notes first, then the active timeline's clips.
     SelectAllPressed,
+    /// Command+D. Context-resolved in `update`: duplicates the selected
+    /// notes when the piano roll has a selection, else the selected clips.
+    DuplicatePressed,
     /// Command+1 to 5, for the grid of the editor with focus.
     GridShortcutPressed(GridCommand),
 
@@ -331,11 +368,66 @@ pub enum Message {
     RescanSampleLibrary,
     /// Select a Local source; starts RAW Audition when selection-follow is on.
     ClickLocalBrowserEntry(MediaSourceRef),
+    /// A result row was released without dragging; `ctrl`/`shift` come
+    /// from the tracked modifiers, for multi-select (Ctrl toggles, Shift ranges).
+    BrowserEntryReleased {
+        source: MediaSourceRef,
+        ctrl: bool,
+        shift: bool,
+    },
+    /// A result row was double-clicked: select it and add it to the project.
+    BrowserEntryDoubleClicked(MediaSourceRef),
+    /// Right-click on a result row: select it if needed, open its menu.
+    BrowserEntryRightPressed(MediaSourceRef),
+    /// Right-click on a tag row of the browser's TAGS section.
+    BrowserTagRightPressed(u32),
+    /// Right-click on a tag folder row of the browser's TAGS section.
+    BrowserTagFolderRightPressed(u32),
+    /// Right-click on a device row (instrument, effect, plug-in) of the
+    /// browser's results: open its tag-toggles menu.
+    BrowserTaggableRightPressed(BrowserTaggable),
+    /// Right-click on a device parameter knob (instrument or effect):
+    /// open the "Automate" context menu.
+    DeviceParamRightPressed {
+        track_id: vibez_core::id::TrackId,
+        slot: crate::domains::device_params::DeviceSlot,
+        param_index: usize,
+    },
+    /// The pointer entered (`Some`) or left (`None`) a result row.
+    BrowserEntryHover(Option<MediaSourceRef>),
+    /// The row's play button: preview this entry, or stop if it is playing.
+    ToggleBrowserRowAudition(MediaSourceRef),
     /// Mouse-down creates a Pending Drag at the globally tracked cursor.
     BeginPendingBrowserDrag(MediaSourceRef, String),
+    /// Mouse-down on a device row (instrument, effect, plug-in) creates a
+    /// pending tag drag at the globally tracked cursor.
+    BeginPendingTaggableDrag(BrowserTaggable, String),
+    /// The pointer was released on a device row; `click` runs when the
+    /// pointer did not travel far enough to become a drag.
+    TaggableDragReleased {
+        item: BrowserTaggable,
+        click: Option<Box<Message>>,
+    },
+    /// Ctrl+P toggles the quick-add palette.
+    OpenQuickAdd,
+    CloseQuickAdd,
+    QuickAddQueryChanged(String),
+    /// Arrow keys move the highlighted row.
+    QuickAddMove(i8),
+    QuickAddSetKind(crate::state::QuickAddKind),
+    /// Enter adds the highlighted item.
+    QuickAddSubmit,
+    /// Add one palette item to the project.
+    QuickAddDevice(QuickAddItem),
+    /// The pointer entered (Some) or left (None) a sample-map point: hover
+    /// plays the sample without changing the selection.
+    SampleMapHover(Option<MediaSourceRef>),
     /// Explicit Play in the persistent Audition footer.
     PreviewLocalEntry(MediaSourceRef),
     StopBrowserPreview,
+    /// The preview waveform was clicked or dragged to `fraction` of the
+    /// source; seeks the audition voice, or the next start when stopped.
+    SeekBrowserPreview(f32),
     ToggleAuditionEnabled,
     SetAuditionGain(f32),
     SetAuditionMode(AuditionMode),
@@ -345,6 +437,10 @@ pub enum Message {
     /// dropped instead of starting playback.
     LocalSamplePreviewReady(MediaSourceRef, u64, Result<AnalysedBrowserAudio, String>),
     BrowserWaveformReady(MediaSourceRef, Result<AnalysedBrowserAudio, String>),
+    /// The preview's bounded loop-tempo analysis finished after the audio
+    /// was already playing; carries no generation, staleness is checked
+    /// against the shown waveform's source.
+    BrowserLoopFitReady(MediaSourceRef, Option<crate::warp::LoopGridFit>),
     /// A MIDI file selected in the Browser was read; `play` asks for its
     /// audition once read, under the audition request `generation`.
     BrowserMidiPreviewReady {
@@ -426,6 +522,11 @@ pub enum Message {
     OpenSettings,
     CloseSettings,
     SelectSettingsTab(SettingsTab),
+    /// Start capturing the next key press as the new binding of `action`
+    /// (clicking the row again cancels).
+    BeginShortcutCapture(crate::shortcuts::ShortcutAction),
+    /// Restore an action's default binding(s).
+    ResetShortcut(crate::shortcuts::ShortcutAction),
     SelectAudioBackend(vibez_audio_io::audio_host::AudioBackend),
     SetBufferSize(u32),
     SetAudioSampleRate(AudioSampleRate),
@@ -553,51 +654,6 @@ pub enum Message {
     ExportProject,
     ExportPathSelected(Option<PathBuf>),
     ExportComplete(Result<PathBuf, String>),
-
-    // Dropbox
-    SaveDropboxAppKey,
-    ConnectDropbox,
-    DropboxConnected(Result<DropboxConnectOutcome, String>),
-    DisconnectDropbox,
-    RemoteCatalogStartupLoaded(RemoteCatalogStartupResult),
-    RefreshRemoteConnection,
-    RemoteCatalogPageFetched {
-        generation: u64,
-        completed_pages: usize,
-        result:
-            Result<crate::remote_provider::RemotePage, crate::remote_provider::RemoteProviderError>,
-    },
-    RemoteCatalogRefreshPrepared(RemoteCatalogRefreshResult),
-    RemoteCatalogSaved {
-        generation: u64,
-        /// `Some` continues pagination from this checkpoint after a
-        /// successful progress save.
-        next_checkpoint: Option<String>,
-        result: Result<(), String>,
-    },
-    SetMediaCacheBudgetGiB(f32),
-    ToggleMediaCacheAutomaticEviction,
-    ClearMediaCache,
-    MediaCacheMaintenanceComplete(Result<vibez_dropbox::CacheUsage, String>),
-    MediaCacheCleared(Result<(vibez_dropbox::CacheClearReport, vibez_dropbox::CacheUsage), String>),
-    ClickRemoteBrowserEntry(crate::remote_provider::RemoteCatalogEntry),
-    RemoteAuditionReady {
-        request_id: u64,
-        /// Audition request generation minted at spawn time (see
-        /// [`Message::LocalSamplePreviewReady`]).
-        generation: u64,
-        source: MediaSourceRef,
-        result: Result<RemoteMaterializedSample, String>,
-    },
-    RemoteImportReady {
-        request_id: u64,
-        target: BrowserImportTarget,
-        treatment: AuditionImportInput,
-        result: Result<(AnalysedBrowserAudio, String, MediaSourceRef), String>,
-    },
-    DropboxPreview(DropboxEntry),
-    DropboxImportToArrangement(DropboxEntry),
-    DropboxImportToDevice(DropboxEntry),
 }
 
 #[path = "message_constructors.rs"]

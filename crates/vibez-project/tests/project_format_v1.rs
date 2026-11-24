@@ -334,6 +334,7 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         loop_start_beats: 0.0,
         loop_end_beats: 8.0,
         groove_grid: Default::default(),
+        color_index: None,
     };
     let project = Project {
         reduced_latency_monitoring: false,

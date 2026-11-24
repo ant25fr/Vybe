@@ -758,6 +758,7 @@ fn synth_note_clip_produces_audio() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+        color_index: None,
         notes: vec![MidiNote {
             pitch: 60,
             velocity: 100,
@@ -848,6 +849,7 @@ fn strict_render_uses_prepared_plugin_instrument_and_reports_progress() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+        color_index: None,
         notes: vec![MidiNote {
             pitch: 36,
             velocity: 100,

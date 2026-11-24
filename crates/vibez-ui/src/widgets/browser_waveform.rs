@@ -1,4 +1,5 @@
-//! Truthful, non-interactive waveform for the Browser Audition footer.
+//! The Browser Audition footer's waveform: truthful peaks plus a playhead,
+//! and a click/drag seeks the preview to that fraction of the source.
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -16,6 +17,8 @@ use super::playhead::playhead_geometry;
 pub struct BrowserWaveform {
     pub audio: Option<Arc<DecodedAudio>>,
     pub playhead_fraction: Option<f32>,
+    /// Whether the waveform answers the mouse with a seek.
+    pub seekable: bool,
 }
 
 pub struct BrowserWaveformState {
@@ -23,6 +26,8 @@ pub struct BrowserWaveformState {
     /// (audio Arc pointer, theme epoch): a palette swap must repaint
     /// the cached geometry, not just a new selection.
     fingerprint: Cell<(u64, u64)>,
+    /// True while the left button is held down on the waveform.
+    dragging: bool,
 }
 
 impl Default for BrowserWaveformState {
@@ -30,7 +35,18 @@ impl Default for BrowserWaveformState {
         Self {
             cache: canvas::Cache::new(),
             fingerprint: Cell::new((u64::MAX, u64::MAX)),
+            dragging: false,
         }
+    }
+}
+
+impl BrowserWaveform {
+    fn fraction_at(&self, bounds: Rectangle, cursor: mouse::Cursor) -> Option<f32> {
+        if !self.seekable || self.audio.is_none() || bounds.width <= 0.0 {
+            return None;
+        }
+        let position = cursor.position_in(bounds)?;
+        Some((position.x / bounds.width).clamp(0.0, 1.0))
     }
 }
 
@@ -100,6 +116,52 @@ impl canvas::Program<Message> for BrowserWaveform {
         let mut geometry = vec![geometry];
         geometry.extend(playhead_geometry(renderer, bounds, playhead_x));
         geometry
+    }
+
+    fn update(
+        &self,
+        state: &mut Self::State,
+        event: canvas::Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+    ) -> (canvas::event::Status, Option<Message>) {
+        let Some(fraction) = self.fraction_at(bounds, cursor) else {
+            if let canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) = event {
+                state.dragging = false;
+            }
+            return (canvas::event::Status::Ignored, None);
+        };
+        match event {
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                state.dragging = true;
+                (
+                    canvas::event::Status::Captured,
+                    Some(Message::SeekBrowserPreview(fraction)),
+                )
+            }
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if state.dragging => (
+                canvas::event::Status::Captured,
+                Some(Message::SeekBrowserPreview(fraction)),
+            ),
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                state.dragging = false;
+                (canvas::event::Status::Captured, None)
+            }
+            _ => (canvas::event::Status::Ignored, None),
+        }
+    }
+
+    fn mouse_interaction(
+        &self,
+        _state: &Self::State,
+        _bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> mouse::Interaction {
+        if self.seekable && self.audio.is_some() {
+            mouse::Interaction::Crosshair
+        } else {
+            mouse::Interaction::default()
+        }
     }
 }
 

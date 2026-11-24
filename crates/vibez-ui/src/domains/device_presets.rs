@@ -245,6 +245,27 @@ const SATURATOR_KEYS: [(usize, &str, bool); 15] = {
 };
 
 /// Every native Limiter parameter.
+/// Native Multiband Dynamics parameters a preset stores: all of them.
+const MULTIBAND_DYNAMICS_KEYS: [(usize, &str, bool); 14] = {
+    use vibez_dsp::multiband_dynamics::param::*;
+    [
+        (XOVER_LOW_MID, "xover_low_mid_hz", false),
+        (XOVER_MID_HIGH, "xover_mid_high_hz", false),
+        (ATTACK, "attack_ms", false),
+        (RELEASE, "release_ms", false),
+        (OUTPUT_DB, "output_db", false),
+        (LOW_THRESHOLD, "low_threshold_db", false),
+        (LOW_RATIO, "low_ratio", false),
+        (LOW_MAKEUP, "low_makeup_db", false),
+        (MID_THRESHOLD, "mid_threshold_db", false),
+        (MID_RATIO, "mid_ratio", false),
+        (MID_MAKEUP, "mid_makeup_db", false),
+        (HIGH_THRESHOLD, "high_threshold_db", false),
+        (HIGH_RATIO, "high_ratio", false),
+        (HIGH_MAKEUP, "high_makeup_db", false),
+    ]
+};
+
 const LIMITER_KEYS: [(usize, &str, bool); 8] = {
     use vibez_dsp::limiter::param::*;
     [
@@ -571,6 +592,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::Saturator => Ok(SATURATOR_KEYS.to_vec()),
         EffectType::Reverb => Ok(REVERB_KEYS.to_vec()),
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
+        EffectType::MultibandDynamics => Ok(MULTIBAND_DYNAMICS_KEYS.to_vec()),
         EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
     }
 }
@@ -1210,9 +1232,41 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::Reverb => reverb_factory_presets(),
         EffectType::AutoPan => auto_pan_factory_presets(),
         EffectType::Phaser => phaser_factory_presets(),
+        EffectType::MultibandDynamics => multiband_dynamics_factory_presets(),
     }
 }
 
+fn multiband_dynamics_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 3] = [
+        ("Init", &[]),
+        (
+            "Glue the low end",
+            &[
+                ("low_threshold_db", -30.0),
+                ("low_ratio", 6.0),
+                ("low_makeup_db", 3.0),
+                ("attack_ms", 20.0),
+                ("release_ms", 300.0),
+            ],
+        ),
+        (
+            "De-ess the highs",
+            &[
+                ("high_threshold_db", -24.0),
+                ("high_ratio", 8.0),
+                ("xover_mid_high_hz", 5_000.0),
+                ("attack_ms", 2.0),
+                ("release_ms", 120.0),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::MultibandDynamics),
+        &MULTIBAND_DYNAMICS_KEYS,
+        vibez_dsp::multiband_dynamics::MULTIBAND_DYNAMICS_PARAMS,
+        &presets,
+    )
+}
 fn gain_factory_presets() -> Vec<DevicePreset> {
     let effect_type = EffectType::Gain;
     [

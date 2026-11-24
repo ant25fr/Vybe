@@ -311,6 +311,34 @@ impl App {
             Message::KeyboardInput { event, occurred_at } => {
                 return self.handle_keyboard_input(event, occurred_at);
             }
+            Message::GlobalWheelScrolled(delta) => {
+                // Wheel turns only matter while a wheel action is being
+                // rebound in Settings → Shortcuts; everywhere else the
+                // widgets handle their own wheel through canvas events.
+                if let Some(action) = self.state.view.shortcut_capture {
+                    if action.is_wheel() {
+                        let (dx, dy) = crate::timeline_geometry::wheel_delta_pixels(delta);
+                        if dy.abs() > dx.abs() && dy != 0.0 {
+                            let combo = crate::shortcuts::KeyCombo::wheel(
+                                dy > 0.0,
+                                self.state.view.held_modifiers,
+                                cfg!(target_os = "macos"),
+                            );
+                            self.shortcuts.set_binding(action, vec![combo]);
+                            self.state.view.shortcut_capture = None;
+                            self.persist_ui_settings();
+                            let binding = self
+                                .shortcuts
+                                .combos_for(action)
+                                .iter()
+                                .map(|combo| combo.label(cfg!(target_os = "macos")))
+                                .collect::<Vec<_>>()
+                                .join(" / ");
+                            self.state.status_text = format!("{} → {binding}", action.label());
+                        }
+                    }
+                }
+            }
             // The transport domain owns its logic entirely; app.rs
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
@@ -623,6 +651,9 @@ impl App {
                 if let Some(status) = action.status {
                     self.state.status_text = status;
                 }
+                if action.persist_settings {
+                    self.persist_ui_settings();
+                }
             }
             Message::TrackHeight(msg) => {
                 self.route_track_height_message(msg, self.state.view.cursor_y)
@@ -701,8 +732,9 @@ impl App {
                 let source = self
                     .state
                     .browser
-                    .drag_source
-                    .take()
+                    .take_drag_sources()
+                    .into_iter()
+                    .next()
                     .or_else(|| self.state.browser.selected_source.clone());
                 self.state.browser.cancel_media_drag();
                 if let Some(source) = source {
@@ -716,7 +748,7 @@ impl App {
                 self.state.browser.open = true;
             }
             Message::ImportLauncherClipOnNewTrack { row } => {
-                let source = self.state.browser.drag_source.take();
+                let source = self.state.browser.take_drag_sources().into_iter().next();
                 self.state.browser.cancel_media_drag();
                 if let Some(source) = source
                     .filter(|_| self.state.perform.layout == vibez_project::PerformLayout::Clips)
@@ -800,9 +832,21 @@ impl App {
             | Message::SampleLibraryRootSelected(..)
             | Message::RescanSampleLibrary
             | Message::ClickLocalBrowserEntry(..)
+            | Message::BrowserEntryReleased { .. }
+            | Message::BrowserEntryDoubleClicked(..)
+            | Message::BrowserEntryRightPressed(..)
+            | Message::BrowserTagRightPressed(..)
+            | Message::BrowserTagFolderRightPressed(..)
+            | Message::BrowserTaggableRightPressed(..)
+            | Message::DeviceParamRightPressed { .. }
+            | Message::BrowserEntryHover(..)
+            | Message::ToggleBrowserRowAudition(..)
             | Message::BeginPendingBrowserDrag(..)
+            | Message::BeginPendingTaggableDrag(..)
+            | Message::TaggableDragReleased { .. }
             | Message::PreviewLocalEntry(..)
             | Message::StopBrowserPreview
+            | Message::SeekBrowserPreview(..)
             | Message::ToggleAuditionEnabled
             | Message::SetAuditionGain(..)
             | Message::SetAuditionMode(..)
@@ -817,6 +861,7 @@ impl App {
             | Message::DropSampleOnDevicePanel { .. }
             | Message::LocalSamplePreviewReady(..)
             | Message::BrowserWaveformReady(..)
+            | Message::BrowserLoopFitReady(..)
             | Message::BrowserMidiPreviewReady { .. }
             | Message::BrowserAuditionReady { .. }
             | Message::ImportSelectedBrowserSampleToArrangement
@@ -824,29 +869,19 @@ impl App {
             | Message::ReplaySelectedBrowserSample
             | Message::LoadSelectedBrowserSampleToDevice
             | Message::BrowserSampleDecoded(..)
-            | Message::RemoteImportReady { .. }
             | Message::BrowserImportPrepared { .. }
             | Message::ClipAutoWarpReady { .. }
             | Message::BrowserSampleDecodeError(..)
-            | Message::SaveDropboxAppKey
-            | Message::ConnectDropbox
-            | Message::DropboxConnected(..)
-            | Message::DisconnectDropbox
-            | Message::RemoteCatalogStartupLoaded(..)
-            | Message::RefreshRemoteConnection
-            | Message::RemoteCatalogPageFetched { .. }
-            | Message::RemoteCatalogRefreshPrepared(..)
-            | Message::RemoteCatalogSaved { .. }
-            | Message::SetMediaCacheBudgetGiB(..)
-            | Message::ToggleMediaCacheAutomaticEviction
-            | Message::MediaCacheMaintenanceComplete(..)
-            | Message::ClearMediaCache
-            | Message::MediaCacheCleared(..)
-            | Message::ClickRemoteBrowserEntry(..)
-            | Message::RemoteAuditionReady { .. }
-            | Message::DropboxPreview(..)
-            | Message::DropboxImportToArrangement(..)
-            | Message::DropboxImportToDevice(..)) => return self.update_services(message),
+            | Message::OpenQuickAdd
+            | Message::CloseQuickAdd
+            | Message::QuickAddQueryChanged(..)
+            | Message::QuickAddMove(..)
+            | Message::QuickAddSetKind(..)
+            | Message::QuickAddSubmit
+            | Message::QuickAddDevice(..)
+            | Message::SampleMapHover(..)
+            | Message::BeginShortcutCapture(..)
+            | Message::ResetShortcut(..)) => return self.update_services(message),
             Message::BounceSelectionToAudio => {
                 if !self.state.arrangement.time_selection_active
                     || self.state.arrangement.selection_end_beats
@@ -956,6 +991,7 @@ impl App {
 
             // -- Multi-track messages --
             Message::DeleteKeyPressed => return self.on_delete_key_pressed(),
+            Message::DuplicatePressed => return self.on_duplicate_pressed(),
             Message::SelectAllPressed => return self.on_select_all_pressed(),
             Message::GridShortcutPressed(command) => return self.on_grid_shortcut_pressed(command),
             Message::AddClipToTrack(track_id) => {

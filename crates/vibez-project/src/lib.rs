@@ -811,6 +811,7 @@ mod tests {
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
                     groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+                    color_index: None,
                     notes: vec![
                         MidiNote {
                             pitch: 60,

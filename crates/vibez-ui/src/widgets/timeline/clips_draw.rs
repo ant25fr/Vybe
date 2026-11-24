@@ -166,11 +166,16 @@ pub(super) fn draw_notes(
 }
 
 impl TrackClipCanvas {
-    fn clip_colors(&self, selected: bool, recording_preview: bool) -> ClipColors {
+    fn clip_colors(
+        &self,
+        selected: bool,
+        recording_preview: bool,
+        clip_color: Option<Color>,
+    ) -> ClipColors {
         let track = if recording_preview {
             theme::danger()
         } else {
-            self.track_color
+            clip_color.unwrap_or(self.track_color)
         };
         let colors = clip_colors(track, selected);
         if self.muted && !recording_preview {
@@ -477,7 +482,7 @@ impl TrackClipCanvas {
         let ppb = geometry.pixels_per_beat();
         let spb = self.sample_rate as f64 * 60.0 / self.bpm;
         let is_selected = !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
-        let colors = self.clip_colors(is_selected, is_recording_preview);
+        let colors = self.clip_colors(is_selected, is_recording_preview, None);
         let clip_start_beat = clip.position as f64 / spb;
         let clip_dur_beats = clip.duration as f64 / spb;
 
@@ -629,7 +634,7 @@ impl TrackClipCanvas {
     ) {
         let geometry = self.geometry();
         let is_selected = !is_recording_preview && self.selected_clips.contains(&note_clip.clip_id);
-        let colors = self.clip_colors(is_selected, is_recording_preview);
+        let colors = self.clip_colors(is_selected, is_recording_preview, note_clip.color);
         let clip_x = self.beat_to_x(note_clip.position_beats);
         let clip_w = geometry.width_for_beats(note_clip.duration_beats);
 

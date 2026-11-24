@@ -582,6 +582,8 @@ pub struct UiNoteClip {
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
     pub groove_grid: vibez_core::perform::GrooveGrid,
+    /// A color of its own in the timeline; `None` uses the track's color.
+    pub color_index: Option<u8>,
 }
 
 impl UiNoteClip {
@@ -745,6 +747,7 @@ impl UiNoteClip {
             loop_start_beats: 0.0,
             loop_end_beats: duration_beats,
             groove_grid: Default::default(),
+            color_index: None,
         }
     }
 }

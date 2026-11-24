@@ -1,3 +1,32 @@
+# Dev builds stay debuggable for the UI, but the real-time audio path
+# (engine callback, synth/DSP inner loops, FFT and resampling) is compiled
+# optimized even in `cargo build`: those crates dominate CPU in debug, and
+# opt-level 3 without fast-math keeps floating-point results bit-identical.
+[profile.dev.package.vibez-core]
+opt-level = 3
+
+[profile.dev.package.vibez-dsp]
+opt-level = 3
+
+[profile.dev.package.vibez-instruments]
+opt-level = 3
+
+[profile.dev.package.vibez-engine]
+opt-level = 3
+
+[profile.dev.package.vibez-audio-io]
+opt-level = 3
+
+[profile.dev.package.vibez-project]
+opt-level = 3
+
+
+[profile.dev.package.rustfft]
+opt-level = 3
+
+[profile.dev.package.rubato]
+opt-level = 3
+
 [workspace]
 members = [
     "crates/vibez-core",
@@ -8,7 +37,6 @@ members = [
     "crates/vibez-plugin-host",
     "crates/vibez-plugin-host/tests/fixtures",
     "crates/vibez-project",
-    "crates/vibez-dropbox",
     "crates/vibez-ui",
 ]
 resolver = "2"
@@ -27,7 +55,6 @@ vibez-dsp = { path = "crates/vibez-dsp" }
 vibez-instruments = { path = "crates/vibez-instruments" }
 vibez-plugin-host = { path = "crates/vibez-plugin-host" }
 vibez-project = { path = "crates/vibez-project" }
-vibez-dropbox = { path = "crates/vibez-dropbox" }
 vibez-ui = { path = "crates/vibez-ui" }
 
 # Audio

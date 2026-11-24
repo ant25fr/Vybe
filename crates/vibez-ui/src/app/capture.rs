@@ -591,6 +591,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         });
 
         let captured = MaterializedCapture {
@@ -637,6 +638,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         });
         let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
         for (beat, value) in [(0.0, 0.0), (5.0, 1.0), (10.0, 0.0)] {
@@ -797,6 +799,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         };
         let mut arrange = Arc::new(ArrangementTimeline::default());
         let song = Arc::make_mut(&mut arrange).ensure(track_id);
@@ -855,6 +858,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         };
         let mut section = crate::domains::perform::Section::new(0);
         let mut groove = existing.clone();
@@ -913,6 +917,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         });
         let captured = MaterializedCapture {
             arrange_start_samples: 16,
@@ -1005,6 +1010,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         };
         let filler = crate::state::TrackTimelineContent {
             note_clips: (0..vibez_core::constants::RING_BUFFER_CAPACITY)

@@ -50,6 +50,7 @@ fn looped_pattern(track_id: TrackId) -> NoteClipInfo {
         loop_start_beats: 0.0,
         loop_end_beats: 16.0,
         groove_grid: Default::default(),
+        color_index: None,
     }
 }
 
@@ -59,7 +60,7 @@ async fn reopen(path: PathBuf, saved_before: Option<PathBuf>, project: Project) 
         .unwrap();
     let mut app = super::test_support::app();
     app.rebuild_from_loaded_project(
-        load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        load_project_async(path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap(),
     );
@@ -143,6 +144,7 @@ fn undo_and_redo_of_a_shrink_keep_the_loop() {
             loop_start_beats: 0.0,
             loop_end_beats: 16.0,
             groove_grid: Default::default(),
+            color_index: None,
         });
     Arc::make_mut(&mut app.state.project_tracks)
         .tracks

@@ -50,6 +50,7 @@ fn offline_note_channel_prepares_actual_content_and_grows_live_and_staging_at_bo
                         loop_start_beats: clip.loop_start_beats,
                         loop_end_beats: clip.loop_end_beats,
                         groove_grid: clip.groove_grid,
+                        color_index: None,
                     }
                 })
                 .collect(),

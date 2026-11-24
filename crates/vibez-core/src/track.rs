@@ -156,7 +156,7 @@ impl std::fmt::Display for InputMonitoring {
 }
 
 /// Credential-free identity retained after external media becomes project-owned.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MediaProvenance {
     Local {
@@ -191,7 +191,7 @@ impl MediaProvenance {
 }
 
 /// Canonical reference to media outside the project file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MediaSourceRef {
     LocalFile {

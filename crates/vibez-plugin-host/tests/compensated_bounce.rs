@@ -112,6 +112,7 @@ fn render(
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: Default::default(),
+        color_index: None,
     };
     let detector_id = detector.id;
     let req = BounceRequest {

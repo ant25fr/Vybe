@@ -1,13 +1,12 @@
 //! Prepared media and project results carried by application messages.
 
 use crate::state::{AuditionImportInput, SampleBrowserEntry, SampleBrowserFolder};
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 use vibez_core::{
     audio_buffer::DecodedAudio,
     id::{ClipId, SectionId, TrackId},
     track::{ClipInfo, ClipTranspose, DrumPadState, MediaSourceRef},
 };
-use vibez_dropbox::{AccountInfo, Tokens as DropboxTokens};
 use vibez_project::{project_format_v1::SaveObservation, Project, TimelineLocation};
 
 #[derive(Debug, Clone)]
@@ -134,105 +133,10 @@ pub struct AudioRecordingOutcome {
     pub quality_warning: Option<String>,
 }
 
-/// OAuth flow success payload passed to the UI as `Message::DropboxConnected`.
-#[derive(Debug, Clone)]
-pub struct DropboxConnectOutcome {
-    pub info: AccountInfo,
-    pub tokens: DropboxTokens,
-}
-
-#[derive(Debug, Clone)]
-pub struct RemoteMaterializedSample {
-    pub audio: Arc<DecodedAudio>,
-    pub name: String,
-    pub source: MediaSourceRef,
-    pub lease: vibez_dropbox::CacheLease,
-    pub metadata: vibez_dropbox::DerivedMetadata,
-}
-
 #[derive(Debug, Clone)]
 pub struct AnalysedBrowserAudio {
     pub audio: Arc<DecodedAudio>,
     pub loop_fit: Option<crate::warp::LoopGridFit>,
-}
-
-#[derive(Debug)]
-pub struct RemoteCatalogStartupData {
-    pub catalog: crate::remote_provider::RemoteCatalogSnapshot,
-    pub catalog_children: HashMap<String, Vec<usize>>,
-    pub availability: HashMap<String, crate::state::RemoteAvailability>,
-    pub cache_usage: vibez_dropbox::CacheUsage,
-    pub load_error: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub enum RemoteCatalogRefreshContinuation {
-    FetchNext { checkpoint: String },
-    Complete,
-    Failed(crate::remote_provider::RemoteProviderError),
-}
-
-#[derive(Debug)]
-pub struct RemoteCatalogRefreshData {
-    pub generation: u64,
-    pub pages: usize,
-    pub catalog: Arc<crate::remote_provider::RemoteCatalogSnapshot>,
-    pub catalog_children: Option<HashMap<String, Vec<usize>>>,
-    pub availability: Option<HashMap<String, crate::state::RemoteAvailability>>,
-    pub base_catalog: Arc<crate::remote_provider::RemoteCatalogSnapshot>,
-    pub base_availability: HashMap<String, crate::state::RemoteAvailability>,
-    pub base_runtime_revision: u64,
-    pub continuation: RemoteCatalogRefreshContinuation,
-}
-
-#[derive(Clone)]
-pub struct RemoteCatalogRefreshResult {
-    generation: u64,
-    result: Arc<std::sync::Mutex<Option<Result<RemoteCatalogRefreshData, String>>>>,
-}
-
-impl RemoteCatalogRefreshResult {
-    pub fn new(generation: u64, result: Result<RemoteCatalogRefreshData, String>) -> Self {
-        Self {
-            generation,
-            result: Arc::new(std::sync::Mutex::new(Some(result))),
-        }
-    }
-
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    pub fn take(&self) -> Option<Result<RemoteCatalogRefreshData, String>> {
-        self.result.lock().ok()?.take()
-    }
-}
-
-impl std::fmt::Debug for RemoteCatalogRefreshResult {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("RemoteCatalogRefreshResult")
-    }
-}
-
-#[derive(Clone)]
-pub struct RemoteCatalogStartupResult(
-    Arc<std::sync::Mutex<Option<Result<RemoteCatalogStartupData, String>>>>,
-);
-
-impl RemoteCatalogStartupResult {
-    pub fn new(result: Result<RemoteCatalogStartupData, String>) -> Self {
-        Self(Arc::new(std::sync::Mutex::new(Some(result))))
-    }
-
-    pub fn take(&self) -> Option<Result<RemoteCatalogStartupData, String>> {
-        self.0.lock().ok()?.take()
-    }
-}
-
-impl std::fmt::Debug for RemoteCatalogStartupResult {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("RemoteCatalogStartupResult")
-    }
 }
 
 /// Successful background result from `quantize_audio_clip_async`.
@@ -301,6 +205,9 @@ pub enum BrowserImportTarget {
     },
     ArrangementNewTrackAt {
         position_samples: u64,
+        /// Multi-row drop grouping: sources sharing a group land on the one
+        /// track the group's first source created, instead of one track each.
+        group: Option<u64>,
     },
     /// A new track whose Clip goes in `section_id` at `position_samples`.
     SectionNewTrackAt {

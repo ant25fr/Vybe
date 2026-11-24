@@ -436,6 +436,7 @@ impl TimelineEditorState {
             loop_start_beats: 0.0,
             loop_end_beats: total_duration,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            color_index: None,
         };
         engine.send(joined.add_command(track_id));
         if let Some(track) = self.find_content_mut(track_id) {

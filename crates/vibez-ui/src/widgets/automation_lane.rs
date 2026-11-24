@@ -4,6 +4,9 @@
 //! Interactions:
 //! - double-click adds a point; drag moves one (ghost while
 //!   dragging, commit on release); right-click or Delete removes
+//! - the bottom edge drag resizes the lane (live preview, commit on
+//!   release)
+//! - pencil mode: a left-drag draws a freehand stroke of many points
 //! - alt-drag a segment bends its curve (alt-double-click resets it
 //!   straight); the cursor switches to a vertical-resize arrow
 //! - command-drag (Cmd on macOS, Ctrl elsewhere) sweeps a beat range and
@@ -29,6 +32,8 @@ use crate::widgets::double_click::DoubleClick;
 use crate::widgets::local_drag::LocalDrag;
 
 pub const LANE_HEIGHT: f32 = 56.0;
+/// Bottom-edge strip that starts a lane-height drag.
+const EDGE_H: f32 = 6.0;
 const HANDLE_RADIUS: f32 = 5.0;
 const HIT_RADIUS: f32 = 9.0;
 const SEGMENT_HIT: f32 = 10.0;
@@ -55,9 +60,13 @@ pub struct AutomationLaneWidget {
     pub ref_label: String,
     /// Draw and edit instantaneous state steps; curve handles are disabled.
     pub stepped: bool,
+    /// The lane strip's current height (the bottom edge drags it).
+    pub height: f32,
+    /// Pencil mode: left-drag draws a freehand stroke of points.
+    pub pencil: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LaneInteraction {
     /// Point index being dragged and its current ghost position.
     drag: Option<(usize, f64, f32)>,
@@ -67,6 +76,11 @@ pub struct LaneInteraction {
     erase_drag: Option<(f64, f64)>,
     /// Last left press, for double-click detection.
     double_click: DoubleClick,
+    /// (press y in window coords, start height, current height) of a
+    /// bottom-edge drag; absolute so the lane's own growth doesn't skew it.
+    height_drag: Option<(f32, f32, f32)>,
+    /// Points of the pencil stroke being drawn.
+    pencil_drag: Option<Vec<(f64, f32)>>,
     alt: bool,
     /// Command modifier held: Cmd on macOS, Ctrl elsewhere. Literal Ctrl
     /// would collide with the macOS right-click gesture.
@@ -167,7 +181,7 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
-        _cursor: mouse::Cursor,
+        cursor: mouse::Cursor,
     ) -> Vec<canvas::Geometry> {
         let mut frame = canvas::Frame::new(renderer, bounds.size());
         let h = bounds.height;
@@ -321,6 +335,52 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             }
         }
 
+        // Pencil stroke being drawn: a freehand polyline over the lane.
+        if let Some(stroke) = &state.pencil_drag {
+            if stroke.len() >= 2 {
+                let mut path = canvas::path::Builder::new();
+                path.move_to(Point::new(
+                    self.beat_to_x(stroke[0].0),
+                    self.value_to_y(stroke[0].1, h),
+                ));
+                for &(beat, value) in &stroke[1..] {
+                    path.line_to(Point::new(self.beat_to_x(beat), self.value_to_y(value, h)));
+                }
+                frame.stroke(
+                    &path.build(),
+                    canvas::Stroke::default()
+                        .with_color(th::accent())
+                        .with_width(2.0),
+                );
+            }
+            for &(beat, value) in stroke {
+                frame.fill(
+                    &canvas::Path::circle(
+                        Point::new(self.beat_to_x(beat), self.value_to_y(value, h)),
+                        3.0,
+                    ),
+                    th::accent(),
+                );
+            }
+        }
+
+        // The bottom edge is the lane's resize handle: highlight it while
+        // dragged or hovered.
+        let edge_active = state.height_drag.is_some()
+            || cursor
+                .position_in(bounds)
+                .is_some_and(|pos| pos.y >= h - EDGE_H);
+        if edge_active {
+            frame.fill_rectangle(
+                Point::new(0.0, h - EDGE_H),
+                iced::Size::new(bounds.width, EDGE_H),
+                Color {
+                    a: 0.35,
+                    ..th::accent()
+                },
+            );
+        }
+
         vec![frame.into_geometry()]
     }
 
@@ -340,6 +400,21 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         }
 
         let commit_release = |state: &mut Self::State| -> Option<Message> {
+            if let Some((_, _, current)) = state.height_drag.take() {
+                return Some(Message::Automation(AutomationMsg::SetLaneHeight {
+                    lane_id: self.lane_id,
+                    height: current,
+                }));
+            }
+            if let Some(stroke) = state.pencil_drag.take() {
+                if !stroke.is_empty() {
+                    return Some(Message::Automation(AutomationMsg::PencilDraw {
+                        track_id: self.track_id,
+                        lane_id: self.lane_id,
+                        points: stroke,
+                    }));
+                }
+            }
             if let Some((index, beat, value)) = state.drag.take() {
                 return Some(Message::Automation(AutomationMsg::MovePoint {
                     track_id: self.track_id,
@@ -376,8 +451,11 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         // During an active drag, keep tracking when the cursor leaves
         // the lane by clamping the absolute position into bounds, so
         // point/curve/erase drags don't stall at the lane edge.
-        let dragging =
-            state.drag.is_some() || state.curve_drag.is_some() || state.erase_drag.is_some();
+        let dragging = state.drag.is_some()
+            || state.curve_drag.is_some()
+            || state.erase_drag.is_some()
+            || state.height_drag.is_some()
+            || state.pencil_drag.is_some();
         let clamped_fallback = || {
             dragging
                 .then(|| LocalDrag::clamped().position(cursor, bounds))
@@ -442,6 +520,20 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                         })),
                     );
                 }
+                // The bottom edge resizes the lane.
+                if pos.y >= h - EDGE_H {
+                    let press_abs = cursor.position().map(|p| p.y).unwrap_or(pos.y);
+                    state.height_drag = Some((press_abs, self.height, self.height));
+                    state.double_click.clear();
+                    return (canvas::event::Status::Captured, None);
+                }
+                // Pencil mode: a left-drag draws a freehand stroke.
+                if self.pencil {
+                    state.pencil_drag =
+                        Some(vec![(self.x_to_beat(pos.x), self.y_to_value(pos.y, h))]);
+                    state.double_click.clear();
+                    return (canvas::event::Status::Captured, None);
+                }
                 // Double-click on empty lane space adds a point.
                 if state.double_click.press(
                     Instant::now(),
@@ -470,6 +562,39 @@ impl canvas::Program<Message> for AutomationLaneWidget {
                 )
             }
             canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                if let Some((press_abs, start, current)) = state.height_drag {
+                    // Absolute window y: the lane's own growth moves its
+                    // bounds, so a bounds-relative delta would feed back.
+                    if let Some(abs) = cursor.position() {
+                        let next = (start + abs.y - press_abs).clamp(
+                            crate::domains::automation::LANE_HEIGHT_MIN,
+                            crate::domains::automation::LANE_HEIGHT_MAX,
+                        );
+                        if (next - current).abs() >= 1.0 {
+                            state.height_drag = Some((press_abs, start, next));
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::Automation(AutomationMsg::PreviewLaneHeight {
+                                    lane_id: self.lane_id,
+                                    height: next,
+                                })),
+                            );
+                        }
+                    }
+                    return (canvas::event::Status::Captured, None);
+                }
+                if state.pencil_drag.is_some() {
+                    // Freehand: no grid snap, and one point per 2 px so a
+                    // stroke stays light to commit.
+                    let beat = self.x_to_beat(pos.x);
+                    let value = self.y_to_value(pos.y, h);
+                    let stroke = state.pencil_drag.as_mut().expect("pencil drag");
+                    let last_x = stroke.last().map(|(b, _)| self.beat_to_x(*b));
+                    if last_x.map_or(true, |lx| (pos.x - lx).abs() >= 2.0) {
+                        stroke.push((beat, value));
+                    }
+                    return (canvas::event::Status::Captured, None);
+                }
                 if let Some((index, _, _)) = state.drag {
                     state.drag = Some((
                         index,
@@ -521,10 +646,10 @@ impl canvas::Program<Message> for AutomationLaneWidget {
         if state.drag.is_some() {
             return mouse::Interaction::Grabbing;
         }
-        if state.curve_drag.is_some() {
+        if state.curve_drag.is_some() || state.height_drag.is_some() {
             return mouse::Interaction::ResizingVertically;
         }
-        if state.erase_drag.is_some() {
+        if state.erase_drag.is_some() || state.pencil_drag.is_some() {
             return mouse::Interaction::Crosshair;
         }
         if let Some(pos) = cursor.position_in(bounds) {
@@ -539,6 +664,12 @@ impl canvas::Program<Message> for AutomationLaneWidget {
             }
             if self.hit_point(pos, bounds.height).is_some() {
                 return mouse::Interaction::Grab;
+            }
+            if pos.y >= bounds.height - EDGE_H {
+                return mouse::Interaction::ResizingVertically;
+            }
+            if self.pencil {
+                return mouse::Interaction::Crosshair;
             }
         }
         mouse::Interaction::default()

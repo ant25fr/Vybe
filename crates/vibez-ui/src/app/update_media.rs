@@ -95,6 +95,40 @@ impl App {
         Task::none()
     }
 
+    /// Command+D, resolved against whatever the user is actually editing.
+    ///
+    /// Mirrors [`Self::on_delete_key_pressed`]: the focus gate first, then
+    /// the selected notes of the open piano roll, then the selected clips.
+    pub(super) fn on_duplicate_pressed(&mut self) -> Task<Message> {
+        // A text field owns Command+D for its own purposes.
+        if self.text_field_editing() {
+            return Task::none();
+        }
+        // Priority 1: selected notes in the open piano roll.
+        if let Some((track_id, clip_id)) = self.state.active_timeline_editor().selected_note_clip {
+            let has_selection = self
+                .state
+                .active_timeline_content(track_id)
+                .and_then(|content| content.note_clips.iter().find(|c| c.id == clip_id))
+                .is_some_and(|c| !c.selected_notes.is_empty());
+            if has_selection {
+                return self.update(Message::PianoRoll(PianoRollMsg::DuplicateSelectedNotes {
+                    track_id,
+                    clip_id,
+                }));
+            }
+        }
+        // Priority 2: selected arrangement clips.
+        if !self
+            .state
+            .active_timeline_editor()
+            .selected_clips
+            .is_empty()
+        {
+            return self.update(Message::Arrangement(ArrangementMsg::DuplicateSelectedClip));
+        }
+        Task::none()
+    }
     /// Command+A, resolved against whatever the user is actually editing.
     ///
     /// Mirrors [`Self::on_delete_key_pressed`]: the focus gate first, then the
@@ -333,20 +367,223 @@ impl App {
         let changed = self.state.browser.select_source(source.clone());
         if changed {
             if let MediaSourceRef::LocalFile { path } = source.clone() {
+                if let Some(cached) = self.state.browser.cached_preview(&path) {
+                    if self.state.browser.audition_enabled {
+                        let generation = self.state.browser.begin_audition_load(&source);
+                        return self.update(Message::LocalSamplePreviewReady(
+                            source,
+                            generation,
+                            Ok(cached),
+                        ));
+                    }
+                    self.state.browser.begin_waveform_load(&source);
+                    return self.update(Message::BrowserWaveformReady(source, Ok(cached)));
+                }
                 if self.state.browser.audition_enabled {
                     let generation = self.state.browser.begin_audition_load(&source);
                     self.state.status_text = "Preparing Audition...".to_string();
                     return Task::perform(decode_local_for_preview_async(path), move |result| {
-                        Message::LocalSamplePreviewReady(source.clone(), generation, result)
+                        Message::LocalSamplePreviewReady(
+                            source.clone(),
+                            generation,
+                            result.map(|(audio, _name)| crate::message::AnalysedBrowserAudio {
+                                audio,
+                                loop_fit: None,
+                            }),
+                        )
                     });
                 }
                 self.state.browser.begin_waveform_load(&source);
                 return Task::perform(decode_local_for_preview_async(path), move |result| {
-                    Message::BrowserWaveformReady(source.clone(), result)
+                    Message::BrowserWaveformReady(
+                        source.clone(),
+                        result.map(|(audio, _name)| crate::message::AnalysedBrowserAudio {
+                            audio,
+                            loop_fit: None,
+                        }),
+                    )
                 });
             }
         } else {
             return self.replay_selected_browser_sample();
+        }
+        Task::none()
+    }
+
+    /// A result row was released without starting a drag. Plain releases
+    /// keep the historical click behavior (select + preview); Ctrl toggles
+    /// the row in a multi-selection, Shift ranges from the anchor, and a
+    /// rapid second release is a double-click that imports the row.
+    pub(super) fn on_browser_entry_released(
+        &mut self,
+        source: MediaSourceRef,
+        ctrl: bool,
+        shift: bool,
+    ) -> Task<Message> {
+        let is_double = if ctrl || shift {
+            self.state.browser.entry_double_click.clear();
+            false
+        } else {
+            let now = std::time::Instant::now();
+            let position = iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y);
+            let double = self.state.browser.entry_double_click.press(
+                now,
+                position,
+                std::time::Duration::from_millis(450),
+                Some(8.0),
+            );
+            if double {
+                self.state.browser.entry_double_click.clear();
+            }
+            double
+        };
+        if is_double {
+            return self.on_browser_entry_double_clicked(source);
+        }
+        if ctrl || shift {
+            return self.select_browser_entry_modified(source, ctrl, shift);
+        }
+        self.update(Message::ClickLocalBrowserEntry(source))
+    }
+
+    /// Ctrl toggles a row in the multi-selection; Shift selects the range
+    /// from the primary (anchor) row to `source` over the visible results.
+    fn select_browser_entry_modified(
+        &mut self,
+        source: MediaSourceRef,
+        ctrl: bool,
+        shift: bool,
+    ) -> Task<Message> {
+        let visible = self.visible_browser_results();
+        let browser = &mut self.state.browser;
+        if shift {
+            if let Some(anchor) = browser.selected_source.clone() {
+                let anchor_pos = visible.iter().position(|s| *s == anchor);
+                let target_pos = visible.iter().position(|s| *s == source);
+                if let (Some(a), Some(b)) = (anchor_pos, target_pos) {
+                    let (lo, hi) = (a.min(b), a.max(b));
+                    browser.selected_extra.clear();
+                    for item in &visible[lo..=hi] {
+                        if *item != anchor {
+                            browser.selected_extra.insert(item.clone());
+                        }
+                    }
+                    return Task::none();
+                }
+            }
+            return Task::none();
+        }
+        if ctrl {
+            if browser.selected_source.as_ref() == Some(&source) {
+                // Removing the primary promotes the first extra, if any.
+                browser.selected_source = None;
+                if let Some(next) = browser.selected_extra.iter().next().cloned() {
+                    browser.selected_extra.remove(&next);
+                    browser.selected_source = Some(next);
+                }
+            } else if browser.selected_extra.contains(&source) {
+                browser.selected_extra.remove(&source);
+            } else if browser.selected_source.is_none() {
+                browser.selected_source = Some(source);
+            } else {
+                browser.selected_extra.insert(source);
+            }
+        }
+        Task::none()
+    }
+
+    /// Double-click on a row: select it, then add it to the project at the
+    /// playhead (selected track when it can take it, else a new track).
+    pub(super) fn on_browser_entry_double_clicked(
+        &mut self,
+        source: MediaSourceRef,
+    ) -> Task<Message> {
+        let selection = self.update(Message::ClickLocalBrowserEntry(source.clone()));
+        self.state.browser.push_recent(source.clone());
+        self.persist_ui_settings();
+        let import = self.handle_import_selected_browser_sample_to_arrangement();
+        Task::batch([selection, import])
+    }
+
+    /// Right-click on a row: make it the selection when it is not part of
+    /// one, then open its context menu at the cursor.
+    pub(super) fn on_browser_entry_right_pressed(
+        &mut self,
+        source: MediaSourceRef,
+    ) -> Task<Message> {
+        if !self.state.browser.is_selected(&source) {
+            self.state.browser.selected_extra.clear();
+            self.state.browser.select_source(source.clone());
+        }
+        let x = self.state.view.cursor_x;
+        let y = self.state.view.cursor_y;
+        self.update(Message::View(
+            crate::domains::view::ViewMsg::ShowContextMenu {
+                x,
+                y,
+                target: crate::state::ContextMenuTarget::BrowserEntry { source },
+            },
+        ))
+    }
+
+    pub(super) fn on_browser_entry_hover(
+        &mut self,
+        source: Option<MediaSourceRef>,
+    ) -> Task<Message> {
+        self.state.browser.hovered_source = source;
+        Task::none()
+    }
+
+    /// The row's play button: stop when this row is the one playing,
+    /// otherwise select it and start its preview.
+    pub(super) fn on_toggle_browser_row_audition(
+        &mut self,
+        source: MediaSourceRef,
+    ) -> Task<Message> {
+        if self.state.browser.audition_playing
+            && self.state.browser.selected_source.as_ref() == Some(&source)
+        {
+            self.stop_browser_audition();
+            self.state.browser.audition_playing = false;
+            self.state.status_text = "Preview stopped".into();
+            return Task::none();
+        }
+        self.update(Message::PreviewLocalEntry(source))
+    }
+
+    /// A sample-map point under the pointer: play it, without selecting it.
+    pub(super) fn on_sample_map_hover(&mut self, source: Option<MediaSourceRef>) -> Task<Message> {
+        let Some(source) = source else {
+            return Task::none();
+        };
+        if self.state.browser.drag_source.is_some()
+            || crate::domains::browser::DragMedia::of(&source)
+                == crate::domains::browser::DragMedia::Midi
+        {
+            return Task::none();
+        }
+        let generation = self.state.browser.begin_audition_load(&source);
+        if let MediaSourceRef::LocalFile { path } = &source {
+            if let Some(cached) = self.state.browser.cached_preview(path) {
+                return self.update(Message::LocalSamplePreviewReady(
+                    source,
+                    generation,
+                    Ok(cached),
+                ));
+            }
+            return Task::perform(
+                decode_local_for_preview_async(path.clone()),
+                move |result| {
+                    Message::LocalSamplePreviewReady(
+                        source.clone(),
+                        generation,
+                        result.map(|(audio, _name)| crate::message::AnalysedBrowserAudio {
+                            audio,
+                            loop_fit: None,
+                        }),
+                    )
+                },
+            );
         }
         Task::none()
     }
@@ -361,42 +598,68 @@ impl App {
         }
         let generation = self.state.browser.begin_audition_load(&source);
         if let MediaSourceRef::LocalFile { path } = source.clone() {
+            if let Some(cached) = self.state.browser.cached_preview(&path) {
+                return self.update(Message::LocalSamplePreviewReady(
+                    source,
+                    generation,
+                    Ok(cached),
+                ));
+            }
             self.state.status_text = "Preparing Audition...".to_string();
             return Task::perform(decode_local_for_preview_async(path), move |result| {
-                Message::LocalSamplePreviewReady(source.clone(), generation, result)
+                Message::LocalSamplePreviewReady(
+                    source.clone(),
+                    generation,
+                    result.map(|(audio, _name)| crate::message::AnalysedBrowserAudio {
+                        audio,
+                        loop_fit: None,
+                    }),
+                )
             });
         }
         Task::none()
     }
 
     pub(super) fn on_stop_browser_preview(&mut self) -> Task<Message> {
-        self.remote_materialization_request.cancel();
-        self.remote_audition_cache_lease = None;
-        self.state.browser.remote.preview_in_progress = false;
         self.stop_browser_audition();
         self.state.status_text = "Audition stopped".to_string();
-        // Re-enforce the cache budget off the update thread now that
-        // the audition lease is released.
-        self.media_cache_maintenance_task()
+        Task::none()
+    }
+
+    /// A click or drag on the preview waveform: seek the playing voice,
+    /// or remember the position for the next Play when stopped.
+    pub(super) fn on_seek_browser_preview(&mut self, fraction: f32) -> Task<Message> {
+        let fraction = fraction.clamp(0.0, 1.0);
+        let Some(audio) = self.state.browser.waveform_audio.clone() else {
+            return Task::none();
+        };
+        let frames = audio.num_frames();
+        if frames == 0 {
+            return Task::none();
+        }
+        let position = ((fraction as f64) * (frames as u64) as f64) as u64;
+        let position = position.min(frames.saturating_sub(1) as u64);
+        self.state.browser.audition_position_frames = position;
+        if self.state.browser.audition_playing {
+            self.send_command(EngineCommand::SeekAudition {
+                position_frames: position,
+            });
+        }
+        Task::none()
     }
 
     pub(super) fn on_toggle_audition_enabled(&mut self) -> Task<Message> {
         let enabled = self.state.browser.toggle_audition_enabled();
-        let maintenance = if !enabled {
-            self.remote_materialization_request.cancel();
-            self.remote_audition_cache_lease = None;
+        if !enabled {
             self.stop_browser_audition();
-            self.media_cache_maintenance_task()
-        } else {
-            Task::none()
-        };
+        }
         self.persist_ui_settings();
         self.state.status_text = if enabled {
             "Selection Audition enabled".into()
         } else {
             "Selection Audition disabled; explicit Play remains available".into()
         };
-        maintenance
+        Task::none()
     }
 
     pub(super) fn on_set_audition_mode(
@@ -464,14 +727,6 @@ impl App {
         {
             self.stop_browser_audition();
             self.state.status_text = "Audition stopped".into();
-        } else if self.remote_import_active() {
-            self.remote_import_request.cancel();
-            self.state.status_text = "Remote import cancelled; no project media added".into();
-            let maintenance = self.media_cache_maintenance_task();
-            if let Some(entry) = self.pending_remote_audition.take() {
-                return Task::batch([maintenance, self.start_remote_audition(entry, true)]);
-            }
-            return maintenance;
         } else if self.state.browser.drag_source.is_some()
             || self.state.browser.pending_drag.is_some()
         {
@@ -492,45 +747,151 @@ impl App {
         track_id: TrackId,
         position_samples: u64,
     ) -> Task<Message> {
-        let Some(source) = self.state.browser.drag_source.take() else {
+        let sources = self.state.browser.take_drag_sources();
+        if sources.is_empty() {
             return Task::none();
-        };
+        }
         self.state.browser.cancel_media_drag();
+        let ctrl = super::keyboard::command_held(
+            self.state.view.held_modifiers,
+            super::keyboard::ON_MACOS,
+        );
         if self.state.view.workspace == crate::state::Workspace::Perform {
             if let Some(section_id) = self.state.perform.selected_section {
-                return self.dispatch_drop_for_target(
-                    source,
-                    BrowserImportTarget::SectionClipAt {
-                        section_id,
-                        track_id,
-                        position_samples,
-                    },
-                );
+                let mut tasks = Vec::with_capacity(sources.len());
+                for source in sources {
+                    tasks.push(self.dispatch_drop_for_target(
+                        source,
+                        BrowserImportTarget::SectionClipAt {
+                            section_id,
+                            track_id,
+                            position_samples,
+                        },
+                    ));
+                }
+                return Task::batch(tasks);
             }
         }
-        self.dispatch_drop_on_arrangement(track_id, position_samples, source)
+        // Every source goes through the lane's own clip target, so the
+        // lane's existing rules still apply (a MIDI file on an audio lane
+        // is turned away, an audio file converts an empty MIDI lane).
+        let sample_rate = self.state.transport.sample_rate;
+        let mut tasks = Vec::new();
+        if ctrl {
+            // Ctrl held: one new track per source, all at the dropped beat.
+            for source in sources {
+                tasks.push(self.dispatch_drop_for_target(
+                    source,
+                    BrowserImportTarget::ArrangementNewTrackAt {
+                        position_samples,
+                        group: None,
+                    },
+                ));
+            }
+        } else {
+            // One after another on the lane, each where the previous ends.
+            let mut offset = 0u64;
+            for source in &sources {
+                let duration = self
+                    .state
+                    .browser
+                    .entry_duration_samples(source, sample_rate);
+                tasks.push(self.dispatch_drop_for_target(
+                    source.clone(),
+                    BrowserImportTarget::ArrangementClipAt {
+                        track_id,
+                        position_samples: position_samples.saturating_add(offset),
+                    },
+                ));
+                offset = offset.saturating_add(duration);
+            }
+        }
+        Task::batch(tasks)
     }
 
     pub(super) fn on_drop_sample_on_empty_arrangement(&mut self) -> Task<Message> {
-        let Some(source) = self.state.browser.drag_source.take() else {
+        let sources = self.state.browser.take_drag_sources();
+        if sources.is_empty() {
             return Task::none();
-        };
+        }
         let beat = match self.state.browser.drag_target.take() {
             Some(crate::state::BrowserDropTarget::EmptyArrangement { beat }) => beat,
             _ => self.state.transport.position_beats(),
         };
         self.state.browser.cancel_media_drag();
+        let ctrl = super::keyboard::command_held(
+            self.state.view.held_modifiers,
+            super::keyboard::ON_MACOS,
+        );
         let position_samples = self.state.transport.beats_to_samples(beat);
-        let target = match self.active_timeline_location() {
-            vibez_project::TimelineLocation::Section(section_id) => {
-                BrowserImportTarget::SectionNewTrackAt {
+        let section_id = match self.active_timeline_location() {
+            vibez_project::TimelineLocation::Section(section_id) => Some(section_id),
+            _ => None,
+        };
+        if sources.len() == 1 {
+            // A single file keeps its exact behaviour.
+            let source = sources.into_iter().next().unwrap();
+            let target = match section_id {
+                Some(section_id) => BrowserImportTarget::SectionNewTrackAt {
                     section_id,
                     position_samples,
-                }
-            }
-            _ => BrowserImportTarget::ArrangementNewTrackAt { position_samples },
-        };
-        self.dispatch_drop_for_target(source, target)
+                },
+                None => BrowserImportTarget::ArrangementNewTrackAt {
+                    position_samples,
+                    group: None,
+                },
+            };
+            return self.dispatch_drop_for_target(source, target);
+        }
+        // Multi-row drop on the empty area: without Ctrl, one new track per
+        // media kind with the clips one after another; with Ctrl, one new
+        // track per source, all at the dropped beat.
+        let sample_rate = self.state.transport.sample_rate;
+        let mut audio_group: Option<u64> = None;
+        let mut midi_group: Option<u64> = None;
+        let mut next_group = 1u64;
+        let mut audio_offset = 0u64;
+        let mut midi_offset = 0u64;
+        let mut tasks = Vec::with_capacity(sources.len());
+        for source in &sources {
+            let media = crate::domains::browser::DragMedia::of(source);
+            let (group, offset) = if ctrl {
+                (None, 0u64)
+            } else {
+                let (group_slot, offset) = match media {
+                    crate::domains::browser::DragMedia::Audio => {
+                        (&mut audio_group, &mut audio_offset)
+                    }
+                    crate::domains::browser::DragMedia::Midi => (&mut midi_group, &mut midi_offset),
+                };
+                let group = group_slot.get_or_insert_with(|| {
+                    let g = next_group;
+                    next_group += 1;
+                    g
+                });
+                let position_offset = *offset;
+                *offset = offset.saturating_add(
+                    self.state
+                        .browser
+                        .entry_duration_samples(source, sample_rate),
+                );
+                (Some(*group), position_offset)
+            };
+            let position = position_samples.saturating_add(offset);
+            let target = match section_id {
+                // Perform sections make one track per source (no grouping).
+                Some(section_id) => BrowserImportTarget::SectionNewTrackAt {
+                    section_id,
+                    position_samples: position,
+                },
+                None => BrowserImportTarget::ArrangementNewTrackAt {
+                    position_samples: position,
+                    group,
+                },
+            };
+            tasks.push(self.dispatch_drop_for_target(source.clone(), target));
+        }
+        Task::batch(tasks)
     }
 
     pub(super) fn on_drop_sample_on_sampler(&mut self, track_id: TrackId) -> Task<Message> {
@@ -580,10 +941,60 @@ impl App {
         if self
             .state
             .browser
-            .install_audition(generation, source, analysed)
+            .install_audition(generation, source.clone(), analysed)
         {
-            let source = self.state.browser.selected_source.clone().unwrap();
-            return self.play_browser_mode(source, audio);
+            // Playback starts on the decoded audio alone; the loop-tempo
+            // analysis follows in its own task.
+            let play = self.play_browser_mode(source.clone(), audio.clone());
+            let analysis = self.spawn_loop_fit_analysis(&source, audio);
+            return Task::batch([play, analysis]);
+        }
+        Task::none()
+    }
+
+    /// Spawns the bounded loop-tempo analysis for a shown preview, unless a
+    /// fit is already known (cached preview).
+    fn spawn_loop_fit_analysis(
+        &self,
+        source: &MediaSourceRef,
+        audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    ) -> Task<Message> {
+        if self.state.browser.waveform_loop_fit.is_some() {
+            return Task::none();
+        }
+        let MediaSourceRef::LocalFile { path } = source else {
+            return Task::none();
+        };
+        let name = path
+            .file_name()
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let source = source.clone();
+        Task::perform(analyse_preview_loop_fit_async(audio, name), move |fit| {
+            Message::BrowserLoopFitReady(source.clone(), fit)
+        })
+    }
+
+    pub(super) fn on_browser_loop_fit_ready(
+        &mut self,
+        source: MediaSourceRef,
+        fit: Option<crate::warp::LoopGridFit>,
+    ) -> Task<Message> {
+        if self.state.browser.waveform_source.as_ref() != Some(&source) {
+            return Task::none();
+        }
+        self.state.browser.set_waveform_loop_fit(fit);
+        if let MediaSourceRef::LocalFile { path } = &source {
+            self.state.browser.update_cached_preview_fit(path, fit);
+        }
+        // A WARP preview now has its source tempo: prepare the warped
+        // treatment; the bus crossfades when it is ready.
+        if self.state.browser.audition_playing
+            && self.state.browser.audition_mode == crate::state::AuditionMode::Warp
+        {
+            if let Some(audio) = self.state.browser.waveform_audio.clone() {
+                return self.play_browser_mode(source, audio);
+            }
         }
         Task::none()
     }
@@ -609,8 +1020,14 @@ impl App {
         source: MediaSourceRef,
         analysed: crate::message::AnalysedBrowserAudio,
     ) -> Task<Message> {
-        if self.state.browser.install_waveform(source, analysed) {
+        let audio = Arc::clone(&analysed.audio);
+        if self
+            .state
+            .browser
+            .install_waveform(source.clone(), analysed)
+        {
             self.state.status_text = "Waveform ready".into();
+            return self.spawn_loop_fit_analysis(&source, audio);
         }
         Task::none()
     }
@@ -650,55 +1067,7 @@ impl App {
         name: String,
         source: MediaSourceRef,
     ) -> Task<Message> {
-        // The active import's own completion has already finished its
-        // TrackedRequest (RemoteImportReady). A remote
-        // source decoded while another import is still running (e.g.
-        // a dropped staged copy) must not run its cleanup or release
-        // the queued audition.
-        let remote_import_finished = matches!(
-            &source,
-            MediaSourceRef::DropboxFile { .. } | MediaSourceRef::StagedRemoteProjectMedia { .. }
-        ) && !self.remote_import_active();
-        let maintenance = if remote_import_finished {
-            self.media_cache_maintenance_task()
-        } else {
-            Task::none()
-        };
-        let import = self.prepare_browser_sample_import(target, treatment, analysed, name, source);
-        let pending_audition = if remote_import_finished {
-            self.pending_remote_audition
-                .take()
-                .map(|entry| self.start_remote_audition(entry, true))
-                .unwrap_or_else(Task::none)
-        } else {
-            Task::none()
-        };
-        Task::batch([import, pending_audition, maintenance])
-    }
-
-    pub(super) fn on_remote_import_ready(
-        &mut self,
-        request_id: u64,
-        target: BrowserImportTarget,
-        treatment: crate::state::AuditionImportInput,
-        result: Result<(crate::message::AnalysedBrowserAudio, String, MediaSourceRef), String>,
-    ) -> Task<Message> {
-        if !self.remote_import_request.finish(request_id) {
-            // Staging copies are content-addressed, so a superseding
-            // import of the same bytes shares this exact file;
-            // deleting it here would break that import's next save.
-            // The startup staging sweep owns orphan cleanup.
-            return Task::none();
-        }
-        match result {
-            Ok((analysed, name, source)) => self.update(Message::BrowserSampleDecoded(
-                target, treatment, analysed, name, source,
-            )),
-            Err(error) => Task::batch([
-                self.media_cache_maintenance_task(),
-                self.update(Message::BrowserSampleDecodeError(error)),
-            ]),
-        }
+        self.prepare_browser_sample_import(target, treatment, analysed, name, source)
     }
 
     pub(super) fn on_browser_import_prepared(
@@ -730,14 +1099,6 @@ impl App {
 
     pub(super) fn on_browser_sample_decode_error(&mut self, err: String) -> Task<Message> {
         self.state.status_text = format!("Browser import error: {err}");
-        // Release the queued audition only when no import is active:
-        // a local decode failure must not preempt a Remote import
-        // that is still downloading.
-        if !self.remote_import_active() {
-            if let Some(entry) = self.pending_remote_audition.take() {
-                return self.start_remote_audition(entry, true);
-            }
-        }
         Task::none()
     }
 }

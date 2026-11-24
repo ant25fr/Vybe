@@ -113,6 +113,7 @@ fn rename_note_clip() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        color_index: None,
     });
     if let Some(t) = Arc::make_mut(&mut state.arrangement.timeline).get_mut(tid) {
         if let Some(c) = t.note_clips.iter_mut().find(|c| c.id == cid) {
@@ -301,6 +302,7 @@ fn the_clip_count_covers_listed_tracks_only() {
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
         groove_grid: Default::default(),
+        color_index: None,
     };
     let (drums, bass, removed) = (TrackId::new(), TrackId::new(), TrackId::new());
     let mut content = TimelineContent::default();

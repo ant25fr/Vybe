@@ -658,6 +658,7 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: Default::default(),
+                color_index: None,
             };
             let audio = Arc::new(DecodedAudio {
                 channels: vec![vec![0.1; 32], vec![0.1; 32]],

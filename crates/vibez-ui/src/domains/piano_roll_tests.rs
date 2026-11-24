@@ -32,6 +32,7 @@ fn midi_track_with_clip() -> (TimelineEditorState, TrackId, ClipId) {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: GrooveGrid::Off,
+        color_index: None,
     });
     (timeline, track_id, clip_id)
 }

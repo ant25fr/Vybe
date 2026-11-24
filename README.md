@@ -109,7 +109,7 @@ more room.
 
 - **Themes**: 20 built in, dark and light, from Charcoal to Porcelain, and
   your own saved alongside them
-- **Sample browser** with local library indexing, Dropbox, RAW and WARP
+- **Sample browser** with local library indexing, RAW and WARP
   audition, automatic tempo sync, looping and a waveform playhead
 - **Project save/load and autosave**, with undo, redo and WAV export from the
   master bus
@@ -166,7 +166,6 @@ vibez is a Cargo workspace:
 | `vibez-instruments` | Built-in synth, sampler, drum rack |
 | `vibez-plugin-host` | VST3 and CLAP hosting, sandboxed scanning |
 | `vibez-project` | Project file format: self-contained `.vzp`, legacy JSON |
-| `vibez-dropbox` | Dropbox sample browser backend |
 | `vibez-ui` | The app: iced GUI, domain modules, message router |
 
 The UI is organized into domain modules (transport, arrangement, perform, piano

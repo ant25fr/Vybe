@@ -52,6 +52,10 @@ impl App {
             BrowserDropTarget::NewTrackSlot { row } => {
                 Message::ImportLauncherClipOnNewTrack { row }
             }
+            // Releasing a file drag on a tag row tags every dragged file.
+            BrowserDropTarget::TagRow { tag_id } => {
+                Message::Browser(BrowserMsg::DropOnTagRow { tag_id })
+            }
         };
         self.state.browser.end_desktop_drop();
         self.update(message)

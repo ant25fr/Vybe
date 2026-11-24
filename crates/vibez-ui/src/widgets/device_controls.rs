@@ -2,8 +2,12 @@
 //! a readable value you can click to type into, segmented choices, and
 //! headings. Sizes are in logical pixels, which Interface Scale multiplies.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+
 use iced::widget::{button, canvas, column, container, pick_list, row, text, text_input, Space};
 use iced::{Alignment, Color, Element, Length, Theme};
+use vibez_core::effect::ParamDescriptor;
 use vibez_core::id::TrackId;
 
 use crate::domains::device_params::{DeviceParams, DeviceSlot};
@@ -30,6 +34,51 @@ pub const METER_W: f32 = 58.0;
 /// Only one value is typed into at a time, so every entry shares this id.
 pub fn entry_id() -> text_input::Id {
     text_input::Id::new("device-value-entry")
+}
+
+thread_local! {
+    /// The automation values at the playhead for the device panel being
+    /// built, as (track, (slot, param index) -> normalized value). Set for
+    /// the duration of one panel build so every knob in it can follow its
+    /// lane's curve; cleared by the guard when the build ends.
+    static AUTOMATION_LIVE: RefCell<Option<(TrackId, HashMap<(DeviceSlot, usize), f32>)>> =
+        RefCell::new(None);
+}
+
+/// Publish the live automation values for the device panel about to be built.
+pub fn set_automation_live(track_id: TrackId, values: HashMap<(DeviceSlot, usize), f32>) {
+    AUTOMATION_LIVE.with(|cell| *cell.borrow_mut() = Some((track_id, values)));
+}
+
+/// Clear the values published by [`set_automation_live`].
+pub fn clear_automation_live() {
+    AUTOMATION_LIVE.with(|cell| *cell.borrow_mut() = None);
+}
+
+/// The normalized live value of one control at the playhead, when a lane
+/// drives it (and is not overridden by a manual touch).
+pub fn automation_live_value(track_id: TrackId, slot: DeviceSlot, index: usize) -> Option<f32> {
+    AUTOMATION_LIVE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .filter(|(tid, _)| *tid == track_id)
+            .and_then(|(_, map)| map.get(&(slot, index)).copied())
+    })
+}
+
+/// The value a control should display: the lane's value at the playhead
+/// denormalized into the descriptor's range, else the manual value.
+pub fn automation_display_value(
+    track_id: TrackId,
+    slot: DeviceSlot,
+    index: usize,
+    descriptor: &ParamDescriptor,
+    manual: f32,
+) -> f32 {
+    match automation_live_value(track_id, slot, index) {
+        Some(norm) => descriptor.min + norm.clamp(0.0, 1.0) * (descriptor.max - descriptor.min),
+        None => manual,
+    }
 }
 
 /// Knob diameter for a control column `height` tall.
@@ -112,7 +161,18 @@ impl<'a> Param<'a> {
     }
 
     fn value(&self) -> f32 {
-        self.device.value(self.index)
+        // While a lane drives this parameter, the control shows the curve's
+        // value at the playhead instead of the static one.
+        match self.descriptor() {
+            Some(d) => automation_display_value(
+                self.track_id,
+                self.device.slot,
+                self.index,
+                d,
+                self.device.value(self.index),
+            ),
+            None => self.device.value(self.index),
+        }
     }
 
     fn descriptor(&self) -> Option<&'static vibez_core::effect::ParamDescriptor> {
@@ -552,5 +612,57 @@ mod tests {
         assert_eq!(knob_size(0.0), KNOB_MIN);
         assert_eq!(knob_size(KNOB_TEXT_H + 40.0), 40.0);
         assert_eq!(knob_size(400.0), KNOB_MAX);
+    }
+
+    #[test]
+    fn live_automation_values_denormalize_and_fall_back_to_manual() {
+        let track = TrackId::new();
+        let other = TrackId::new();
+        let slot = DeviceSlot::Instrument;
+        let fx = DeviceSlot::Effect(vibez_core::id::EffectId::new());
+        let descriptor = vibez_core::effect::ParamDescriptor {
+            name: "cutoff",
+            min: 0.0,
+            max: 200.0,
+            default: 100.0,
+            unit: "Hz",
+        };
+
+        clear_automation_live();
+        assert_eq!(automation_live_value(track, slot, 0), None);
+        assert_eq!(
+            automation_display_value(track, slot, 0, &descriptor, 42.0),
+            42.0
+        );
+
+        let mut values = HashMap::new();
+        values.insert((slot, 0), 0.5f32);
+        values.insert((fx, 3), 1.0f32);
+        set_automation_live(track, values);
+
+        assert_eq!(automation_live_value(track, slot, 0), Some(0.5));
+        // Other track / other param / cleared stash -> manual value.
+        assert_eq!(automation_live_value(other, slot, 0), None);
+        assert_eq!(automation_live_value(track, slot, 1), None);
+        assert_eq!(
+            automation_display_value(other, slot, 0, &descriptor, 42.0),
+            42.0
+        );
+        // Denormalized into the descriptor range, clamped.
+        assert_eq!(
+            automation_display_value(track, slot, 0, &descriptor, 42.0),
+            100.0
+        );
+        assert_eq!(
+            automation_display_value(track, fx, 3, &descriptor, 42.0),
+            200.0
+        );
+
+        clear_automation_live();
+        assert_eq!(automation_live_value(track, slot, 0), None);
+        assert_eq!(
+            automation_display_value(track, slot, 0, &descriptor, 42.0),
+            42.0
+        );
     }
 }

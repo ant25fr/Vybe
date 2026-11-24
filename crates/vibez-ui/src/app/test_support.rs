@@ -27,7 +27,7 @@ pub(super) fn deliver_key(
         return;
     }
     if let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event {
-        if let Some(message) = super::keyboard::global_key_handler(key, modifiers) {
+        if let Some(message) = super::keyboard::global_key_handler(key, modifiers, &app.shortcuts) {
             let _ = app.update(message);
         }
     }
@@ -40,6 +40,7 @@ pub(super) fn app() -> super::App {
     super::App {
         state: AppState::default(),
         edge_shortcuts: Default::default(),
+        shortcuts: Default::default(),
         cmd_tx: Default::default(),
         event_rx: None,
         _stream: None,
@@ -54,6 +55,7 @@ pub(super) fn app() -> super::App {
         filter_panels: Default::default(),
         gate_panels: Default::default(),
         card_panels: Default::default(),
+        multiband_panels: Default::default(),
         instrument_panels: Default::default(),
         gain_devices: Default::default(),
         eq_devices: Default::default(),
@@ -70,17 +72,8 @@ pub(super) fn app() -> super::App {
         export_job: None,
         export_render_progress: None,
         export_plugin_return_rx: None,
-        dropbox_settings: Default::default(),
-        dropbox_cache: Default::default(),
-        dropbox_client: None,
-        remote_materialization_request: Default::default(),
-        remote_import_request: Default::default(),
-        remote_audition_cache_lease: None,
-        pending_remote_audition: None,
         browser_import_request: Default::default(),
-        remote_catalog_request: Default::default(),
         section_residency_request: Default::default(),
-        remote_catalog_pending: Vec::new(),
         midi_input: None,
         hardware_keys: Default::default(),
         midi_input_ports: Vec::new(),

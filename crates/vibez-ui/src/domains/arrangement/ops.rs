@@ -291,6 +291,7 @@ impl TimelineEditorState {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            color_index: None,
         });
         engine.send(EngineCommand::AddNoteClip {
             track_id,
@@ -310,6 +311,84 @@ impl TimelineEditorState {
         self.selected_clips
             .insert(ArrangementSelection::NoteClip { track_id, clip_id });
         action.status = Some("Created note clip from selection".to_string());
+        action
+    }
+
+    pub(super) fn op_create_note_clip_at(
+        &mut self,
+        project_tracks: &ProjectTracksState,
+        engine: &mut impl EngineHandle,
+        _ctx: ArrangementCtx,
+        track_id: TrackId,
+        position_beats: f64,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        if let Some(track) = project_tracks.find(track_id) {
+            if !track.kind.is_midi() {
+                action.status = Some("Can only create note clips on MIDI tracks".to_string());
+                return action;
+            }
+        }
+        let clip_id = ClipId::new();
+        let position_beats = position_beats.max(0.0);
+        let duration_beats = vibez_core::time::BEATS_PER_BAR;
+        let track = Arc::make_mut(&mut self.timeline).ensure(track_id);
+        track.note_clips.push(UiNoteClip {
+            id: clip_id,
+            name: format!("Pattern {}", track.note_clips.len() + 1),
+            position_beats,
+            duration_beats,
+            notes: Vec::new(),
+            selected_notes: HashSet::new(),
+            start_marker_beats: 0.0,
+            loop_enabled: true,
+            loop_start_beats: 0.0,
+            loop_end_beats: duration_beats,
+            groove_grid: vibez_core::perform::GrooveGrid::Off,
+            color_index: None,
+        });
+        engine.send(EngineCommand::AddNoteClip {
+            track_id,
+            insertion: vibez_engine::clip_insertion::PreparedNoteClipInsertion::new(
+                clip_id,
+                position_beats,
+                duration_beats,
+                0.0,
+                true,
+                0.0,
+                duration_beats,
+                vibez_core::perform::GrooveGrid::Off,
+            ),
+        });
+        self.selected_note_clip = Some((track_id, clip_id));
+        self.selected_clips.clear();
+        self.selected_clips
+            .insert(ArrangementSelection::NoteClip { track_id, clip_id });
+        action.status = Some("Created pattern".to_string());
+        action
+    }
+
+    pub(super) fn op_set_note_clip_color(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        color_index: Option<u8>,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        let changed = self
+            .find_content_mut(track_id)
+            .and_then(|t| t.note_clips.iter_mut().find(|c| c.id == clip_id))
+            .is_some_and(|clip| {
+                clip.color_index = color_index;
+                true
+            });
+        if changed {
+            action.mark_dirty = true;
+            action.status = Some(match color_index {
+                Some(index) => format!("Pattern color set to {}", index + 1),
+                None => "Pattern color reset to the track color".to_string(),
+            });
+        }
         action
     }
 

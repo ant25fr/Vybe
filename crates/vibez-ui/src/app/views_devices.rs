@@ -1,8 +1,11 @@
 //! Split out of app.rs; inherent methods on [`super::App`].
 
+use std::collections::HashMap;
+
 use iced::widget::{column, container, mouse_area, row, scrollable, text};
 use iced::{Color, Element, Length};
 
+use vibez_core::automation::AutomationTarget;
 use vibez_core::id::TrackId;
 
 use crate::message::Message;
@@ -36,6 +39,7 @@ enum Flexible {
     Reverb,
     AutoPan,
     Phaser,
+    MultibandDynamics,
 }
 
 /// A built-in instrument whose card takes a flexible share like the
@@ -98,12 +102,60 @@ impl Flexible {
             Self::Reverb => reverb_device::WIDTHS,
             Self::Phaser => phaser_device::WIDTHS,
             Self::AutoPan => auto_pan_device::WIDTHS,
+            Self::MultibandDynamics => multiband_dynamics_device::WIDTHS,
         }
         .chain_width(share, available)
     }
 }
 
 impl App {
+    /// The automation values at the playhead for one track's device
+    /// controls, keyed by (device slot, param index). Lanes overridden by a
+    /// manual touch or holding no value at the playhead are left out, so
+    /// their knob keeps showing the manual value.
+    fn automation_live_values(
+        &self,
+        track_id: TrackId,
+    ) -> HashMap<(crate::domains::device_params::DeviceSlot, usize), f32> {
+        use crate::domains::device_params::DeviceSlot;
+        let mut map = HashMap::new();
+        let Some(content) = self.state.active_timeline_content(track_id) else {
+            return map;
+        };
+        let beat = self.state.transport.position_beats();
+        for lane in &content.automation {
+            let (slot, index) = match lane.target {
+                AutomationTarget::EffectParam {
+                    effect_id,
+                    param_index,
+                } => (DeviceSlot::Effect(effect_id), param_index),
+                AutomationTarget::InstrumentParam { param_index } => {
+                    (DeviceSlot::Instrument, param_index)
+                }
+                AutomationTarget::PluginParam {
+                    effect_id: Some(id),
+                    param_id,
+                } => (DeviceSlot::Effect(id), param_id as usize),
+                AutomationTarget::PluginParam {
+                    effect_id: None,
+                    param_id,
+                } => (DeviceSlot::Instrument, param_id as usize),
+                _ => continue,
+            };
+            if self
+                .state
+                .automation_ui
+                .is_overridden(track_id, lane.target)
+            {
+                continue;
+            }
+            if let Some(norm) = lane.value_at(beat) {
+                map.insert((slot, index), norm);
+            }
+        }
+        map
+    }
+
     /// Build the device chain for the detail panel.
     pub(super) fn view_device_chain<'a>(
         &'a self,
@@ -111,6 +163,20 @@ impl App {
         track: &'a UiTrack,
         track_color: Color,
     ) -> Element<'a, Message> {
+        // Publish this track's automation values at the playhead for the
+        // whole build, so every control in the chain follows its lane's
+        // curve; the guard clears the stash on any return path.
+        crate::widgets::device_controls::set_automation_live(
+            track_id,
+            self.automation_live_values(track_id),
+        );
+        struct LiveGuard;
+        impl Drop for LiveGuard {
+            fn drop(&mut self) {
+                crate::widgets::device_controls::clear_automation_live();
+            }
+        }
+        let _guard = LiveGuard;
         // The chain keeps the room under its cards itself, for its scrollbar.
         let content = iced::widget::responsive(move |size| {
             self.device_chain_row(track_id, track, track_color, size.width)
@@ -223,6 +289,8 @@ impl App {
                 Some(Flexible::AutoPan)
             } else if crate::domains::phaser::is_native_phaser(effect) {
                 Some(Flexible::Phaser)
+            } else if crate::domains::multiband_dynamics::is_native_multiband_dynamics(effect) {
+                Some(Flexible::MultibandDynamics)
             } else {
                 None
             };
@@ -297,6 +365,9 @@ impl App {
                     }
                     Flexible::AutoPan => {
                         self.auto_pan_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::MultibandDynamics => {
+                        self.multiband_dynamics_device_body(track_id, effect, track_color, width)
                     }
                 };
                 cards[position] = Some(view_effect_slot(
@@ -569,6 +640,32 @@ impl App {
             view().advanced_switch(),
             move |size| view().view(size),
         )
+    }
+
+    fn multiband_dynamics_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let now = std::time::Instant::now();
+        let view = move || crate::widgets::multiband_dynamics_device::MultibandDynamicsView {
+            track_id,
+            effect,
+            accent,
+            panel: self.multiband_panels.panel(effect.id),
+            now,
+        };
+        DeviceBody {
+            content: iced::widget::responsive(move |size| view().view(size)).into(),
+            width,
+            padding: iced::Padding::ZERO,
+            preset: Some(Box::new(move |selector_w| {
+                self.view_device_preset_bar(track_id, effect, accent, selector_w)
+            })),
+            advanced: None,
+        }
     }
 
     fn echo_device_body<'a>(

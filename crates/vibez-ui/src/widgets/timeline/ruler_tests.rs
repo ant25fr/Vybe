@@ -15,6 +15,7 @@ const NUMBERS_Y: f32 = 25.0;
 /// 20 px per beat with the loop over beats 16 to 32 (x 320 to 640).
 fn ruler() -> RulerWidget {
     RulerWidget {
+        wheel_zoom: Default::default(),
         playhead_beats: 0.0,
         play_start_beats: Some(0.0),
         zoom_level: 1.0,

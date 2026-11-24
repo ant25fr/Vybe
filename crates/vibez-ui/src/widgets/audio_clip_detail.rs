@@ -59,6 +59,10 @@ pub struct AudioClipDetailWidget {
     /// The producer's zoom and scroll for this clip; `None` frames the whole
     /// source.
     pub view: Option<StoredClipView>,
+    /// Wheel-zoom bindings (rebindable, Ctrl+Wheel by default) plus the
+    /// modifiers currently held: a matching wheel turn zooms around the
+    /// cursor, as Shift+wheel already does.
+    pub wheel_zoom: crate::shortcuts::WheelZoom,
 }
 
 #[derive(Debug, Default)]
@@ -713,7 +717,9 @@ impl canvas::Program<Message> for AudioClipDetailWidget {
                     .position_in(bounds)
                     .map_or(width / 2.0, |position| position.x);
                 let view = self.clip_view();
-                let viewport = match wheel_intent(delta, state.shift_held) {
+                let (_, dy) = crate::timeline_geometry::wheel_delta_pixels(delta);
+                let zoom_bound = self.wheel_zoom.matches(dy > 0.0, cfg!(target_os = "macos"));
+                let viewport = match wheel_intent(delta, state.shift_held || zoom_bound) {
                     WheelIntent::Zoom(factor) => view.zoomed(factor, anchor_x, width),
                     WheelIntent::ScrollTime(pixels) | WheelIntent::Plain(pixels) => {
                         view.scrolled(pixels, width)

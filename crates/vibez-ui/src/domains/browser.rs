@@ -1,15 +1,14 @@
-//! Browser domain: local and remote sample browsing state, and
-//! drag-and-drop from the browser into the arrangement.
+//! Browser domain: local sample browsing state, and drag-and-drop
+//! from the browser into the arrangement.
 //!
 //! Only the synchronous state transitions live here. Anything that
-//! spawns work (file dialogs, decode, provider HTTP) stays in app.rs
-//! as an iced Task and routes results back through these messages.
+//! spawns work (file dialogs, decode) stays in app.rs as an iced Task
+//! and routes results back through these messages.
 
 use std::path::PathBuf;
 
 use crate::domains::device_panel_drop::DevicePanelDrop;
 use crate::message::{LocalRootWatchEvent, SampleLibraryScanResult};
-use crate::remote_provider::RemoteCatalogEntry;
 use crate::state::{BrowserState, LocalRootCatalogState, SampleBrowserMode};
 use vibez_core::id::TrackId;
 use vibez_core::track::MediaSourceRef;
@@ -30,8 +29,18 @@ pub enum BrowserMsg {
     ShowMoreLocalResults,
     SelectSampleBrowserEntry(MediaSourceRef),
     SetSampleBrowserMode(SampleBrowserMode),
+    /// Shows a device category (Instruments, Plugins) in the results pane,
+    /// or `None` to go back to browsing samples.
+    SetBrowserCategory(Option<crate::state::BrowserCategory>),
     BeginPendingDrag {
         source: MediaSourceRef,
+        label: String,
+        origin_x: f32,
+        origin_y: f32,
+    },
+    /// Like BeginPendingDrag, but the whole selected rows move together.
+    BeginPendingDragMany {
+        sources: Vec<MediaSourceRef>,
         label: String,
         origin_x: f32,
         origin_y: f32,
@@ -44,6 +53,23 @@ pub enum BrowserMsg {
         track_id: TrackId,
         beat: f64,
         compatible: bool,
+    },
+    /// The pointer entered a tag row of the TAGS section while a drag is
+    /// in flight: the row lights up and a release there tags the drag.
+    DragHoverTagRow {
+        tag_id: u32,
+    },
+    /// A release over a tag row: set the tag on every dragged item.
+    DropOnTagRow {
+        tag_id: u32,
+    },
+    /// A press on a device row (instrument, effect, plug-in), which becomes
+    /// a tag drag once the pointer moves.
+    BeginPendingTaggableDrag {
+        item: crate::state::BrowserTaggable,
+        label: String,
+        origin_x: f32,
+        origin_y: f32,
     },
     DragHoverEmptyArrangement {
         beat: f64,
@@ -100,12 +126,71 @@ pub enum BrowserMsg {
         result: Result<SampleLibraryScanResult, String>,
     },
     RemoveSampleLibraryRoot(PathBuf),
-    ToggleRemotePlace,
-    ToggleRemoteConnection,
-    SelectRemoteFolder(String),
-    ToggleRemoteFolder(String),
-    SelectRemoteEntry(RemoteCatalogEntry),
-    SetDropboxAppKey(String),
+    /// Show a special place (Pinned / Recent) in the results pane, or go
+    /// back to folders with `None`.
+    SelectSpecialPlace(Option<crate::state::SpecialPlace>),
+    /// Collapse or expand a sidebar section ("PINNED", "LIBRARY", "FOLDERS").
+    TogglePlacesSection(&'static str),
+    /// Pin or unpin one entry.
+    TogglePin(MediaSourceRef),
+    /// Pin or unpin every source in the given selection.
+    TogglePinSelection(Vec<MediaSourceRef>),
+    /// Select the folder holding `source`, expanding it in the sidebar.
+    ShowEntryInFolder(MediaSourceRef),
+    /// Show the items carrying any of these tags in the results pane.
+    SelectTagPlace(Vec<u32>),
+    /// Ctrl-click on a tag row: add/remove it in the current tag place.
+    ToggleTagPlace(u32),
+    /// Collapse or expand a tag folder in the sidebar.
+    ToggleTagFolder(u32),
+    /// Toggle one tag of the results header-dot filter (any-of).
+    ToggleTagFilter(u32),
+    /// Set or clear one tag on every source given (the row, or the whole
+    /// selection when the row is part of it).
+    ToggleItemTag {
+        sources: Vec<MediaSourceRef>,
+        tag_id: u32,
+    },
+    /// Make a tag (optionally inside a folder) and tag `apply_to` with it.
+    NewTag {
+        apply_to: Vec<MediaSourceRef>,
+        folder: Option<u32>,
+    },
+    /// Set or clear one tag on a device (instrument, effect, plug-in).
+    ToggleTaggableTag {
+        item: crate::state::BrowserTaggable,
+        tag_id: u32,
+    },
+    /// Make a tag (optionally inside a folder) and tag the device with it.
+    NewTagForTaggable {
+        item: crate::state::BrowserTaggable,
+        folder: Option<u32>,
+    },
+    /// Make a tag folder (inside `parent`, top level when `None`).
+    NewTagFolder {
+        parent: Option<u32>,
+    },
+    /// Start an inline rename of a tag / folder in the context menu.
+    StartRenameTag(u32),
+    StartRenameFolder(u32),
+    RenameTextChanged(String),
+    /// Apply the inline rename (or drop it when the name is refused).
+    CommitRename,
+    CancelRename,
+    RecolorTag {
+        id: u32,
+        color: u8,
+    },
+    /// Switch the results pane between the list and the sample map.
+    SetResultsView(crate::state::BrowserResultsView),
+    /// The sample map legend: show only this kind, or all when it is the
+    /// active one again.
+    ToggleSampleMapKindFilter(crate::state::SampleMapKind),
+    /// Two-step removal: the first press arms the confirm, the second runs.
+    RequestRemoveTag(u32),
+    RequestRemoveTagFolder(u32),
+    RemoveTag(u32),
+    RemoveTagFolder(u32),
 }
 
 impl BrowserMsg {
@@ -216,6 +301,7 @@ impl crate::state::BrowserDropTarget {
             Target::NewTrackSlot { row } => {
                 format!("New {kind} track, Clip slot in row {}", row + 1)
             }
+            Target::TagRow { tag_id } => format!("Tag #{tag_id}"),
         }
     }
 
@@ -334,9 +420,12 @@ impl BrowserState {
 
     fn moving_status(&self) -> String {
         let label = self.drag_label.as_deref().unwrap_or("media");
+        if self.tag_drag.is_some() {
+            return format!("Moving {label} - choose a tag row to tag it");
+        }
         let targets = match self.drag_media() {
             Some(DragMedia::Midi) => "a MIDI lane, empty Arrange, or a MIDI track's Clip slot",
-            _ => "an audio lane, empty Arrange, or a MIDI track's devices",
+            _ => "an audio lane, empty Arrange, or a MIDI track's devices, or a tag row",
         };
         format!("Moving {label} - choose {targets}")
     }
@@ -399,6 +488,7 @@ impl BrowserState {
             }
             BrowserMsg::SelectLocalFolder(folder) => {
                 self.mode = SampleBrowserMode::Local;
+                self.special_place = None;
                 self.select_local_folder(folder);
             }
             BrowserMsg::ToggleLocalFolder(folder) => {
@@ -428,6 +518,14 @@ impl BrowserState {
             }
             BrowserMsg::SetSampleBrowserMode(mode) => {
                 self.mode = mode;
+                self.category = None;
+                self.special_place = None;
+                self.reset_results_window();
+            }
+            BrowserMsg::SetBrowserCategory(category) => {
+                self.category = category;
+                self.special_place = None;
+                self.results_view = crate::state::BrowserResultsView::List;
                 self.reset_results_window();
             }
             BrowserMsg::BeginPendingDrag {
@@ -436,12 +534,22 @@ impl BrowserState {
                 origin_x,
                 origin_y,
             } => {
-                self.begin_pending_drag(source, label, origin_x, origin_y);
+                self.begin_pending_drag(vec![source], label, origin_x, origin_y);
+            }
+            BrowserMsg::BeginPendingDragMany {
+                sources,
+                label,
+                origin_x,
+                origin_y,
+            } => {
+                self.begin_pending_drag(sources, label, origin_x, origin_y);
             }
             BrowserMsg::PendingDragMoved { x, y } => {
                 if self.move_pending_drag(x, y) {
                     action.status = Some(self.moving_status());
                     action.read_drag_ghost = self.drag_source.clone();
+                } else if self.move_pending_taggable_drag(x, y) {
+                    action.status = Some(self.moving_status());
                 }
             }
             BrowserMsg::DragHoverTrack {
@@ -589,11 +697,54 @@ impl BrowserState {
             BrowserMsg::DragGhostRead(Ok(read)) => self.install_ghost_cache(*read),
             BrowserMsg::DragGhostRead(Err(_)) => {}
             BrowserMsg::EndDragSample => {
-                if self.drag_source.is_some() {
+                if self.drag_source.is_some() || self.tag_drag.is_some() {
                     self.cancel_media_drag();
                     action.status = Some("Drag cancelled".to_string());
                 } else {
                     self.cancel_pending_drag();
+                }
+            }
+            BrowserMsg::BeginPendingTaggableDrag {
+                item,
+                label,
+                origin_x,
+                origin_y,
+            } => {
+                self.begin_pending_taggable_drag(item, label, origin_x, origin_y);
+            }
+            BrowserMsg::DragHoverTagRow { tag_id } => {
+                if self.drag_in_flight() {
+                    self.drag_target = Some(crate::state::BrowserDropTarget::TagRow { tag_id });
+                }
+            }
+            BrowserMsg::DropOnTagRow { tag_id } => {
+                let mut items: Vec<crate::state::BrowserTaggable> = Vec::new();
+                if let Some(source) = self.drag_source.clone() {
+                    items.push(crate::state::BrowserTaggable::Sample(source));
+                }
+                for extra in self.drag_extra.clone() {
+                    items.push(crate::state::BrowserTaggable::Sample(extra));
+                }
+                if let Some(item) = self.tag_drag.clone() {
+                    items.push(item);
+                }
+                let name = self
+                    .tag(tag_id)
+                    .map(|tag| tag.name.clone())
+                    .unwrap_or_else(|| format!("#{tag_id}"));
+                self.cancel_media_drag();
+                if items.is_empty() {
+                    action.status = Some("Nothing is being dragged".to_string());
+                } else {
+                    for item in &items {
+                        self.set_taggable_tag(item, tag_id);
+                    }
+                    action.status = Some(format!(
+                        "Tagged {} item{} with {name}",
+                        items.len(),
+                        if items.len() == 1 { "" } else { "s" }
+                    ));
+                    action.persist_settings = true;
                 }
             }
             BrowserMsg::LocalRootWatchEvent(event) => match event {
@@ -748,40 +899,275 @@ impl BrowserState {
                 action.persist_settings = true;
                 action.status = Some("Removed sample root".to_string());
             }
-            BrowserMsg::ToggleRemotePlace => {
-                self.remote.place_expanded = !self.remote.place_expanded;
-            }
-            BrowserMsg::ToggleRemoteConnection => {
-                self.remote.connection_expanded = !self.remote.connection_expanded;
-            }
-            BrowserMsg::SelectRemoteFolder(path) => {
-                self.mode = SampleBrowserMode::Remote;
-                self.remote.current_path = path;
-                if !self.remote.current_path.is_empty() {
-                    self.remote
-                        .expanded
-                        .insert(self.remote.current_path.clone());
-                }
-                self.remote.selected_path = None;
-                self.search_scope = crate::state::BrowserSearchScope::SelectedFolder;
-                self.clear_selection();
+            BrowserMsg::SelectSpecialPlace(place) => {
+                self.select_special_place(place);
                 self.reset_results_window();
             }
-            BrowserMsg::ToggleRemoteFolder(path) => {
-                if !self.remote.expanded.remove(&path) {
-                    self.remote.expanded.insert(path);
-                }
+            BrowserMsg::TogglePlacesSection(section) => {
+                self.toggle_section(section);
             }
-            BrowserMsg::SelectRemoteEntry(entry) => {
-                self.remote.selected_path = Some(entry.provider_item_id.clone());
-                self.select_source(MediaSourceRef::DropboxFile {
-                    path_lower: entry.provider_item_id,
-                    display_path: entry.path,
-                    rev: entry.revision,
+            BrowserMsg::TogglePin(source) => {
+                let pinned = self.toggle_pin(source);
+                action.status = Some(if pinned {
+                    "Pinned".into()
+                } else {
+                    "Unpinned".into()
+                });
+                action.persist_settings = true;
+            }
+            BrowserMsg::TogglePinSelection(sources) => {
+                let count = sources.len();
+                let any_unpinned = sources.iter().any(|source| !self.is_pinned(source));
+                for source in sources {
+                    if any_unpinned {
+                        if !self.is_pinned(&source) {
+                            self.pins.push(source);
+                        }
+                    } else if let Some(index) = self.pins.iter().position(|p| p == &source) {
+                        self.pins.remove(index);
+                    }
+                }
+                action.status = Some(format!(
+                    "{} {} item{}",
+                    if any_unpinned { "Pinned" } else { "Unpinned" },
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ));
+                action.persist_settings = true;
+            }
+            BrowserMsg::SetResultsView(view) => {
+                self.results_view = view;
+                self.reset_results_window();
+            }
+            BrowserMsg::ToggleSampleMapKindFilter(kind) => {
+                self.sample_map_kind_filter = if self.sample_map_kind_filter == Some(kind) {
+                    None
+                } else {
+                    Some(kind)
+                };
+            }
+            BrowserMsg::SelectTagPlace(ids) => {
+                self.select_tag_place(ids);
+                self.reset_results_window();
+            }
+            BrowserMsg::ToggleTagPlace(id) => {
+                self.toggle_tag_in_place(id);
+                self.reset_results_window();
+            }
+            BrowserMsg::ToggleTagFolder(id) => {
+                self.toggle_tag_folder_expanded(id);
+            }
+            BrowserMsg::ToggleTagFilter(id) => {
+                let active = self.toggle_tag_filter(id);
+                let name = self
+                    .tag(id)
+                    .map(|tag| tag.name.clone())
+                    .unwrap_or_else(|| format!("#{id}"));
+                action.status = Some(if active {
+                    format!("Filtering by {name}")
+                } else {
+                    format!("No longer filtering by {name}")
                 });
             }
-            BrowserMsg::SetDropboxAppKey(key) => {
-                self.remote.app_key_input = key;
+            BrowserMsg::ToggleItemTag { sources, tag_id } => {
+                if let Some(tag) = self.tag(tag_id) {
+                    let name = tag.name.clone();
+                    let add = sources.iter().any(|s| !self.tags_of(s).contains(&tag_id));
+                    for source in &sources {
+                        let now = self.toggle_item_tag(source, tag_id);
+                        debug_assert_eq!(now, add);
+                    }
+                    action.status = Some(if add {
+                        format!(
+                            "Tagged {} item{} with {name}",
+                            sources.len(),
+                            if sources.len() == 1 { "" } else { "s" }
+                        )
+                    } else {
+                        format!(
+                            "Removed {name} from {} item{}",
+                            sources.len(),
+                            if sources.len() == 1 { "" } else { "s" }
+                        )
+                    });
+                    action.persist_settings = true;
+                }
+            }
+            BrowserMsg::NewTag { apply_to, folder } => {
+                let name = self.default_tag_name();
+                let color = self.next_tag_color();
+                let made = match folder {
+                    None => self.make_tag(&name, color),
+                    Some(folder_id) => self.make_tag_in(Some(folder_id), &name, color),
+                };
+                match made {
+                    Ok(id) => {
+                        for source in &apply_to {
+                            self.toggle_item_tag(source, id);
+                        }
+                        if apply_to.is_empty() {
+                            // Made from the sidebar: rename it inline.
+                            self.renaming_tag = Some(id);
+                            self.rename_text = name.clone();
+                        }
+                        action.status = Some(format!(
+                            "Made tag {name}, tagged {} item{}",
+                            apply_to.len(),
+                            if apply_to.len() == 1 { "" } else { "s" }
+                        ));
+                        action.persist_settings = true;
+                    }
+                    Err(err) => action.status = Some(err),
+                }
+            }
+            BrowserMsg::ToggleTaggableTag { item, tag_id } => {
+                let name = self
+                    .tag(tag_id)
+                    .map(|tag| tag.name.clone())
+                    .unwrap_or_else(|| format!("#{tag_id}"));
+                let label = item.label();
+                if self.toggle_taggable_tag(&item, tag_id) {
+                    action.status = Some(format!("Tagged {label} with {name}"));
+                } else {
+                    action.status = Some(format!("Removed {name} from {label}"));
+                }
+                action.persist_settings = true;
+            }
+            BrowserMsg::NewTagForTaggable { item, folder } => {
+                let name = self.default_tag_name();
+                let color = self.next_tag_color();
+                let made = match folder {
+                    None => self.make_tag(&name, color),
+                    Some(folder_id) => self.make_tag_in(Some(folder_id), &name, color),
+                };
+                match made {
+                    Ok(id) => {
+                        self.set_taggable_tag(&item, id);
+                        // Made from a device row's menu: rename it inline.
+                        self.renaming_tag = Some(id);
+                        self.rename_text = name.clone();
+                        action.status = Some(format!("Made tag {name}, tagged {}", item.label()));
+                        action.persist_settings = true;
+                    }
+                    Err(err) => action.status = Some(err),
+                }
+            }
+            BrowserMsg::NewTagFolder { parent } => {
+                let name = self.default_folder_name();
+                match self.make_folder(parent, &name) {
+                    Ok(id) => {
+                        self.expanded_tag_folders.insert(id);
+                        self.renaming_folder = Some(id);
+                        self.rename_text = name;
+                        action.persist_settings = true;
+                    }
+                    Err(err) => action.status = Some(err),
+                }
+            }
+            BrowserMsg::StartRenameTag(id) => {
+                let name = self.tag(id).map(|tag| tag.name.clone());
+                if let Some(name) = name {
+                    self.renaming_tag = Some(id);
+                    self.renaming_folder = None;
+                    self.rename_text = name;
+                }
+            }
+            BrowserMsg::StartRenameFolder(id) => {
+                fn find_name(nodes: &[crate::state::TagFolderNode], id: u32) -> Option<String> {
+                    for node in nodes {
+                        if node.id == id {
+                            return Some(node.name.clone());
+                        }
+                        if let Some(found) = find_name(&node.folders, id) {
+                            return Some(found);
+                        }
+                    }
+                    None
+                }
+                if let Some(name) = find_name(&self.tag_tree, id) {
+                    self.renaming_folder = Some(id);
+                    self.renaming_tag = None;
+                    self.rename_text = name;
+                }
+            }
+            BrowserMsg::RenameTextChanged(text) => {
+                self.rename_text = text;
+            }
+            BrowserMsg::CommitRename => {
+                let renaming_tag = self.renaming_tag.take();
+                let renaming_folder = self.renaming_folder.take();
+                let text = std::mem::take(&mut self.rename_text);
+                let result = if let Some(id) = renaming_tag {
+                    self.rename_tag(id, &text)
+                } else if let Some(id) = renaming_folder {
+                    self.rename_folder(id, &text)
+                } else {
+                    Ok(())
+                };
+                if let Err(err) = result {
+                    action.status = Some(err);
+                } else if renaming_tag.is_some() || renaming_folder.is_some() {
+                    action.persist_settings = true;
+                }
+            }
+            BrowserMsg::CancelRename => {
+                self.renaming_tag = None;
+                self.renaming_folder = None;
+                self.rename_text.clear();
+            }
+            BrowserMsg::RecolorTag { id, color } => {
+                if self.recolor_tag(id, color) {
+                    action.persist_settings = true;
+                }
+            }
+            BrowserMsg::RequestRemoveTag(id) => {
+                self.confirm_remove_tag = if self.confirm_remove_tag == Some(id) {
+                    None
+                } else {
+                    Some(id)
+                };
+                self.confirm_remove_folder = None;
+            }
+            BrowserMsg::RequestRemoveTagFolder(id) => {
+                self.confirm_remove_folder = if self.confirm_remove_folder == Some(id) {
+                    None
+                } else {
+                    Some(id)
+                };
+                self.confirm_remove_tag = None;
+            }
+            BrowserMsg::RemoveTag(id) => {
+                self.confirm_remove_tag = None;
+                let name = self
+                    .tag(id)
+                    .map(|tag| tag.name.clone())
+                    .unwrap_or_else(|| format!("#{id}"));
+                let carriers = self.remove_tag(id);
+                action.status = Some(format!(
+                    "Removed tag {name} ({carriers} item{})",
+                    if carriers == 1 { "" } else { "s" }
+                ));
+                action.persist_settings = true;
+            }
+            BrowserMsg::RemoveTagFolder(id) => {
+                self.confirm_remove_folder = None;
+                let moved = self.remove_folder(id);
+                action.status = Some(format!(
+                    "Removed tag folder, {moved} row{} lifted",
+                    if moved == 1 { "" } else { "s" }
+                ));
+                action.persist_settings = true;
+            }
+            BrowserMsg::ShowEntryInFolder(source) => {
+                if let MediaSourceRef::LocalFile { path } = &source {
+                    if let Some(parent) = path.parent() {
+                        if self.roots.iter().any(|root| parent.starts_with(root)) {
+                            self.mode = SampleBrowserMode::Local;
+                            self.special_place = None;
+                            self.select_local_folder(Some(parent.to_path_buf()));
+                        }
+                    }
+                }
             }
         }
         action

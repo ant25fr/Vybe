@@ -5,8 +5,6 @@
 use crate::domains::arrangement::ArrangementMsg;
 use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::{CaptureMsg, PerformMode, PerformMsg};
-use crate::domains::piano_roll::PianoRollMsg;
-use crate::domains::project::ProjectMsg;
 use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 
@@ -156,6 +154,58 @@ impl super::App {
 
         if let iced::keyboard::Event::ModifiersChanged(modifiers) = event {
             self.state.view.held_modifiers = modifiers;
+        }
+        // While a shortcut is being rebound in Settings → Shortcuts, the next
+        // key press becomes the action's new binding; Escape cancels.
+        if let Some(action) = self.state.view.shortcut_capture {
+            if let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event {
+                if matches!(key, iced::keyboard::Key::Named(Named::Escape)) {
+                    self.state.view.shortcut_capture = None;
+                } else if let Some(combo) =
+                    crate::shortcuts::KeyCombo::from_event(&key, modifiers, ON_MACOS)
+                {
+                    self.shortcuts.set_binding(action, vec![combo]);
+                    self.state.view.shortcut_capture = None;
+                    self.persist_ui_settings();
+                    let binding = self
+                        .shortcuts
+                        .combos_for(action)
+                        .iter()
+                        .map(|combo| combo.label(ON_MACOS))
+                        .collect::<Vec<_>>()
+                        .join(" / ");
+                    self.state.status_text = format!("{} → {binding}", action.label());
+                }
+            }
+            return iced::Task::none();
+        }
+        // While the quick-add palette is open, Escape/Enter/arrows drive it
+        // and every other key goes only to its text field (the other
+        // shortcuts are swallowed); Ctrl+P still toggles it closed.
+        if self.state.view.quick_add.is_some() {
+            if let iced::keyboard::Event::KeyPressed { key, modifiers, .. } = event {
+                if let Some(action) = self.shortcuts.action_for(&key, modifiers, ON_MACOS) {
+                    if action == crate::shortcuts::ShortcutAction::QuickAdd {
+                        return self.update(Message::OpenQuickAdd);
+                    }
+                }
+                return match key {
+                    iced::keyboard::Key::Named(Named::Escape) => {
+                        self.update(Message::CloseQuickAdd)
+                    }
+                    iced::keyboard::Key::Named(Named::Enter) => {
+                        self.update(Message::QuickAddSubmit)
+                    }
+                    iced::keyboard::Key::Named(Named::ArrowUp) => {
+                        self.update(Message::QuickAddMove(-1))
+                    }
+                    iced::keyboard::Key::Named(Named::ArrowDown) => {
+                        self.update(Message::QuickAddMove(1))
+                    }
+                    _ => iced::Task::none(),
+                };
+            }
+            return iced::Task::none();
         }
         if self.state.project.new_project_layout.is_some() {
             if let iced::keyboard::Event::KeyPressed { key, .. } = event {
@@ -333,7 +383,7 @@ impl super::App {
                 } else {
                     None
                 }
-                .or_else(|| global_key_handler(key, modifiers))?;
+                .or_else(|| global_key_handler(key, modifiers, &self.shortcuts))?;
                 self.edge_shortcuts
                     .should_dispatch(&key_id, &message, occurred_at)
                     .then_some(message)
@@ -400,16 +450,21 @@ pub(crate) const ON_MACOS: bool = cfg!(target_os = "macos");
 pub(crate) fn global_key_handler(
     key: iced::keyboard::Key,
     modifiers: iced::keyboard::Modifiers,
+    shortcuts: &crate::shortcuts::Shortcuts,
 ) -> Option<Message> {
     use iced::keyboard::key::Named;
 
-    if matches!(key, iced::keyboard::Key::Named(Named::Space)) {
-        let toggle = if modifiers.shift() {
-            TransportMsg::ContinuePlayback
-        } else {
-            TransportMsg::TogglePlayback
-        };
-        return Some(Message::Transport(toggle));
+    // Customizable shortcuts first: the map holds the defaults too, so any
+    // key an action binds — default or rebound in Settings → Shortcuts —
+    // routes through it and the hardcoded blocks below never see it.
+    if let Some(action) = shortcuts.action_for(&key, modifiers, ON_MACOS) {
+        return Some(action.message());
+    }
+
+    // Shift+Space continues playback from the stop position; plain Space
+    // is the rebindable TogglePlayback action above.
+    if matches!(key, iced::keyboard::Key::Named(Named::Space)) && modifiers.shift() {
+        return Some(Message::Transport(TransportMsg::ContinuePlayback));
     }
 
     if modifiers.is_empty() {
@@ -433,15 +488,6 @@ pub(crate) fn global_key_handler(
             };
             if let Some(bank) = bank {
                 return Some(Message::Perform(bank));
-            }
-            // Reached only when no Perform pad claimed the key.
-            let zoom = match character.as_str() {
-                "z" => Some(ViewMsg::ZoomToSelection),
-                "x" => Some(ViewMsg::ZoomBack),
-                _ => None,
-            };
-            if let Some(zoom) = zoom {
-                return Some(Message::View(zoom));
             }
         }
     }
@@ -480,28 +526,6 @@ pub(crate) fn global_key_handler(
         return Some(Message::ImportSelectedBrowserSampleToArrangement);
     }
 
-    // Delete/Backspace: context-resolved in update() (selected notes
-    // first, then selected clips) and ignored while renaming. Guarded on the
-    // command modifier, not literal Ctrl, so "no command held" means the same
-    // thing here as it does for the shortcuts below.
-    if !command_held(modifiers, ON_MACOS)
-        && matches!(
-            key,
-            iced::keyboard::Key::Named(Named::Delete)
-                | iced::keyboard::Key::Named(Named::Backspace)
-        )
-    {
-        return Some(Message::DeleteKeyPressed);
-    }
-
-    // B: toggle piano roll draw mode (no modifiers)
-    if !command_held(modifiers, ON_MACOS)
-        && !modifiers.shift()
-        && matches!(key, iced::keyboard::Key::Character(ref c) if c.as_str() == "b")
-    {
-        return Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode));
-    }
-
     // Alt+Left / Alt+Right: resize the Browser without permanent header chrome.
     if modifiers.alt() && !modifiers.control() && !modifiers.shift() && !modifiers.logo() {
         match key {
@@ -531,60 +555,32 @@ pub(crate) fn global_key_handler(
         }
     }
 
-    // Editing shares the grid's command modifier. Binding these to Ctrl
-    // directly gave macOS Cmd for the grid and Ctrl for copy and undo.
-    if !command_held(modifiers, ON_MACOS) {
-        return None;
-    }
-    match key {
-        iced::keyboard::Key::Named(Named::ArrowUp) => {
-            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
+    // Grid commands share the command modifier with the rebindable
+    // editing shortcuts above (they are not rebindable).
+    if command_held(modifiers, ON_MACOS) {
+        if let iced::keyboard::Key::Character(ref c) = key {
+            let grid_command = match c.as_str() {
+                "1" => Some(GridCommand::Narrow),
+                "2" => Some(GridCommand::Widen),
+                "3" => Some(GridCommand::ToggleTriplet),
+                "4" => Some(GridCommand::ToggleSnap),
+                "5" => Some(GridCommand::ToggleAdaptive),
+                _ => None,
+            };
+            if let Some(command) = grid_command {
+                return Some(Message::GridShortcutPressed(command));
+            }
         }
-        iced::keyboard::Key::Named(Named::ArrowDown) => {
-            Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown))
-        }
-        iced::keyboard::Key::Character(ref c) => match c.as_str() {
-            "a" | "A" => Some(Message::SelectAllPressed),
-            "c" | "C" => Some(Message::Arrangement(ArrangementMsg::CopySelectedClips)),
-            "s" | "S" => Some(Message::SaveProject),
-            "x" | "X" => Some(Message::Arrangement(ArrangementMsg::CutSelectedClips)),
-            "v" | "V" => Some(Message::Arrangement(ArrangementMsg::PasteClips)),
-            "t" | "T" => {
-                if modifiers.shift() {
-                    Some(Message::Arrangement(ArrangementMsg::AddInstrumentTrack))
-                } else {
-                    Some(Message::Arrangement(ArrangementMsg::AddTrack))
-                }
-            }
-            "m" | "M" => Some(Message::create_clip_from_selection()),
-            "d" => Some(Message::Arrangement(ArrangementMsg::DuplicateSelectedClip)),
-            "e" => Some(Message::split_selected_at_playhead()),
-            "j" => Some(Message::join_selected_clips()),
-            "l" | "L" => {
-                if modifiers.shift() {
-                    Some(Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop))
-                } else {
-                    Some(Message::Transport(TransportMsg::ToggleArrangementLoop))
-                }
-            }
-            "0" => Some(Message::View(ViewMsg::ZoomToFit)),
-            "z" | "Z" => {
-                if modifiers.shift() {
-                    Some(Message::Project(ProjectMsg::Redo))
-                } else {
-                    Some(Message::Project(ProjectMsg::Undo))
-                }
-            }
-            "y" | "Y" => Some(Message::Project(ProjectMsg::Redo)),
-            _ => None,
-        },
-        _ => None,
     }
+
+    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::piano_roll::PianoRollMsg;
+    use crate::domains::project::ProjectMsg;
 
     /// The modifier a producer actually holds for a command shortcut: Cmd on
     /// macOS, Ctrl everywhere else. Every command shortcut is expected to
@@ -609,15 +605,15 @@ mod tests {
         // surface-agnostic so the piano roll and the timeline canvases
         // cannot race each other for it.
         assert!(matches!(
-            global_key_handler(Key::Character("a".into()), command_modifier()),
+            gkh(Key::Character("a".into()), command_modifier()),
             Some(Message::SelectAllPressed)
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("A".into()), command_modifier()),
+            gkh(Key::Character("A".into()), command_modifier()),
             Some(Message::SelectAllPressed)
         ));
         // Bare "a" is a Perform pad key, not select-all.
-        assert!(global_key_handler(Key::Character("a".into()), Modifiers::empty()).is_none());
+        assert!(gkh(Key::Character("a".into()), Modifiers::empty()).is_none());
     }
 
     #[test]
@@ -639,7 +635,7 @@ mod tests {
         use iced::keyboard::Key;
 
         assert!(matches!(
-            global_key_handler(Key::Character("c".into()), command_modifier()),
+            gkh(Key::Character("c".into()), command_modifier()),
             Some(Message::Arrangement(ArrangementMsg::CopySelectedClips))
         ));
     }
@@ -650,11 +646,11 @@ mod tests {
 
         for key in ["s", "S"] {
             assert!(matches!(
-                global_key_handler(Key::Character(key.into()), command_modifier()),
+                gkh(Key::Character(key.into()), command_modifier()),
                 Some(Message::SaveProject)
             ));
         }
-        assert!(global_key_handler(Key::Character("s".into()), Modifiers::empty()).is_none());
+        assert!(gkh(Key::Character("s".into()), Modifiers::empty()).is_none());
     }
 
     #[test]
@@ -666,19 +662,19 @@ mod tests {
         let command = command_modifier();
 
         assert!(matches!(
-            global_key_handler(Key::Character("1".into()), command),
+            gkh(Key::Character("1".into()), command),
             Some(Message::GridShortcutPressed(GridCommand::Narrow))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("v".into()), command),
+            gkh(Key::Character("v".into()), command),
             Some(Message::Arrangement(ArrangementMsg::PasteClips))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("z".into()), command),
+            gkh(Key::Character("z".into()), command),
             Some(Message::Project(ProjectMsg::Undo))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("0".into()), command),
+            gkh(Key::Character("0".into()), command),
             Some(Message::View(ViewMsg::ZoomToFit))
         ));
     }
@@ -691,16 +687,16 @@ mod tests {
         // modifier must suppress them. Guarding on literal Ctrl meant that on
         // macOS Cmd+B toggled draw mode while Ctrl+B was the blocked one.
         assert!(matches!(
-            global_key_handler(Key::Character("b".into()), Modifiers::empty()),
+            gkh(Key::Character("b".into()), Modifiers::empty()),
             Some(Message::PianoRoll(PianoRollMsg::ToggleEditMode))
         ));
-        assert!(global_key_handler(Key::Character("b".into()), command_modifier()).is_none());
+        assert!(gkh(Key::Character("b".into()), command_modifier()).is_none());
 
         assert!(matches!(
-            global_key_handler(Key::Named(Named::Delete), Modifiers::empty()),
+            gkh(Key::Named(Named::Delete), Modifiers::empty()),
             Some(Message::DeleteKeyPressed)
         ));
-        assert!(global_key_handler(Key::Named(Named::Delete), command_modifier()).is_none());
+        assert!(gkh(Key::Named(Named::Delete), command_modifier()).is_none());
     }
 
     #[test]
@@ -712,13 +708,13 @@ mod tests {
         // and Windows.
         #[cfg(not(target_os = "macos"))]
         {
-            assert!(global_key_handler(Key::Character("c".into()), Modifiers::LOGO).is_none());
-            assert!(global_key_handler(Key::Character("z".into()), Modifiers::LOGO).is_none());
+            assert!(gkh(Key::Character("c".into()), Modifiers::LOGO).is_none());
+            assert!(gkh(Key::Character("z".into()), Modifiers::LOGO).is_none());
         }
         #[cfg(target_os = "macos")]
         {
-            assert!(global_key_handler(Key::Character("c".into()), Modifiers::CTRL).is_none());
-            assert!(global_key_handler(Key::Character("z".into()), Modifiers::CTRL).is_none());
+            assert!(gkh(Key::Character("c".into()), Modifiers::CTRL).is_none());
+            assert!(gkh(Key::Character("z".into()), Modifiers::CTRL).is_none());
         }
     }
 
@@ -736,7 +732,7 @@ mod tests {
             GridCommand::ToggleAdaptive,
         ];
         for (number, expected) in ["1", "2", "3", "4", "5"].into_iter().zip(expected) {
-            let message = global_key_handler(Key::Character(number.into()), command);
+            let message = gkh(Key::Character(number.into()), command);
             assert!(
                 matches!(message, Some(Message::GridShortcutPressed(sent)) if sent == expected),
                 "Command+{number} should send {expected:?}"
@@ -748,8 +744,8 @@ mod tests {
     fn alt_arrows_resize_the_browser_without_header_buttons() {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
-        let narrower = global_key_handler(Key::Named(Named::ArrowLeft), Modifiers::ALT);
-        let wider = global_key_handler(Key::Named(Named::ArrowRight), Modifiers::ALT);
+        let narrower = gkh(Key::Named(Named::ArrowLeft), Modifiers::ALT);
+        let wider = gkh(Key::Named(Named::ArrowRight), Modifiers::ALT);
 
         assert!(matches!(
             narrower,
@@ -766,7 +762,7 @@ mod tests {
         use iced::keyboard::{Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(
+            gkh(
                 Key::Character("M".into()),
                 command_modifier() | Modifiers::SHIFT
             ),
@@ -812,10 +808,10 @@ mod tests {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(Key::Named(Named::Enter), Modifiers::empty()),
+            gkh(Key::Named(Named::Enter), Modifiers::empty()),
             Some(Message::ImportSelectedBrowserSampleToArrangement)
         ));
-        assert!(global_key_handler(Key::Named(Named::Enter), Modifiers::SHIFT).is_none());
+        assert!(gkh(Key::Named(Named::Enter), Modifiers::SHIFT).is_none());
     }
 
     #[test]
@@ -823,15 +819,15 @@ mod tests {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(Key::Named(Named::ArrowUp), Modifiers::empty()),
+            gkh(Key::Named(Named::ArrowUp), Modifiers::empty()),
             Some(Message::SelectAdjacentBrowserResult(-1))
         ));
         assert!(matches!(
-            global_key_handler(Key::Named(Named::ArrowDown), Modifiers::empty()),
+            gkh(Key::Named(Named::ArrowDown), Modifiers::empty()),
             Some(Message::SelectAdjacentBrowserResult(1))
         ));
         assert!(matches!(
-            global_key_handler(Key::Named(Named::ArrowUp), command_modifier()),
+            gkh(Key::Named(Named::ArrowUp), command_modifier()),
             Some(Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp))
         ));
     }
@@ -841,7 +837,7 @@ mod tests {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(Key::Named(Named::ArrowRight), Modifiers::empty()),
+            gkh(Key::Named(Named::ArrowRight), Modifiers::empty()),
             Some(Message::ReplaySelectedBrowserSample)
         ));
     }
@@ -851,19 +847,19 @@ mod tests {
         use iced::keyboard::{key::Named, Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(Key::Named(Named::Space), Modifiers::empty()),
+            gkh(Key::Named(Named::Space), Modifiers::empty()),
             Some(Message::Transport(TransportMsg::TogglePlayback))
         ));
         assert!(matches!(
-            global_key_handler(Key::Named(Named::Space), Modifiers::SHIFT),
+            gkh(Key::Named(Named::Space), Modifiers::SHIFT),
             Some(Message::Transport(TransportMsg::ContinuePlayback))
         ));
         assert!(matches!(
-            global_key_handler(Key::Named(Named::Home), Modifiers::empty()),
+            gkh(Key::Named(Named::Home), Modifiers::empty()),
             Some(Message::Transport(TransportMsg::SeekToBeat(beat))) if beat == 0.0
         ));
         assert!(matches!(
-            global_key_handler(Key::Named(Named::Escape), Modifiers::empty()),
+            gkh(Key::Named(Named::Escape), Modifiers::empty()),
             Some(Message::EscapePressed)
         ));
     }
@@ -879,12 +875,12 @@ mod tests {
         ];
         for (key, expected_mode) in expected {
             assert!(matches!(
-                global_key_handler(Key::Named(key), Modifiers::empty()),
+                gkh(Key::Named(key), Modifiers::empty()),
                 Some(Message::Perform(PerformMsg::SelectMode(mode))) if mode == expected_mode
             ));
         }
 
-        assert!(global_key_handler(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
+        assert!(gkh(Key::Named(Named::F1), Modifiers::SHIFT).is_none());
     }
 
     #[test]
@@ -896,13 +892,13 @@ mod tests {
             Some(Message::Perform(PerformMsg::ToggleRecord))
         ));
         assert!(perform_workspace_key_handler(&Key::Named(Named::F4), Modifiers::SHIFT).is_none());
-        assert!(global_key_handler(Key::Named(Named::F4), Modifiers::empty()).is_none());
+        assert!(gkh(Key::Named(Named::F4), Modifiers::empty()).is_none());
         assert!(matches!(
             perform_workspace_key_handler(&Key::Named(Named::F5), Modifiers::empty()),
             Some(Message::Perform(PerformMsg::Capture(CaptureMsg::Toggle)))
         ));
         assert!(perform_workspace_key_handler(&Key::Named(Named::F5), Modifiers::ALT).is_none());
-        assert!(global_key_handler(Key::Named(Named::F5), Modifiers::empty()).is_none());
+        assert!(gkh(Key::Named(Named::F5), Modifiers::empty()).is_none());
     }
 
     #[test]
@@ -910,14 +906,14 @@ mod tests {
         use iced::keyboard::{Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(Key::Character("[".into()), Modifiers::empty()),
+            gkh(Key::Character("[".into()), Modifiers::empty()),
             Some(Message::Perform(PerformMsg::PreviousBank))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("]".into()), Modifiers::empty()),
+            gkh(Key::Character("]".into()), Modifiers::empty()),
             Some(Message::Perform(PerformMsg::NextBank))
         ));
-        assert!(global_key_handler(Key::Character("]".into()), Modifiers::SHIFT).is_none());
+        assert!(gkh(Key::Character("]".into()), Modifiers::SHIFT).is_none());
     }
 
     #[test]
@@ -1011,22 +1007,22 @@ mod tests {
         use iced::keyboard::{Key, Modifiers};
 
         assert!(matches!(
-            global_key_handler(Key::Character("z".into()), Modifiers::empty()),
+            gkh(Key::Character("z".into()), Modifiers::empty()),
             Some(Message::View(ViewMsg::ZoomToSelection))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("x".into()), Modifiers::empty()),
+            gkh(Key::Character("x".into()), Modifiers::empty()),
             Some(Message::View(ViewMsg::ZoomBack))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("z".into()), command_modifier()),
+            gkh(Key::Character("z".into()), command_modifier()),
             Some(Message::Project(ProjectMsg::Undo))
         ));
         assert!(matches!(
-            global_key_handler(Key::Character("x".into()), command_modifier()),
+            gkh(Key::Character("x".into()), command_modifier()),
             Some(Message::Arrangement(ArrangementMsg::CutSelectedClips))
         ));
-        assert!(global_key_handler(Key::Character("Z".into()), Modifiers::SHIFT).is_none());
+        assert!(gkh(Key::Character("Z".into()), Modifiers::SHIFT).is_none());
     }
 
     #[test]
@@ -1123,10 +1119,8 @@ mod clip_browser_focus_tests {
         for (key, direction) in [(Named::ArrowUp, -1), (Named::ArrowDown, 1)] {
             let key = Key::Named(key);
             assert_eq!(clip_window_movement(&key, Modifiers::empty(), true), None);
-            assert!(
-                matches!(global_key_handler(key.clone(), Modifiers::empty()),
-                Some(Message::SelectAdjacentBrowserResult(value)) if value == direction)
-            );
+            assert!(matches!(gkh(key.clone(), Modifiers::empty()),
+                Some(Message::SelectAdjacentBrowserResult(value)) if value == direction));
             assert_eq!(
                 clip_window_movement(&key, Modifiers::empty(), false),
                 Some((0, i32::from(direction)))
@@ -1139,7 +1133,7 @@ mod clip_browser_focus_tests {
         let right = Key::Named(Named::ArrowRight);
         assert_eq!(clip_window_movement(&right, Modifiers::empty(), true), None);
         assert!(matches!(
-            global_key_handler(right, Modifiers::empty()),
+            gkh(right, Modifiers::empty()),
             Some(Message::ReplaySelectedBrowserSample)
         ));
     }
@@ -1219,4 +1213,10 @@ mod clip_editor_note_key_tests {
             "with none selected, the arrows still move the launcher"
         );
     }
+}
+
+/// Test shim: route through the default shortcut map.
+#[cfg(test)]
+fn gkh(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    global_key_handler(key, modifiers, &crate::shortcuts::Shortcuts::default())
 }

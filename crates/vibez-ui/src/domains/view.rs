@@ -247,7 +247,7 @@ impl ViewState {
                     if self.workspace == Workspace::Mix {
                         self.mix_detail_panel_height = Some(height);
                     } else {
-                        self.detail_panel_height = height;
+                        self.detail_panel_height = Some(height);
                     }
                 }
             }
@@ -512,6 +512,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: Default::default(),
+            color_index: None,
         }
     }
 
@@ -1041,6 +1042,31 @@ mod tests {
     }
 
     #[test]
+    fn detail_panel_resize_works_in_device_mode_too() {
+        let mut view = ViewState {
+            detail_panel_tab: DetailPanelTab::Devices,
+            ..ViewState::default()
+        };
+        let timeline = TimelineEditorState::default();
+
+        view.update(
+            ViewMsg::BeginDetailPanelResize,
+            &timeline,
+            ViewCtx::default(),
+        );
+        assert!(
+            view.detail_panel_resize_active,
+            "the rack resizes on the device tab as well"
+        );
+        view.update(
+            ViewMsg::ResizeDetailPanel(420.0),
+            &timeline,
+            ViewCtx::default(),
+        );
+        assert_eq!(view.detail_panel_height, Some(420.0));
+    }
+
+    #[test]
     fn detail_panel_resize_commits_one_global_view_preference() {
         let mut view = ViewState::default();
         let timeline = TimelineEditorState::default();
@@ -1050,10 +1076,7 @@ mod tests {
             &timeline,
             ViewCtx::default(),
         );
-        assert_eq!(
-            view.detail_panel_height,
-            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
-        );
+        assert_eq!(view.detail_panel_height, None);
 
         view.update(
             ViewMsg::BeginDetailPanelResize,
@@ -1067,7 +1090,7 @@ mod tests {
         );
         let action = view.update(ViewMsg::EndDetailPanelResize, &timeline, ViewCtx::default());
 
-        assert_eq!(view.detail_panel_height, 420.0);
+        assert_eq!(view.detail_panel_height, Some(420.0));
         assert!(!view.detail_panel_resize_active);
         assert!(action.persist_settings);
     }
@@ -1088,10 +1111,7 @@ mod tests {
         }
         let action = view.update(ViewMsg::EndDetailPanelResize, &timeline, ViewCtx::default());
 
-        assert_eq!(
-            view.detail_panel_height,
-            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
-        );
+        assert_eq!(view.detail_panel_height, None);
         assert!(action.persist_settings);
     }
 }

@@ -43,6 +43,10 @@ pub struct ArrangementMinimap {
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
     pub tracks: Vec<MinimapTrack>,
+    /// Wheel-zoom bindings (rebindable, Ctrl+Wheel by default) plus the
+    /// modifiers currently held: a matching wheel turn zooms around the
+    /// cursor, otherwise it pans.
+    pub wheel_zoom: crate::shortcuts::WheelZoom,
 }
 
 impl ArrangementMinimap {
@@ -305,6 +309,46 @@ impl canvas::Program<Message> for ArrangementMinimap {
             {
                 state.drag = None;
                 return (canvas::event::Status::Captured, None);
+            }
+
+            // -- Wheel: a bound combo zooms around the cursor, else pan --
+            canvas::Event::Mouse(iced::mouse::Event::WheelScrolled { delta }) => {
+                if cursor.is_over(bounds) {
+                    let (dx, dy) = crate::timeline_geometry::wheel_delta_pixels(delta);
+                    // Horizontal wheel pans, as in the lanes.
+                    if dx.abs() > dy.abs() {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::ScrollArrangement(
+                                -overview.beats_for_width(dx),
+                            ))),
+                        );
+                    }
+                    if dy.abs() > 0.0 {
+                        let zoom_bound =
+                            self.wheel_zoom.matches(dy > 0.0, cfg!(target_os = "macos"));
+                        if zoom_bound {
+                            let anchor_x = cursor
+                                .position_in(bounds)
+                                .map(|position| position.x)
+                                .unwrap_or(bounds.width / 2.0);
+                            return (
+                                canvas::event::Status::Captured,
+                                Some(Message::View(ViewMsg::ZoomAround {
+                                    factor: crate::timeline_geometry::zoom_factor_from_pixels(dy),
+                                    anchor_x,
+                                })),
+                            );
+                        }
+                        // Plain wheel pans, as in the lanes.
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::View(ViewMsg::ScrollArrangement(
+                                overview.beats_for_width(dy),
+                            ))),
+                        );
+                    }
+                }
             }
             _ => {}
         }

@@ -32,14 +32,6 @@ impl TrackedRequest {
         self.active == Some(token)
     }
 
-    pub fn current(&self) -> Option<u64> {
-        self.active
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.active.is_some()
-    }
-
     pub fn finish(&mut self, token: u64) -> bool {
         if !self.is_current(token) {
             return false;
@@ -87,7 +79,6 @@ mod tests {
         let probe = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         request.attach_abort_probe(std::sync::Arc::clone(&probe));
         assert!(request.is_current(first));
-        assert!(request.is_active());
 
         let second = request.begin();
         assert!(probe.load(std::sync::atomic::Ordering::SeqCst));
@@ -95,7 +86,6 @@ mod tests {
         assert!(request.is_current(second));
         assert!(!request.finish(first));
         assert!(request.finish(second));
-        assert!(!request.is_active());
     }
 
     #[test]
@@ -106,7 +96,6 @@ mod tests {
         request.cancel();
 
         assert!(!request.is_current(token));
-        assert!(!request.is_active());
     }
 
     #[test]

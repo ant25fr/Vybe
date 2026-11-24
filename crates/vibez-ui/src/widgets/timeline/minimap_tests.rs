@@ -24,6 +24,13 @@ fn minimap() -> ArrangementMinimap {
             color: iced::Color::WHITE,
             clips: vec![(0.0, 400.0)],
         }],
+        wheel_zoom: crate::shortcuts::WheelZoom {
+            combos: vec![
+                crate::shortcuts::KeyCombo::new(crate::shortcuts::WHEEL_UP, true, false, false),
+                crate::shortcuts::KeyCombo::new(crate::shortcuts::WHEEL_DOWN, true, false, false),
+            ],
+            modifiers: iced::keyboard::Modifiers::empty(),
+        },
     }
 }
 
@@ -135,5 +142,125 @@ fn a_narrow_view_box_pans_from_its_middle() {
     assert!(
         matches!(message, Some(Message::View(ViewMsg::ScrollArrangement(delta))) if (delta - 50.0).abs() < 1e-3),
         "expected a 50 beat pan, got {message:?}"
+    );
+}
+
+/// Send a wheel turn at `x`, with `modifiers` held, and return the message.
+fn wheel(
+    minimap: &mut ArrangementMinimap,
+    state: &mut MinimapInteractionState,
+    delta: iced::mouse::ScrollDelta,
+    modifiers: iced::keyboard::Modifiers,
+    x: f32,
+) -> Option<Message> {
+    minimap.wheel_zoom.modifiers = modifiers;
+    send(minimap, state, Event::WheelScrolled { delta }, x)
+}
+
+#[test]
+fn ctrl_wheel_zooms_around_the_cursor() {
+    let mut minimap = minimap();
+    let mut state = MinimapInteractionState::default();
+    let up = iced::mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 };
+
+    let message = wheel(
+        &mut minimap,
+        &mut state,
+        up,
+        iced::keyboard::Modifiers::CTRL,
+        150.0,
+    );
+    match message {
+        Some(Message::View(ViewMsg::ZoomAround { factor, anchor_x })) => {
+            assert!(factor > 1.0, "wheel up zooms in, factor {factor}");
+            assert_eq!(anchor_x, 150.0);
+        }
+        other => panic!("expected ZoomAround, got {other:?}"),
+    }
+
+    let down = iced::mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 };
+    let message = wheel(
+        &mut minimap,
+        &mut state,
+        down,
+        iced::keyboard::Modifiers::CTRL,
+        200.0,
+    );
+    match message {
+        Some(Message::View(ViewMsg::ZoomAround { factor, anchor_x })) => {
+            assert!(factor < 1.0, "wheel down zooms out, factor {factor}");
+            assert_eq!(anchor_x, 200.0);
+        }
+        other => panic!("expected ZoomAround, got {other:?}"),
+    }
+}
+
+#[test]
+fn plain_wheel_pans_instead_of_zooming() {
+    let mut minimap = minimap();
+    let mut state = MinimapInteractionState::default();
+    let up = iced::mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 };
+
+    // No modifier held: the default Ctrl+Wheel binding does not match.
+    let message = wheel(
+        &mut minimap,
+        &mut state,
+        up,
+        iced::keyboard::Modifiers::empty(),
+        150.0,
+    );
+    assert!(
+        matches!(message, Some(Message::View(ViewMsg::ScrollArrangement(_)))),
+        "expected a pan, got {message:?}"
+    );
+    // Shift+Ctrl is not the binding either.
+    let message = wheel(
+        &mut minimap,
+        &mut state,
+        up,
+        iced::keyboard::Modifiers::CTRL | iced::keyboard::Modifiers::SHIFT,
+        150.0,
+    );
+    assert!(
+        matches!(message, Some(Message::View(ViewMsg::ScrollArrangement(_)))),
+        "expected a pan, got {message:?}"
+    );
+}
+
+#[test]
+fn a_rebound_wheel_combo_is_the_one_that_zooms() {
+    let mut minimap = minimap();
+    // Rebind zoom-in to plain wheel-up.
+    minimap.wheel_zoom.combos = vec![crate::shortcuts::KeyCombo::new(
+        crate::shortcuts::WHEEL_UP,
+        false,
+        false,
+        false,
+    )];
+    let mut state = MinimapInteractionState::default();
+    let up = iced::mouse::ScrollDelta::Lines { x: 0.0, y: 3.0 };
+
+    let message = wheel(
+        &mut minimap,
+        &mut state,
+        up,
+        iced::keyboard::Modifiers::empty(),
+        150.0,
+    );
+    assert!(
+        matches!(message, Some(Message::View(ViewMsg::ZoomAround { .. }))),
+        "expected zoom on the rebound combo, got {message:?}"
+    );
+    // Ctrl+wheel no longer zooms.
+    let message = wheel(
+        &mut minimap,
+        &mut state,
+        up,
+        iced::keyboard::Modifiers::CTRL,
+        150.0,
+    );
+    assert!(
+        matches!(message, Some(Message::View(ViewMsg::ScrollArrangement(_)))),
+        "expected a pan, got {message:?}"
     );
 }

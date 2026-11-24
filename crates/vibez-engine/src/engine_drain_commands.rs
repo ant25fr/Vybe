@@ -937,6 +937,9 @@ impl AudioEngine {
                     self.present_event(EngineEvent::AuditionStopped, allowance);
                 }
             }
+            EngineCommand::SeekAudition { position_frames } => {
+                self.audition.seek(position_frames);
+            }
             EngineCommand::SetAuditionGain(gain) => {
                 self.audition.gain = gain.clamp(0.0, 2.0);
             }

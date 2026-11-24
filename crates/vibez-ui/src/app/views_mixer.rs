@@ -385,7 +385,7 @@ mod divider_tests {
     use crate::domains::view::ViewMsg;
     use crate::message::Message;
     use crate::shell_layout::DETAIL_PANEL_MIN_HEIGHT;
-    use crate::state::{Workspace, DETAIL_PANEL_DEFAULT_HEIGHT};
+    use crate::state::Workspace;
 
     /// Mix in a 1440 x 900 window, with the divider held: its work column
     /// runs 814 px from the 52 px chrome row down to the gap above the
@@ -408,10 +408,7 @@ mod divider_tests {
         let mut app = dragging_in_mix();
         drag_to(&mut app, 600.0);
         assert_eq!(app.mix_workspace_height(), 544.0, "card from 52 to 596");
-        assert_eq!(
-            app.state.view.detail_panel_height,
-            DETAIL_PANEL_DEFAULT_HEIGHT
-        );
+        assert_eq!(app.state.view.detail_panel_height, None);
     }
 
     #[test]

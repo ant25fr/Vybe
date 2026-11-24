@@ -18,14 +18,43 @@ pub struct UiSettings {
     pub track_mute_quantization: vibez_core::perform::TrackMuteQuantization,
     #[serde(default)]
     pub sample_library_roots: Vec<PathBuf>,
+    /// Browser pins, as absolute paths, most recently pinned last.
+    #[serde(default)]
+    pub browser_pins: Vec<String>,
+    /// Browser recent items, as absolute paths, newest first (max 50).
+    #[serde(default)]
+    pub browser_recent: Vec<String>,
+    /// Browser colour tags.
+    #[serde(default)]
+    pub browser_tags: Vec<crate::state::TagDef>,
+    /// Browser tag folder tree (top level) and the top-level tag ids.
+    #[serde(default)]
+    pub browser_tag_tree: Vec<crate::state::TagFolderNode>,
+    #[serde(default)]
+    pub browser_top_tag_ids: Vec<u32>,
+    /// Per-item tagging of browser entries.
+    #[serde(default)]
+    pub browser_item_tags: Vec<crate::state::StoredItemTags>,
     #[serde(default = "default_sample_browser_open")]
     pub sample_browser_open: bool,
     #[serde(default = "default_sample_browser_width")]
     pub sample_browser_width: f32,
     #[serde(default = "default_perform_surface_width")]
     pub perform_surface_width: f32,
-    #[serde(default = "default_detail_panel_height")]
-    pub detail_panel_height: f32,
+    /// None until the detail panel's divider is first dragged.
+    #[serde(default)]
+    pub detail_panel_height: Option<f32>,
+    /// Automation lane strip heights, as (lane id, px), resized by dragging
+    /// a lane's bottom edge.
+    #[serde(default)]
+    pub automation_lane_heights: Vec<(vibez_core::id::LaneId, f32)>,
+    /// Key bindings the user rebound in Settings → Shortcuts, keyed by
+    /// action id. Absent means the action uses its defaults.
+    #[serde(default)]
+    pub shortcut_overrides: std::collections::HashMap<
+        crate::shortcuts::ShortcutAction,
+        Vec<crate::shortcuts::KeyCombo>,
+    >,
     /// None until Mix's divider is first dragged.
     #[serde(default)]
     pub mix_detail_panel_height: Option<f32>,
@@ -74,10 +103,6 @@ pub struct UiSettings {
     /// the default Charcoal.
     #[serde(default)]
     pub theme: Option<String>,
-    #[serde(default = "default_media_cache_budget_bytes")]
-    pub media_cache_budget_bytes: u64,
-    #[serde(default = "default_media_cache_automatic_eviction")]
-    pub media_cache_automatic_eviction: bool,
     /// Ask before deleting a Project Track and all of its Arrange and
     /// Section content. Off by default because deletion is undoable.
     #[serde(default)]
@@ -143,10 +168,18 @@ impl Default for UiSettings {
             fixed_computer_velocity: default_fixed_computer_velocity(),
             track_mute_quantization: default_track_mute_quantization(),
             sample_library_roots: Vec::new(),
+            browser_pins: Vec::new(),
+            browser_recent: Vec::new(),
+            browser_tags: Vec::new(),
+            browser_tag_tree: Vec::new(),
+            browser_top_tag_ids: Vec::new(),
+            browser_item_tags: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
             perform_surface_width: default_perform_surface_width(),
-            detail_panel_height: default_detail_panel_height(),
+            detail_panel_height: None,
+            automation_lane_heights: Vec::new(),
+            shortcut_overrides: Default::default(),
             mix_detail_panel_height: None,
             arrange_grid: crate::state::GridConfig::default(),
             clip_grid: crate::state::GridConfig::default(),
@@ -162,8 +195,6 @@ impl Default for UiSettings {
             audio_sample_rate: None,
             audio_buffer_size: default_audio_buffer_size(),
             theme: None,
-            media_cache_budget_bytes: default_media_cache_budget_bytes(),
-            media_cache_automatic_eviction: default_media_cache_automatic_eviction(),
             confirm_project_track_deletion: false,
             auto_save_enabled: default_auto_save_enabled(),
             interface_scale: default_interface_scale(),
@@ -265,14 +296,6 @@ const fn default_audio_buffer_size() -> u32 {
     512
 }
 
-fn default_media_cache_budget_bytes() -> u64 {
-    vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
-}
-
-fn default_media_cache_automatic_eviction() -> bool {
-    true
-}
-
 const fn default_auto_save_enabled() -> bool {
     true
 }
@@ -283,10 +306,6 @@ fn default_sample_browser_width() -> f32 {
 
 fn default_perform_surface_width() -> f32 {
     crate::state::PERFORM_SURFACE_DEFAULT_WIDTH
-}
-
-fn default_detail_panel_height() -> f32 {
-    crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
 }
 
 fn default_audition_enabled() -> bool {
@@ -519,20 +538,26 @@ mod tests {
     }
 
     #[test]
-    fn detail_panel_height_defaults_and_roundtrips() {
-        let old: UiSettings = serde_json::from_str("{}").unwrap();
+    fn detail_panel_height_is_unset_until_dragged_and_roundtrips() {
+        // Never dragged: the resting height comes from the view defaults.
+        let fresh: UiSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(fresh.detail_panel_height, None);
         assert_eq!(
-            old.detail_panel_height,
-            crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+            serde_json::to_value(&fresh).unwrap()["detail_panel_height"],
+            serde_json::Value::Null
         );
 
+        // An old file that stored a plain number reads as that dragged height.
+        let legacy: UiSettings = serde_json::from_str(r#"{"detail_panel_height": 280.0}"#).unwrap();
+        assert_eq!(legacy.detail_panel_height, Some(280.0));
+
         let settings = UiSettings {
-            detail_panel_height: 412.0,
+            detail_panel_height: Some(412.0),
             ..UiSettings::default()
         };
         let loaded: UiSettings =
             serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert_eq!(loaded.detail_panel_height, 412.0);
+        assert_eq!(loaded.detail_panel_height, Some(412.0));
     }
 
     #[test]
@@ -639,16 +664,6 @@ mod tests {
             clamp_interface_scale(f32::NEG_INFINITY),
             INTERFACE_SCALE_MIN
         );
-    }
-
-    #[test]
-    fn old_settings_receive_the_twenty_gib_media_cache_policy() {
-        let loaded: UiSettings = serde_json::from_str(r#"{"sample_library_roots":[]}"#).unwrap();
-        assert_eq!(
-            loaded.media_cache_budget_bytes,
-            vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES
-        );
-        assert!(loaded.media_cache_automatic_eviction);
     }
 
     #[test]

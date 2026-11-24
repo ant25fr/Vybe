@@ -12,6 +12,7 @@ use crate::filter::FilterEffect;
 use crate::gain::GainEffect;
 use crate::gate::GateEffect;
 use crate::limiter::LimiterEffect;
+use crate::multiband_dynamics::MultibandDynamicsEffect;
 use crate::phaser::PhaserEffect;
 use crate::reverb::ReverbEffect;
 use crate::saturator::SaturatorEffect;
@@ -33,6 +34,7 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Echo => Box::new(EchoEffect::new(sample_rate)),
         EffectType::Limiter => Box::new(LimiterEffect::new(sample_rate)),
         EffectType::Saturator => Box::new(SaturatorEffect::new(sample_rate)),
+        EffectType::MultibandDynamics => Box::new(MultibandDynamicsEffect::new(sample_rate)),
     }
 }
 

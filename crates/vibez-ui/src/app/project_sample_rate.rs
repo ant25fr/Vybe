@@ -35,14 +35,9 @@ impl App {
             return Task::none();
         };
         self.state.status_text = format!("Converting project to {} Hz...", conversion.sample_rate);
-        let dropbox = self
-            .dropbox_client
-            .clone()
-            .map(|client| (client, self.dropbox_cache.clone()));
-        Task::perform(
-            convert_project_sample_rate_async(conversion, dropbox),
-            |converted| Message::ProjectSampleRateConverted(Box::new(converted)),
-        )
+        Task::perform(convert_project_sample_rate_async(conversion), |converted| {
+            Message::ProjectSampleRateConverted(Box::new(converted))
+        })
     }
 
     pub(super) fn finish_sample_rate_conversion(&mut self, converted: ConvertedProject) {

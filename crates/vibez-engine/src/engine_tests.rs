@@ -2779,3 +2779,34 @@ fn master_gain_automation_shapes_the_mix() {
         buf[0]
     );
 }
+
+#[test]
+fn seek_audition_moves_the_playing_voice() {
+    let (mut engine, mut cmd_tx, mut event_rx) = graph_engine(&[routing_channel(TrackId::MASTER)]);
+    cmd_tx
+        .push(EngineCommand::StartAudition {
+            audio: make_constant_audio(4_096, 0.4),
+            start: AuditionStart::Immediate,
+            looped: false,
+        })
+        .unwrap();
+    let mut buf = vec![0.0f32; 512];
+    engine.process(&mut buf, 2);
+    cmd_tx
+        .push(EngineCommand::SeekAudition {
+            position_frames: 2_048,
+        })
+        .unwrap();
+    engine.process(&mut buf, 2);
+    let mut saw_position = None;
+    while let Ok(event) = event_rx.pop() {
+        if let EngineEvent::AuditionPosition(position) = event {
+            saw_position = Some(position);
+        }
+    }
+    let position = saw_position.expect("a position event after the seek");
+    assert!(
+        (position as i64 - 2_048 - 512).abs() <= 512,
+        "position {position} should be just past the seek target"
+    );
+}

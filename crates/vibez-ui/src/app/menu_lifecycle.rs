@@ -150,6 +150,7 @@ mod tests {
         let mut app = test_app();
         app.state.project.file_menu_open = true;
         app.state.browser.pending_drag = Some(crate::state::PendingMediaDrag {
+            extra: Vec::new(),
             source: vibez_core::track::MediaSourceRef::LocalFile {
                 path: "/music/kick.wav".into(),
             },

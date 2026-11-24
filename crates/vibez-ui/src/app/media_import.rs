@@ -8,7 +8,6 @@ use iced::Task;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::MediaSourceRef;
-use vibez_dropbox::DropboxEntry;
 use vibez_engine::commands::EngineCommand;
 
 use crate::message::{BrowserImportTarget, Message};
@@ -55,24 +54,17 @@ impl App {
         })
     }
 
-    pub(super) fn dispatch_drop_on_arrangement(
-        &mut self,
-        track_id: TrackId,
-        position_samples: u64,
-        source: MediaSourceRef,
-    ) -> Task<Message> {
-        let target = BrowserImportTarget::ArrangementClipAt {
-            track_id,
-            position_samples,
-        };
-        self.dispatch_drop_for_target(source, target)
-    }
-
     pub(super) fn dispatch_drop_for_target(
         &mut self,
         source: MediaSourceRef,
         target: BrowserImportTarget,
     ) -> Task<Message> {
+        // Every import path (drag-drop, Enter, double-click) records the
+        // file as recently used in the browser.
+        if matches!(source, MediaSourceRef::LocalFile { .. }) {
+            self.state.browser.push_recent(source.clone());
+            self.persist_ui_settings();
+        }
         if let MediaSourceRef::LocalFile { path } = &source {
             if vibez_core::midi_file::is_midi_file_path(path) {
                 return self.dispatch_midi_file_drop(path.clone(), target);
@@ -173,7 +165,6 @@ impl App {
                     async move {
                         let audio = hydrate_saved_source(
                             container_path.as_ref(),
-                            None,
                             &retained_source,
                             &name,
                             sample_rate,
@@ -194,24 +185,11 @@ impl App {
                     },
                 )
             }
-            MediaSourceRef::DropboxFile {
-                path_lower,
-                display_path,
-                rev,
-            } => {
-                let name = display_path
-                    .rsplit_once('/')
-                    .map(|(_, n)| n.to_string())
-                    .unwrap_or_else(|| display_path.clone());
-                let entry = DropboxEntry {
-                    path_lower,
-                    path_display: display_path,
-                    name: name.clone(),
-                    is_folder: false,
-                    rev,
-                    size: None,
-                };
-                self.start_remote_import(entry, target, treatment)
+            MediaSourceRef::DropboxFile { display_path, .. } => {
+                self.state.status_text = format!(
+                    "Skipped '{display_path}' (remote cloud connection no longer available)"
+                );
+                Task::none()
             }
         }
     }
@@ -489,25 +467,6 @@ impl App {
         })
     }
 
-    pub(super) fn selected_dropbox_entry(&self) -> Option<DropboxEntry> {
-        let selected = self.state.browser.remote.selected_path.as_ref()?;
-        self.state
-            .browser
-            .remote
-            .catalog
-            .entries
-            .iter()
-            .find(|entry| &entry.provider_item_id == selected && !entry.is_folder)
-            .map(|entry| DropboxEntry {
-                path_lower: entry.provider_item_id.clone(),
-                path_display: entry.path.clone(),
-                name: entry.name.clone(),
-                is_folder: false,
-                rev: entry.revision.clone(),
-                size: entry.size,
-            })
-    }
-
     pub(super) fn handle_add_clip_to_track(&mut self, track_id: TrackId) -> Task<Message> {
         // Guard: only audio tracks can have audio clips
         if let Some(track) = self.state.find_track(track_id) {
@@ -761,7 +720,10 @@ impl App {
                     track_id,
                     position_samples,
                 },
-                None => BrowserImportTarget::ArrangementNewTrackAt { position_samples },
+                None => BrowserImportTarget::ArrangementNewTrackAt {
+                    position_samples,
+                    group: None,
+                },
             };
             self.state.status_text = format!("Importing {name} at playhead...");
             return self.dispatch_drop_for_target(source, target);

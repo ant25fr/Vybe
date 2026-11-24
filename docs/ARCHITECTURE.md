@@ -27,14 +27,12 @@ flowchart LR
         DEC["Decode + warp tasks<br/>(symphonia, Signalsmith)"]
         LOAD["Plugin loader thread<br/>(dlopen VST3/CLAP)"]
         SCAN["vibez-plugin-scan<br/>(sandbox subprocess)"]
-        DBX["Dropbox client<br/>(reqwest)"]
     end
 
     DOM -- "EngineCommand<br/>(rtrb ring buffer)" --> ENG
     ENG -- "EngineEvent<br/>(rtrb ring buffer)" --> APP
     APP <--> DEC
     APP <--> LOAD
-    APP <--> DBX
     LOAD -.-> SCAN
     ENG --> OUT(("audio out"))
 ```
@@ -56,7 +54,6 @@ without waiting for that tick.
 | `vibez-instruments` | Built-in synth, sampler, drum rack |
 | `vibez-plugin-host` | VST3 and CLAP hosting, sandboxed scanning |
 | `vibez-project` | Project file format (JSON) |
-| `vibez-dropbox` | Dropbox sample browser backend |
 | `vibez-ui` | The app: iced GUI, domain modules, services |
 
 ## The UI: domains and one router

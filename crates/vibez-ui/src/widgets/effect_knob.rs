@@ -481,6 +481,32 @@ impl canvas::Program<Message> for EffectKnobWidget {
                 }
             }
 
+            // Right-click on an automatable device control: "Automate" menu.
+            canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
+                if cursor.is_over(bounds) {
+                    let slot = match self.target {
+                        KnobTarget::Effect(effect_id) | KnobTarget::GainDb(effect_id) => {
+                            Some(crate::domains::device_params::DeviceSlot::Effect(effect_id))
+                        }
+                        KnobTarget::Instrument => {
+                            Some(crate::domains::device_params::DeviceSlot::Instrument)
+                        }
+                        KnobTarget::Device(slot) => Some(slot),
+                        KnobTarget::Send { .. } | KnobTarget::AudioClip { .. } => None,
+                    };
+                    if let Some(slot) = slot {
+                        return (
+                            canvas::event::Status::Captured,
+                            Some(Message::DeviceParamRightPressed {
+                                track_id: self.track_id,
+                                slot,
+                                param_index: self.param_index,
+                            }),
+                        );
+                    }
+                }
+            }
+
             // Release
             canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
                 if state.drag.release() {

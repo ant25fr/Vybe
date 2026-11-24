@@ -7,7 +7,7 @@ use crate::domains::automation::{target_label_with_buses, AutomationMsg};
 use crate::icons;
 use crate::message::Message;
 use crate::theme as th;
-use crate::widgets::automation_lane::{AutomationLaneWidget, LANE_HEIGHT};
+use crate::widgets::automation_lane::AutomationLaneWidget;
 
 use super::*;
 
@@ -49,6 +49,27 @@ impl App {
         for lane in automation {
             let label =
                 target_label_with_buses(&lane.target, track, &self.state.project_tracks.buses);
+            let height = self.state.automation_ui.lane_height(lane.id);
+            let pencil_on = self.state.automation_ui.pencil_active(lane.id);
+            let pencil_btn = button(icons::icon(icons::PENCIL).size(13).color(if pencil_on {
+                th::accent()
+            } else {
+                th::text_dim()
+            }))
+            .on_press(Message::Automation(AutomationMsg::TogglePencil {
+                lane_id: lane.id,
+            }))
+            .padding([2, 6])
+            .style(move |_theme: &Theme, _status| button::Style {
+                background: pencil_on.then(|| th::accent_dim().into()),
+                text_color: if pencil_on {
+                    th::accent()
+                } else {
+                    th::text_dim()
+                },
+                border: iced::Border::default(),
+                ..Default::default()
+            });
             let remove = button(icons::icon(icons::TRASH_2).size(9).color(th::text_dim()))
                 .on_press(Message::Automation(AutomationMsg::RemoveLane {
                     track_id: track.id,
@@ -65,14 +86,17 @@ impl App {
                 .state
                 .automation_ui
                 .is_overridden(track.id, lane.target);
-            let mut header_row = row![text(label)
-                .shaping(crate::typography::USER_TEXT_SHAPING)
-                .size(11)
-                .color(if overridden {
-                    th::accent()
-                } else {
-                    th::text_dim()
-                })]
+            let mut header_row = row![
+                text(label)
+                    .shaping(crate::typography::USER_TEXT_SHAPING)
+                    .size(11)
+                    .color(if overridden {
+                        th::accent()
+                    } else {
+                        th::text_dim()
+                    }),
+                pencil_btn
+            ]
             .spacing(4)
             .align_y(iced::Alignment::Center);
             if overridden {
@@ -88,7 +112,7 @@ impl App {
             let header = container(header_row.push(horizontal_space()).push(remove))
                 .padding([0, 10])
                 .width(Length::Fixed(layout.header_width))
-                .height(Length::Fixed(LANE_HEIGHT))
+                .height(Length::Fixed(height))
                 .align_y(iced::alignment::Vertical::Center)
                 .style(|_theme: &Theme| container::Style {
                     background: Some(th::bg_surface().into()),
@@ -119,14 +143,16 @@ impl App {
                 max_label,
                 ref_label,
                 stepped: lane.target.is_stepped(),
+                height,
+                pencil: pencil_on,
             })
             .width(body_width())
-            .height(Length::Fixed(LANE_HEIGHT));
+            .height(Length::Fixed(height));
 
             parts.push(AutomationLanePart {
                 header: header.into(),
                 body: body.into(),
-                height: LANE_HEIGHT,
+                height,
             });
         }
 
@@ -421,14 +447,20 @@ impl App {
         timeline: &crate::state::TimelineEditorState,
         track_id: vibez_core::id::TrackId,
     ) -> f32 {
-        let lanes = timeline
+        let lanes_height = timeline
             .timeline
             .get(track_id)
-            .map(|content| content.automation.len())
-            .unwrap_or(0);
+            .map(|content| {
+                content
+                    .automation
+                    .iter()
+                    .map(|lane| self.state.automation_ui.lane_height(lane.id))
+                    .sum::<f32>()
+            })
+            .unwrap_or(0.0);
         let picker_open =
             matches!(&self.state.automation_ui.picker, Some((id, _)) if *id == track_id);
-        lanes as f32 * LANE_HEIGHT
+        lanes_height
             + if picker_open {
                 PICKER_OPEN_HEIGHT
             } else {

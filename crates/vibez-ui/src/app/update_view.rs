@@ -104,7 +104,10 @@ impl App {
     /// reads its file for the ghost.
     fn route_pointer_to_browser_drag(&mut self, msg: &ViewMsg) -> Task<Message> {
         let pending_drag_msg = match msg {
-            ViewMsg::CursorMoved(x, y) if self.state.browser.pending_drag.is_some() => {
+            ViewMsg::CursorMoved(x, y)
+                if self.state.browser.pending_drag.is_some()
+                    || self.state.browser.pending_taggable.is_some() =>
+            {
                 Some(BrowserMsg::PendingDragMoved { x: *x, y: *y })
             }
             // Pointer events reach this router after the widgets under the
@@ -113,10 +116,16 @@ impl App {
             ViewMsg::CursorMoved(..) if self.state.browser.drags_from_desktop() => {
                 Some(BrowserMsg::DesktopPointerMoved)
             }
-            ViewMsg::MouseReleased if self.state.browser.pending_drag.is_some() => {
+            ViewMsg::MouseReleased
+                if self.state.browser.pending_drag.is_some()
+                    || self.state.browser.pending_taggable.is_some() =>
+            {
                 Some(BrowserMsg::EndDragSample)
             }
-            ViewMsg::MouseReleased if self.state.browser.drag_source.is_some() => {
+            ViewMsg::MouseReleased
+                if self.state.browser.drag_source.is_some()
+                    || self.state.browser.tag_drag.is_some() =>
+            {
                 Some(BrowserMsg::EndDragSample)
             }
             _ => None,

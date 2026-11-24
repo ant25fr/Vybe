@@ -10,6 +10,7 @@ use iced::widget::{
 use iced::{Element, Length, Theme};
 
 use crate::domains::arrangement::{ArrangementMsg, AudioSliceMarkers};
+use crate::domains::automation::{target_label_with_buses, AutomationMsg};
 use crate::domains::piano_roll::PianoRollMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::effect::EffectType;
@@ -44,7 +45,130 @@ fn context_menu_width(target: &ContextMenuTarget) -> f32 {
         ContextMenuTarget::AudioClipDetail { .. } | ContextMenuTarget::TrackHeader { .. } => {
             200.0 + CONTEXT_MENU_CARD_PADDING
         }
+        ContextMenuTarget::BrowserEntry { .. }
+        | ContextMenuTarget::BrowserTag { .. }
+        | ContextMenuTarget::BrowserTagFolder { .. }
+        | ContextMenuTarget::BrowserTaggable { .. }
+        | ContextMenuTarget::AutomationParam { .. } => 200.0 + CONTEXT_MENU_CARD_PADDING,
     }
+}
+
+/// A context-menu row that runs `msg` as-is, leaving the menu open (unlike
+/// [`menu_ctx_item`], which dismisses the menu after running).
+fn menu_raw_button<'a>(content: Element<'a, Message>, msg: Message) -> Element<'a, Message> {
+    button(content)
+        .on_press(msg)
+        .padding([6, 12])
+        .width(Length::Fill)
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => th::bg_hover(),
+                _ => th::bg_surface(),
+            };
+            button::Style {
+                background: Some(bg.into()),
+                text_color: th::text(),
+                border: iced::Border::default(),
+                ..Default::default()
+            }
+        })
+        .into()
+}
+
+/// A context-menu row that runs `msg` then dismisses the menu.
+fn menu_ctx_item(icon_char: char, label_text: String, msg: Message) -> Element<'static, Message> {
+    menu_raw_button(
+        row![
+            icons::icon(icon_char).size(13).color(th::text()),
+            text(label_text).size(13).color(th::text())
+        ]
+        .spacing(8)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        Message::menu_item(MenuOverlay::ArrangementContext, msg),
+    )
+}
+
+/// A small muted caption row inside a context menu.
+fn menu_caption(label: String) -> Element<'static, Message> {
+    container(
+        text(label)
+            .size(9.5)
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..iced::Font::DEFAULT
+            })
+            .color(th::text_muted()),
+    )
+    .padding([6, 12])
+    .width(Length::Fill)
+    .into()
+}
+
+/// One colour swatch of the tag recolour row; `active` rings it.
+fn tag_swatch_button(color: iced::Color, active: bool, msg: Message) -> Element<'static, Message> {
+    button(
+        container(iced::widget::Space::with_width(12.0).height(12.0)).style(
+            move |_theme: &Theme| container::Style {
+                background: Some(color.into()),
+                border: iced::Border {
+                    radius: 6.0.into(),
+                    color: if active {
+                        th::text()
+                    } else {
+                        iced::Color::TRANSPARENT
+                    },
+                    width: if active { 2.0 } else { 0.0 },
+                },
+                ..Default::default()
+            },
+        ),
+    )
+    .on_press(msg)
+    .padding(2)
+    .style(|_theme: &Theme, status| {
+        let bg: iced::Background = match status {
+            button::Status::Hovered | button::Status::Pressed => th::bg_hover().into(),
+            _ => iced::Color::TRANSPARENT.into(),
+        };
+        button::Style {
+            background: Some(bg),
+            text_color: th::text(),
+            border: iced::Border::default(),
+            ..Default::default()
+        }
+    })
+    .into()
+}
+
+/// A tag toggle row inside the entry context menu: colour dot, name, and a
+/// check when every target item already carries the tag. Raw message, so
+/// the menu stays open for several toggles.
+fn tag_toggle_menu_button(
+    name: String,
+    color: iced::Color,
+    carried: bool,
+    msg: Message,
+) -> Element<'static, Message> {
+    let mut content = row![
+        container(iced::widget::Space::with_width(9.0).height(9.0)).style(move |_theme: &Theme| {
+            container::Style {
+                background: Some(color.into()),
+                border: iced::Border {
+                    radius: 4.5.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        },),
+        text(name).size(13).color(th::text()),
+    ]
+    .spacing(8)
+    .align_y(iced::Alignment::Center);
+    if carried {
+        content = content.push(icons::icon(icons::CHECK).size(12).color(th::accent()));
+    }
+    menu_raw_button(content.into(), msg)
 }
 
 fn track_header_menu(track_id: vibez_core::id::TrackId) -> [(char, &'static str, Message); 1] {
@@ -810,6 +934,81 @@ impl App {
                     "Toggle Loop".into(),
                     Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop),
                 ));
+                // Pattern color: one swatch per palette entry, plus a reset
+                // that falls back to the track color.
+                if is_note_clip {
+                    let current_color = self
+                        .state
+                        .arrangement
+                        .timeline
+                        .get(track_id)
+                        .and_then(|content| content.note_clips.iter().find(|c| c.id == clip_id))
+                        .and_then(|clip| clip.color_index);
+                    col = col.push(
+                        container(text("Color").size(11).color(th::text_dim())).padding([4, 12]),
+                    );
+                    // Two rows of 8 swatches: the 8 track colors, then 8
+                    // lighter variants, so two patterns on one track can still
+                    // be told apart.
+                    let mut first_row = row![].spacing(4);
+                    let mut second_row = row![].spacing(4);
+                    for index in 0..th::CLIP_COLOR_COUNT {
+                        let swatch_color = th::clip_color(index);
+                        let active = current_color == Some(index);
+                        let swatch = button(
+                            container(
+                                horizontal_space()
+                                    .width(Length::Fixed(14.0))
+                                    .height(Length::Fixed(14.0)),
+                            )
+                            .style(move |_theme: &Theme| {
+                                container::Style {
+                                    background: Some(swatch_color.into()),
+                                    border: iced::Border {
+                                        color: if active { th::text() } else { th::bg_hover() },
+                                        width: if active { 2.0 } else { 1.0 },
+                                        radius: 3.0.into(),
+                                    },
+                                    ..Default::default()
+                                }
+                            }),
+                        )
+                        .on_press(Message::menu_item(
+                            MenuOverlay::ArrangementContext,
+                            Message::Arrangement(ArrangementMsg::SetNoteClipColor {
+                                track_id,
+                                clip_id,
+                                color_index: Some(index),
+                            }),
+                        ))
+                        .padding(2)
+                        .style(|_theme: &Theme, status| {
+                            let bg = match status {
+                                button::Status::Hovered | button::Status::Pressed => th::bg_hover(),
+                                _ => iced::Color::TRANSPARENT,
+                            };
+                            button::Style {
+                                background: Some(bg.into()),
+                                text_color: th::text(),
+                                border: iced::Border::default(),
+                                ..Default::default()
+                            }
+                        });
+                        if index < th::CLIP_COLOR_COUNT / 2 {
+                            first_row = first_row.push(swatch);
+                        } else {
+                            second_row = second_row.push(swatch);
+                        }
+                    }
+                    col = col.push(column![first_row, second_row].spacing(4).padding(
+                        iced::Padding {
+                            top: 0.0,
+                            right: 12.0,
+                            bottom: 6.0,
+                            left: 12.0,
+                        },
+                    ));
+                }
                 col = col.push(menu_btn(
                     icons::SCISSORS,
                     "Split Selection (Ctrl+E)".into(),
@@ -1048,6 +1247,160 @@ impl App {
             .spacing(0)
             .width(Length::Fixed(super::views_grid_menu::TIMELINE_MENU_WIDTH))
             .into(),
+            ContextMenuTarget::BrowserEntry { source } => {
+                let source = source.clone();
+                let pinned = self.state.browser.is_pinned(&source);
+                let selected_count = self.state.browser.selection_count();
+                let in_selection = self.state.browser.is_selected(&source);
+                // The label counts the selection when the row is part of it.
+                let (pin_label, pin_msg) = if in_selection && selected_count > 1 {
+                    let sources = self.visible_browser_results();
+                    (
+                        if pinned {
+                            format!("Unpin {selected_count} items")
+                        } else {
+                            format!("Pin {selected_count} items")
+                        },
+                        Message::Browser(BrowserMsg::TogglePinSelection(
+                            self.state.browser.selection_sources(&sources),
+                        )),
+                    )
+                } else {
+                    (
+                        if pinned {
+                            "Unpin".to_string()
+                        } else {
+                            "Pin".to_string()
+                        },
+                        Message::Browser(BrowserMsg::TogglePin(source.clone())),
+                    )
+                };
+                let mut col = column![
+                    menu_btn(icons::PIN, pin_label, pin_msg,),
+                    menu_btn(
+                        icons::FOLDER_OPEN,
+                        "Show in folder".into(),
+                        Message::Browser(BrowserMsg::ShowEntryInFolder(source.clone())),
+                    ),
+                ]
+                .spacing(0)
+                .width(Length::Fixed(200.0));
+                // TAGS: one toggle per tag (menu stays open), then new tag.
+                let tags = self.state.browser.tags.clone();
+                if !tags.is_empty() {
+                    let tag_targets = if in_selection && selected_count > 1 {
+                        self.state
+                            .browser
+                            .selection_sources(&self.visible_browser_results())
+                    } else {
+                        vec![source.clone()]
+                    };
+                    col = col.push(menu_caption("TAGS".into()));
+                    for tag in &tags {
+                        let carried = tag_targets
+                            .iter()
+                            .all(|s| self.state.browser.tags_of(s).contains(&tag.id));
+                        col = col.push(tag_toggle_menu_button(
+                            tag.name.clone(),
+                            crate::state::BrowserState::tag_color(tag.color),
+                            carried,
+                            Message::Browser(BrowserMsg::ToggleItemTag {
+                                sources: tag_targets.clone(),
+                                tag_id: tag.id,
+                            }),
+                        ));
+                    }
+                    col = col.push(menu_ctx_item(
+                        icons::PLUS,
+                        format!(
+                            "New tag for {} item{}…",
+                            tag_targets.len(),
+                            if tag_targets.len() == 1 { "" } else { "s" }
+                        ),
+                        Message::Browser(BrowserMsg::NewTag {
+                            apply_to: tag_targets,
+                            folder: None,
+                        }),
+                    ));
+                }
+                col.into()
+            }
+            ContextMenuTarget::BrowserTag { id } => {
+                let id = *id;
+                match self.state.browser.tag(id).cloned() {
+                    Some(tag) => self.view_tag_context_menu(id, tag),
+                    None => column![text("That tag is gone").size(12).color(th::text_dim())]
+                        .padding(8)
+                        .width(Length::Fixed(200.0))
+                        .into(),
+                }
+            }
+            ContextMenuTarget::BrowserTagFolder { id } => self.view_tag_folder_context_menu(*id),
+            ContextMenuTarget::AutomationParam { track_id, target } => {
+                let track_id = *track_id;
+                let target = *target;
+                let label = self
+                    .state
+                    .project_tracks
+                    .find(track_id)
+                    .map(|track| {
+                        target_label_with_buses(&target, track, &self.state.project_tracks.buses)
+                    })
+                    .unwrap_or_else(|| "parameter".to_string());
+                let mut col = column![menu_ctx_item(
+                    icons::SLIDERS_VERTICAL,
+                    format!("Automate {label}"),
+                    Message::Automation(AutomationMsg::AddLane { track_id, target }),
+                )]
+                .spacing(0)
+                .width(Length::Fixed(200.0));
+                if self.state.automation_ui.is_overridden(track_id, target) {
+                    col = col.push(menu_ctx_item(
+                        icons::CHECK,
+                        "Re-enable automation".into(),
+                        Message::Automation(AutomationMsg::ReenableAutomation { track_id, target }),
+                    ));
+                }
+                col.into()
+            }
+            ContextMenuTarget::BrowserTaggable { item } => {
+                // TAGS: one toggle per tag (menu stays open), then new tag.
+                let tags = self.state.browser.tags.clone();
+                let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+                if !tags.is_empty() {
+                    col = col.push(menu_caption("TAGS".into()));
+                    for tag in &tags {
+                        let carried = self.state.browser.tags_of_taggable(item).contains(&tag.id);
+                        col = col.push(tag_toggle_menu_button(
+                            tag.name.clone(),
+                            crate::state::BrowserState::tag_color(tag.color),
+                            carried,
+                            Message::Browser(BrowserMsg::ToggleTaggableTag {
+                                item: item.clone(),
+                                tag_id: tag.id,
+                            }),
+                        ));
+                    }
+                    col = col.push(menu_ctx_item(
+                        icons::PLUS,
+                        "New tag for this item…".into(),
+                        Message::Browser(BrowserMsg::NewTagForTaggable {
+                            item: item.clone(),
+                            folder: None,
+                        }),
+                    ));
+                } else {
+                    col = col.push(menu_ctx_item(
+                        icons::PLUS,
+                        "New tag…".into(),
+                        Message::Browser(BrowserMsg::NewTagForTaggable {
+                            item: item.clone(),
+                            folder: None,
+                        }),
+                    ));
+                }
+                col.into()
+            }
         };
 
         let menu_container = container(menu_items)
@@ -1083,6 +1436,203 @@ impl App {
         )
         .on_press(Message::dismiss_menu(MenuOverlay::ArrangementContext))
         .into()
+    }
+    /// The context menu of a TAGS-section tag row: rename (inline), the
+    /// seven-colour swatch row, new tag / new folder, and a two-step
+    /// remove.
+    fn view_tag_context_menu(&self, id: u32, tag: crate::state::TagDef) -> Element<'_, Message> {
+        let carriers = self.state.browser.tag_carrier_count(id);
+        let confirming = self.state.browser.confirm_remove_tag == Some(id);
+        let renaming = self.state.browser.renaming_tag == Some(id);
+        let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+        if confirming {
+            col = col.push(menu_caption(format!(
+                "Remove “{}”? {} item{} carr{}",
+                tag.name,
+                carriers,
+                if carriers == 1 { "y" } else { "ies" },
+                if carriers == 1 { "ies it" } else { "y it" }
+            )));
+            col = col.push(menu_ctx_item(
+                icons::TRASH_2,
+                "Remove tag".into(),
+                Message::Browser(BrowserMsg::RemoveTag(id)),
+            ));
+            col = col.push(menu_raw_button(
+                row![
+                    icons::icon(icons::X).size(13).color(th::text()),
+                    text("Cancel").size(13).color(th::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                // Second press of the same request clears the confirm.
+                Message::Browser(BrowserMsg::RequestRemoveTag(id)),
+            ));
+        } else if renaming {
+            col = col.push(menu_caption("RENAME TAG".into()));
+            col = col.push(
+                text_input("Tag name", &self.state.browser.rename_text)
+                    .on_input(|value| Message::Browser(BrowserMsg::RenameTextChanged(value)))
+                    .on_submit(Message::menu_item(
+                        MenuOverlay::ArrangementContext,
+                        Message::Browser(BrowserMsg::CommitRename),
+                    ))
+                    .padding([4, 8])
+                    .size(13)
+                    .width(Length::Fill),
+            );
+        } else {
+            col = col.push(menu_raw_button(
+                row![
+                    icons::icon(icons::PENCIL).size(13).color(th::text()),
+                    text("Rename").size(13).color(th::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                Message::Browser(BrowserMsg::StartRenameTag(id)),
+            ));
+            col = col.push(menu_caption("COLOUR".into()));
+            let mut swatches = row![].spacing(5).padding([2, 12]);
+            for (index, swatch) in crate::state::TAG_COLORS.iter().enumerate() {
+                swatches = swatches.push(tag_swatch_button(
+                    *swatch,
+                    tag.color as usize == index,
+                    Message::Browser(BrowserMsg::RecolorTag {
+                        id,
+                        color: index as u8,
+                    }),
+                ));
+            }
+            col = col.push(swatches);
+            col = col.push(menu_ctx_item(
+                icons::PLUS,
+                "New tag".into(),
+                Message::Browser(BrowserMsg::NewTag {
+                    apply_to: Vec::new(),
+                    folder: None,
+                }),
+            ));
+            col = col.push(menu_ctx_item(
+                icons::FOLDER_PLUS,
+                "New folder".into(),
+                Message::Browser(BrowserMsg::NewTagFolder { parent: None }),
+            ));
+            col = col.push(menu_raw_button(
+                row![
+                    icons::icon(icons::TRASH_2).size(13).color(th::danger()),
+                    text("Remove tag").size(13).color(th::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                Message::Browser(BrowserMsg::RequestRemoveTag(id)),
+            ));
+        }
+        col.into()
+    }
+
+    /// The context menu of a tag folder row: rename (inline), a new tag or
+    /// subfolder inside it, and a two-step remove that lifts the children.
+    fn view_tag_folder_context_menu(&self, id: u32) -> Element<'_, Message> {
+        fn find_node(
+            nodes: &[crate::state::TagFolderNode],
+            id: u32,
+        ) -> Option<crate::state::TagFolderNode> {
+            for node in nodes {
+                if node.id == id {
+                    return Some(node.clone());
+                }
+                if let Some(found) = find_node(&node.folders, id) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        fn count_rows(node: &crate::state::TagFolderNode) -> usize {
+            node.tags.len() + node.folders.iter().map(count_rows).sum::<usize>()
+        }
+        let Some(node) = find_node(&self.state.browser.tag_tree, id) else {
+            return column![text("That folder is gone").size(12).color(th::text_dim())]
+                .padding(8)
+                .width(Length::Fixed(200.0))
+                .into();
+        };
+        let rows = count_rows(&node);
+        let confirming = self.state.browser.confirm_remove_folder == Some(id);
+        let renaming = self.state.browser.renaming_folder == Some(id);
+        let mut col = column![].spacing(0).width(Length::Fixed(200.0));
+        if confirming {
+            col = col.push(menu_caption(format!(
+                "Remove “{}”? Its {rows} row{} lift up",
+                node.name,
+                if rows == 1 { "" } else { "s" }
+            )));
+            col = col.push(menu_ctx_item(
+                icons::TRASH_2,
+                "Remove folder".into(),
+                Message::Browser(BrowserMsg::RemoveTagFolder(id)),
+            ));
+            col = col.push(menu_raw_button(
+                row![
+                    icons::icon(icons::X).size(13).color(th::text()),
+                    text("Cancel").size(13).color(th::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                Message::Browser(BrowserMsg::RequestRemoveTagFolder(id)),
+            ));
+        } else if renaming {
+            col = col.push(menu_caption("RENAME FOLDER".into()));
+            col = col.push(
+                text_input("Folder name", &self.state.browser.rename_text)
+                    .on_input(|value| Message::Browser(BrowserMsg::RenameTextChanged(value)))
+                    .on_submit(Message::menu_item(
+                        MenuOverlay::ArrangementContext,
+                        Message::Browser(BrowserMsg::CommitRename),
+                    ))
+                    .padding([4, 8])
+                    .size(13)
+                    .width(Length::Fill),
+            );
+        } else {
+            col = col.push(menu_raw_button(
+                row![
+                    icons::icon(icons::PENCIL).size(13).color(th::text()),
+                    text("Rename").size(13).color(th::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                Message::Browser(BrowserMsg::StartRenameFolder(id)),
+            ));
+            col = col.push(menu_ctx_item(
+                icons::TAG,
+                "New tag in folder".into(),
+                Message::Browser(BrowserMsg::NewTag {
+                    apply_to: Vec::new(),
+                    folder: Some(id),
+                }),
+            ));
+            col = col.push(menu_ctx_item(
+                icons::FOLDER_PLUS,
+                "New subfolder".into(),
+                Message::Browser(BrowserMsg::NewTagFolder { parent: Some(id) }),
+            ));
+            col = col.push(menu_raw_button(
+                row![
+                    icons::icon(icons::TRASH_2).size(13).color(th::danger()),
+                    text("Remove folder").size(13).color(th::text())
+                ]
+                .spacing(8)
+                .align_y(iced::Alignment::Center)
+                .into(),
+                Message::Browser(BrowserMsg::RequestRemoveTagFolder(id)),
+            ));
+        }
+        col.into()
     }
 }
 

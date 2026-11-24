@@ -19,6 +19,7 @@ use crate::domains::filter::is_native_filter;
 use crate::domains::gain::is_native_gain;
 use crate::domains::gate::is_native_gate;
 use crate::domains::limiter::is_native_limiter;
+use crate::domains::multiband_dynamics::is_native_multiband_dynamics;
 use crate::domains::reverb::is_native_reverb;
 use crate::domains::saturator::is_native_saturator;
 use crate::state::{DetailPanelTab, UiEffect};
@@ -32,6 +33,7 @@ enum Metered {
     Filter,
     Compressor,
     Gate,
+    Multiband,
     /// A device whose card has only an Advanced switch.
     Card,
 }
@@ -56,6 +58,7 @@ fn is_metered(effect: &UiEffect) -> bool {
         || is_native_echo(effect)
         || is_native_reverb(effect)
         || is_native_auto_pan(effect)
+        || is_native_multiband_dynamics(effect)
 }
 
 impl App {
@@ -88,12 +91,16 @@ impl App {
             panel.reset_stale(now);
         }
         self.card_panels.retain_existing(state);
+        self.multiband_panels.retain_existing(state);
         self.instrument_panels.retain(|track_id, _| {
             state
                 .find_track(*track_id)
                 .is_some_and(crate::domains::instrument_card::has_native_instrument)
         });
         for panel in self.card_panels.values_mut() {
+            panel.reset_stale(now);
+        }
+        for panel in self.multiband_panels.values_mut() {
             panel.reset_stale(now);
         }
     }
@@ -121,6 +128,9 @@ impl App {
         for panel in self.card_panels.values_mut() {
             panel.clear_readings();
         }
+        for panel in self.multiband_panels.values_mut() {
+            panel.clear_readings();
+        }
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: self.device_meters.channel,
             generation: self.device_meters.generation,
@@ -136,6 +146,7 @@ impl App {
         self.filter_panels.clear();
         self.gate_panels.clear();
         self.card_panels.clear();
+        self.multiband_panels.clear();
         self.send_command(EngineCommand::SetEffectMeterChannel {
             track_id: None,
             generation: self.device_meters.generation,
@@ -166,6 +177,8 @@ impl App {
             Some(Metered::Compressor)
         } else if is_native_gate(effect) {
             Some(Metered::Gate)
+        } else if is_native_multiband_dynamics(effect) {
+            Some(Metered::Multiband)
         } else if is_native_drive(effect)
             || is_native_limiter(effect)
             || is_native_saturator(effect)
@@ -219,6 +232,10 @@ impl App {
                 .card_panels
                 .entry(effect_id)
                 .accept_levels(input, output, now),
+            Some(Metered::Multiband) => self
+                .multiband_panels
+                .entry(effect_id)
+                .accept_levels(input, output, now),
             None => {}
         }
     }
@@ -243,6 +260,10 @@ impl App {
                 .accept_dynamics(meter, now),
             Some(Metered::Card) => self
                 .card_panels
+                .entry(effect_id)
+                .accept_dynamics(meter, now),
+            Some(Metered::Multiband) => self
+                .multiband_panels
                 .entry(effect_id)
                 .accept_dynamics(meter, now),
             _ => {}

@@ -3350,13 +3350,12 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "open"
-version = "5.3.3"
+version = "5.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43bb73a7fa3799b198970490a51174027ba0d4ec504b03cd08caf513d40024bc"
+checksum = "8d8c8b8e725ad26404d6896eb2f064294a0a7b4f1d9120210d85544684c4ca95"
 dependencies = [
  "is-wsl",
  "libc",
- "pathdiff",
 ]
 
 [[package]]
@@ -3520,12 +3519,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "pathdiff"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3"
 
 [[package]]
 name = "percent-encoding"
@@ -5380,25 +5373,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vibez-dropbox"
-version = "0.6.8"
-dependencies = [
- "base64",
- "dirs 5.0.1",
- "getrandom 0.2.17",
- "open",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "url",
- "vibez-core",
-]
-
-[[package]]
 name = "vibez-dsp"
 version = "0.6.8"
 dependencies = [
@@ -5480,6 +5454,7 @@ dependencies = [
  "objc2 0.6.3",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "open",
  "proc-macro2",
  "proptest",
  "reqwest",
@@ -5492,7 +5467,6 @@ dependencies = [
  "tokio",
  "vibez-audio-io",
  "vibez-core",
- "vibez-dropbox",
  "vibez-dsp",
  "vibez-engine",
  "vibez-instruments",

@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::{Arc, Weak};
 
+use iced::Color;
+
 use vibez_core::clip_timeline::BeatClipTimeline;
 use vibez_core::id::ClipId;
 use vibez_core::track::FadeCurve;
@@ -50,6 +52,9 @@ pub struct TimelineCrossfade {
 /// Lightweight copy of a note clip for timeline rendering.
 pub struct TimelineNoteClip {
     pub clip_id: ClipId,
+    /// Per-clip color override from the pattern's context menu; `None`
+    /// falls back to the track color.
+    pub color: Option<Color>,
     pub position_beats: f64,
     pub duration_beats: f64,
     pub name: String,

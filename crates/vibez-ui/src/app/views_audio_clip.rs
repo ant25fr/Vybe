@@ -57,6 +57,7 @@ impl App {
             .map(|playhead| playhead - clip.position);
 
         let waveform_widget = AudioClipDetailWidget {
+            wheel_zoom: self.wheel_zoom(),
             location: self.active_timeline_location(),
             track_id,
             clip_id: clip.id,

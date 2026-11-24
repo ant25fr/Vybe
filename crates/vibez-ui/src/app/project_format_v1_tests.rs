@@ -66,12 +66,12 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         assert_eq!(catalog.entries[0].format, format);
         let source = catalog.entries[0].source.clone();
 
-        let audition = decode_local_for_preview_async(source_path.clone())
+        let (audio, _name) = decode_local_for_preview_async(source_path.clone())
             .await
             .unwrap();
-        assert_eq!(audition.audio.num_channels(), channels, "{file_name}");
-        assert_eq!(audition.audio.sample_rate, sample_rate, "{file_name}");
-        assert_audible(Arc::clone(&audition.audio), file_name);
+        assert_eq!(audio.num_channels(), channels, "{file_name}");
+        assert_eq!(audio.sample_rate, sample_rate, "{file_name}");
+        assert_audible(Arc::clone(&audio), file_name);
 
         let mut browser = crate::state::BrowserState {
             entries: catalog.entries,
@@ -83,8 +83,8 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             generation,
             browser.selected_source.clone().unwrap(),
             crate::message::AnalysedBrowserAudio {
-                audio: Arc::clone(&audition.audio),
-                loop_fit: audition.loop_fit,
+                audio: Arc::clone(&audio),
+                loop_fit: None,
             },
         ));
         let metadata = &browser.entries[0];
@@ -97,11 +97,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         let (imported, staged) = decode_and_stage_local_async(source_path.clone(), sample_rate)
             .await
             .unwrap();
-        assert_eq!(
-            imported.num_frames(),
-            audition.audio.num_frames(),
-            "{file_name}"
-        );
+        assert_eq!(imported.num_frames(), audio.num_frames(), "{file_name}");
         let track = TrackInfo::new("Audio");
         let mut transient_markers = TransientMarkers::default();
         transient_markers.add_authored(imported.num_frames() as u64 / 3);
@@ -154,9 +150,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
         vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
         std::fs::remove_file(source_path).unwrap();
 
-        let reopened = load_project_async(project_path, None, sample_rate)
-            .await
-            .unwrap();
+        let reopened = load_project_async(project_path, sample_rate).await.unwrap();
         let reopened_audio = Arc::clone(&reopened.clips[0].audio);
         assert_eq!(reopened_audio.num_channels(), channels, "{file_name}");
         assert_eq!(reopened_audio.sample_rate, sample_rate, "{file_name}");
@@ -243,6 +237,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
     };
     let (warped, original, staged) = prepare_browser_import_audio_async(
         crate::message::BrowserImportTarget::ArrangementNewTrackAt {
+            group: None,
             position_samples: 0,
         },
         treatment,
@@ -291,13 +286,9 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let loaded = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert_eq!(loaded.clips[0].audio.num_frames(), warped.num_frames());
     assert!(matches!(
         loaded.project.arrange.clips[0].source,
@@ -342,13 +333,9 @@ async fn warp_sampler_import_bakes_heard_audio_into_project_media() {
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let loaded = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert_eq!(loaded.sampler_samples.len(), 1);
     assert_eq!(
         loaded.sampler_samples[0].audio.num_frames(),
@@ -413,13 +400,9 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
     vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let loaded = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert_eq!(loaded.clips.len(), 1);
     assert_eq!(loaded.clips[0].audio.num_frames(), audio.num_frames());
     assert!(matches!(
@@ -506,13 +489,9 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
     assert_eq!(saved.observation.media_rows_written, 1);
     std::fs::remove_file(source_path).unwrap();
 
-    let loaded = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let loaded = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert!(loaded.warnings.is_empty());
     assert_eq!(loaded.clips.len(), 2);
     assert!(loaded
@@ -560,13 +539,9 @@ async fn legacy_json_reopens_with_an_empty_section_store_and_no_warnings() {
     )
     .unwrap();
 
-    let loaded = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let loaded = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert!(loaded.project.sections.is_empty());
     assert!(loaded.warnings.is_empty());
     assert!(loaded.clips.is_empty());
@@ -618,13 +593,9 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
     // Without a Dropbox connection the clip cannot hydrate, but its
     // source reference must survive for relink instead of being
     // silently dropped from the next save.
-    let loaded = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let loaded = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     assert!(loaded.clips.is_empty());
     assert_eq!(loaded.unresolved_clips.len(), 1);
     assert_eq!(loaded.unresolved_clips[0].id, clip_id);
@@ -680,7 +651,6 @@ async fn sourceless_audio_clip_survives_reopen_and_re_save() {
 
     let loaded = load_project_async(
         project_path.clone(),
-        None,
         vibez_core::constants::DEFAULT_SAMPLE_RATE,
     )
     .await
@@ -703,13 +673,9 @@ async fn sourceless_audio_clip_survives_reopen_and_re_save() {
     .await
     .unwrap();
 
-    let reopened = load_project_async(
-        project_path,
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
+    let reopened = load_project_async(project_path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        .await
+        .unwrap();
     let kept = &reopened.project.arrange.clips;
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].id, clip_id);
@@ -717,276 +683,6 @@ async fn sourceless_audio_clip_survives_reopen_and_re_save() {
     assert_eq!(kept[0].position, 4_096);
     assert_eq!(kept[0].duration, 2_048);
     assert_eq!(kept[0].fades, fades);
-}
-
-#[tokio::test]
-async fn cached_remote_media_materializes_without_a_client_and_persists_metadata() {
-    let directory = tempfile::tempdir().unwrap();
-    let source_path = directory.path().join("source.wav");
-    let audio = DecodedAudio {
-        channels: vec![vec![0.0, 0.5, -0.5, 0.25]],
-        sample_rate: 44_100,
-    };
-    vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
-    let cache = DropboxCache::with_root(directory.path().join("media-cache"));
-    cache
-        .write(
-            "/megalodon/source.wav",
-            Some("rev-1"),
-            &std::fs::read(source_path).unwrap(),
-        )
-        .unwrap();
-    let entry = DropboxEntry {
-        path_lower: "/megalodon/source.wav".into(),
-        path_display: "/Megalodon/Source.wav".into(),
-        name: "Source.wav".into(),
-        is_folder: false,
-        rev: Some("rev-1".into()),
-        size: None,
-    };
-    let lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
-    let materialized = materialize_remote_sample_async(None, cache.clone(), entry, lease, false)
-        .await
-        .unwrap();
-    assert_eq!(materialized.audio.num_frames(), audio.num_frames());
-    assert_eq!(
-        materialized.metadata.provider_revision.as_deref(),
-        Some("rev-1")
-    );
-    assert_eq!(materialized.metadata.channels, 1);
-    assert_eq!(materialized.metadata.sample_rate, 44_100);
-    assert!(cache
-        .derived_metadata("/megalodon/source.wav", Some("rev-1"))
-        .unwrap()
-        .is_some());
-}
-
-#[tokio::test]
-async fn remote_import_reuses_the_cached_audition_tempo() {
-    let directory = tempfile::tempdir().unwrap();
-    let source_path = directory.path().join("fast-loop.wav");
-    let sample_rate = 44_100_u32;
-    let source_bpm = 190.0;
-    let frames = (4.0 * 4.0 * 60.0 / source_bpm * sample_rate as f64).round() as usize;
-    let beat_frames = (60.0 / source_bpm * sample_rate as f64).round() as usize;
-    let mut channel = vec![0.0_f32; frames];
-    for beat in (0..frames).step_by(beat_frames) {
-        for offset in 0..256.min(frames - beat) {
-            channel[beat + offset] = 0.9 * (1.0 - offset as f32 / 256.0);
-        }
-    }
-    let audio = DecodedAudio {
-        channels: vec![channel],
-        sample_rate,
-    };
-    vibez_audio_io::file_io::write_wav_file(&source_path, &audio).unwrap();
-    let cache = DropboxCache::with_root(directory.path().join("media-cache"));
-    cache
-        .write(
-            "/megalodon/fast-loop.wav",
-            Some("rev-old-analysis"),
-            &std::fs::read(&source_path).unwrap(),
-        )
-        .unwrap();
-    cache
-        .store_derived_metadata(
-            "/megalodon/fast-loop.wav",
-            Some("rev-old-analysis"),
-            vibez_dropbox::DerivedMetadata {
-                provider_revision: Some("rev-old-analysis".into()),
-                duration_seconds: audio.duration_seconds(),
-                channels: 1,
-                sample_rate,
-                bpm: Some(95.0),
-                bpm_confidence: Some(0.9),
-                waveform_peaks: vec![],
-            },
-        )
-        .unwrap();
-    let entry = DropboxEntry {
-        path_lower: "/megalodon/fast-loop.wav".into(),
-        path_display: "/Megalodon/Fast Loop.wav".into(),
-        name: "Fast Loop.wav".into(),
-        is_folder: false,
-        rev: Some("rev-old-analysis".into()),
-        size: None,
-    };
-
-    let (analysed, _, _) = fetch_dropbox_sample_async(None, cache, entry)
-        .await
-        .unwrap();
-
-    assert!((analysed.loop_fit.unwrap().source_bpm - 95.0).abs() < 0.01);
-}
-
-#[tokio::test]
-async fn remote_warp_import_reopens_after_cache_clear_without_dropbox() {
-    let directory = tempfile::tempdir().unwrap();
-    let source_path = directory.path().join("remote-loop.wav");
-    let project_path = directory.path().join("remote-owned.vzp");
-    let raw = one_second_audio();
-    vibez_audio_io::file_io::write_wav_file(&source_path, &raw).unwrap();
-    let cache = DropboxCache::with_root(directory.path().join("media-cache"));
-    cache
-        .write(
-            "/megalodon/remote-loop.wav",
-            Some("rev-9"),
-            &std::fs::read(&source_path).unwrap(),
-        )
-        .unwrap();
-    let entry = DropboxEntry {
-        path_lower: "/megalodon/remote-loop.wav".into(),
-        path_display: "/Megalodon/Remote Loop.wav".into(),
-        name: "Remote Loop.wav".into(),
-        is_folder: false,
-        rev: Some("rev-9".into()),
-        size: None,
-    };
-    let (analysed, name, staged) = fetch_dropbox_sample_async(None, cache.clone(), entry)
-        .await
-        .unwrap();
-    assert!(matches!(
-        staged,
-        MediaSourceRef::StagedRemoteProjectMedia { .. }
-    ));
-    let treatment = crate::state::AuditionImportInput {
-        mode: crate::state::AuditionMode::Warp,
-        source_bpm: Some(120.0),
-    };
-    let (warped, original, staged) = prepare_browser_import_audio_async(
-        crate::message::BrowserImportTarget::ArrangementNewTrackAt {
-            position_samples: 0,
-        },
-        treatment,
-        analysed.audio,
-        staged,
-        60.0,
-        44_100,
-    )
-    .await
-    .unwrap();
-    assert_eq!(warped.num_frames(), 88_200);
-    assert_eq!(original.unwrap().num_frames(), raw.num_frames());
-
-    cache.clear().unwrap();
-    std::fs::remove_file(source_path).unwrap();
-    let track = TrackInfo::new("Audio");
-    let project = Project {
-        reduced_latency_monitoring: false,
-        tracks: vec![track.clone()],
-        arrange: vibez_project::TimelineInfo {
-            clips: vec![ClipInfo {
-                id: ClipId::new(),
-                track_id: track.id,
-                name,
-                position: 0,
-                source_offset: 0,
-                start_marker: None,
-                duration: warped.num_frames() as u64,
-                source: Some(staged),
-                file_path: None,
-                loop_enabled: false,
-                loop_start: 0,
-                loop_end: 0,
-                gain_db: Default::default(),
-                fades: Default::default(),
-                playback_direction: Default::default(),
-                transient_markers: Default::default(),
-                warp_markers: Default::default(),
-                transpose: Default::default(),
-                original_bpm: Some(120.0),
-                warped: true,
-                warped_to_bpm: Some(60.0),
-            }],
-            ..vibez_project::TimelineInfo::default()
-        },
-        ..Project::default()
-    };
-    vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
-
-    let reopened = load_project_async(
-        project_path.clone(),
-        None,
-        vibez_core::constants::DEFAULT_SAMPLE_RATE,
-    )
-    .await
-    .unwrap();
-    assert_eq!(reopened.clips[0].audio.num_frames(), warped.num_frames());
-    assert_audible(Arc::clone(&reopened.clips[0].audio), "Remote WARP reopen");
-    let Some(MediaSourceRef::ProjectMedia {
-        provenance: Some(provenance),
-        ..
-    }) = reopened.project.arrange.clips[0].source.as_ref()
-    else {
-        panic!("reopened clip must carry Remote provenance on Project Media");
-    };
-    let vibez_core::track::MediaProvenance::Remote {
-        provider,
-        connection_id,
-        connection_name,
-        source_path,
-        revision,
-        ..
-    } = provenance.as_ref()
-    else {
-        panic!("reopened clip provenance must remain Remote");
-    };
-    assert_eq!(provider, "dropbox");
-    assert_eq!(connection_id, "dropbox-primary");
-    assert_eq!(connection_name.as_deref(), Some("Dropbox"));
-    assert_eq!(source_path, "/Megalodon/Remote Loop.wav");
-    assert_eq!(revision.as_deref(), Some("rev-9"));
-    let serialized = serde_json::to_string(
-        &vibez_project::project_format_v1::ProjectContainer::open(project_path)
-            .unwrap()
-            .load_document()
-            .unwrap(),
-    )
-    .unwrap();
-    assert!(!serialized.contains("access_token"));
-    assert!(!serialized.contains("refresh_token"));
-}
-
-#[tokio::test]
-async fn dropping_a_debounced_uncached_request_before_200ms_materializes_nothing() {
-    let directory = tempfile::tempdir().unwrap();
-    let cache = DropboxCache::with_root(directory.path().join("media-cache"));
-    let entry = DropboxEntry {
-        path_lower: "/megalodon/transient.wav".into(),
-        path_display: "/Megalodon/Transient.wav".into(),
-        name: "Transient.wav".into(),
-        is_folder: false,
-        rev: Some("rev-1".into()),
-        size: None,
-    };
-    let lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
-    let future = materialize_remote_sample_async(None, cache.clone(), entry, lease, true);
-    tokio::pin!(future);
-    tokio::select! {
-        _ = tokio::time::sleep(std::time::Duration::from_millis(20)) => {}
-        result = &mut future => panic!("debounced request completed early: {result:?}"),
-    }
-    assert!(!cache.is_cached("/megalodon/transient.wav", Some("rev-1")));
-    assert_eq!(cache.usage().unwrap(), vibez_dropbox::CacheUsage::default());
-}
-
-#[tokio::test]
-async fn uncached_degraded_materialization_requires_explicit_reconnect() {
-    let directory = tempfile::tempdir().unwrap();
-    let cache = DropboxCache::with_root(directory.path().join("media-cache"));
-    let entry = DropboxEntry {
-        path_lower: "/megalodon/uncached.wav".into(),
-        path_display: "/Megalodon/Uncached.wav".into(),
-        name: "Uncached.wav".into(),
-        is_folder: false,
-        rev: Some("rev-1".into()),
-        size: None,
-    };
-    let lease = cache.protect(&entry.path_lower, entry.rev.as_deref());
-    let error = materialize_remote_sample_async(None, cache, entry, lease, false)
-        .await
-        .unwrap_err();
-    assert!(error.contains("Reconnect Required"));
 }
 
 /// An App holding one Arrange Audio track with two selected Clips of a
@@ -1017,9 +713,7 @@ async fn joined_audio_clips_survive_save_and_reopen() {
         .await
         .unwrap();
     std::fs::remove_file(staging_path).unwrap();
-    let reopened = load_project_async(project_path, None, 44_100)
-        .await
-        .unwrap();
+    let reopened = load_project_async(project_path, 44_100).await.unwrap();
 
     assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
     assert_eq!(reopened.clips.len(), 2, "joined clip audio lost on reopen");
@@ -1035,16 +729,14 @@ async fn joined_audio_clip_survives_sample_rate_conversion() {
     let (mut app, _) = app_with_two_selected_break_clips(directory.path());
 
     super::test_support::join_selected_audio_clips(&mut app).await;
-    let converted = super::tasks::convert_project_sample_rate_async(
-        super::tasks::SampleRateConversion {
+    let converted =
+        super::tasks::convert_project_sample_rate_async(super::tasks::SampleRateConversion {
             project: app.project_for_save(),
             path: None,
             dirty: true,
             sample_rate: 48_000,
-        },
-        None,
-    )
-    .await;
+        })
+        .await;
 
     assert!(
         converted.loaded.warnings.is_empty(),
@@ -1115,9 +807,7 @@ async fn quantized_audio_clip_survives_save_and_reopen() {
     save_project_async(project_path.clone(), None, app.project_for_save())
         .await
         .unwrap();
-    let reopened = load_project_async(project_path, None, 44_100)
-        .await
-        .unwrap();
+    let reopened = load_project_async(project_path, 44_100).await.unwrap();
 
     assert!(reopened.warnings.is_empty(), "{:?}", reopened.warnings);
     assert_eq!(

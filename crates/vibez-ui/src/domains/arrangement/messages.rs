@@ -297,6 +297,18 @@ pub enum ArrangementMsg {
     },
     CreateClipFromSelection,
     CreateNoteClipFromSelection(TrackId),
+    /// A double-click on an empty lane: a new pattern starting at that beat.
+    CreateNoteClipAt {
+        track_id: TrackId,
+        position_beats: f64,
+    },
+    /// Recolors one note clip (pattern) from its context menu; `None` falls
+    /// back to the track's color.
+    SetNoteClipColor {
+        track_id: TrackId,
+        clip_id: ClipId,
+        color_index: Option<u8>,
+    },
     AudioClipInspectorInputChanged {
         clip_id: ClipId,
         field: AudioClipInspectorField,
@@ -354,6 +366,7 @@ impl ArrangementMsg {
                 | Self::SplitClipsAtRegion { .. }
                 | Self::CreateClipFromSelection
                 | Self::CreateNoteClipFromSelection(_)
+                | Self::CreateNoteClipAt { .. }
         )
     }
 
@@ -412,6 +425,8 @@ impl ArrangementMsg {
                 | Self::SplitClipsAtRegion { .. }
                 | Self::CreateClipFromSelection
                 | Self::CreateNoteClipFromSelection(_)
+                | Self::CreateNoteClipAt { .. }
+                | Self::SetNoteClipColor { .. }
                 | Self::AudioClipInspectorInputChanged { .. }
                 | Self::DiscardAudioClipInspectorEdit { .. }
                 | Self::SubmitAudioClipInspectorField { .. }

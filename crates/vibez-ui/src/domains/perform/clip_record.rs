@@ -171,6 +171,7 @@ pub fn empty_midi_clip(
         loop_start_beats: 0.0,
         loop_end_beats: beats,
         groove_grid: Default::default(),
+        color_index: None,
     });
     LauncherClip {
         id,

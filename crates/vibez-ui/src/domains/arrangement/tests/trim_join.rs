@@ -89,6 +89,7 @@ fn trim_track_mutes_materializes_midi_notes_across_unmuted_fragments() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        color_index: None,
     });
     let mut lane = AutomationLane::new(AutomationTarget::TrackMute);
     for (beat, value) in [(2.0, 1.0), (4.0, 0.0)] {
@@ -226,6 +227,7 @@ fn split_looped_midi_materializes_both_looped_halves() {
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
         groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+        color_index: None,
     });
 
     a.update(
@@ -304,6 +306,7 @@ fn join_looped_midi_expands_repetitions_and_remains_looped() {
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,
             groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+            color_index: None,
         });
         a.selected_clips
             .insert(ArrangementSelection::NoteClip { track_id, clip_id });

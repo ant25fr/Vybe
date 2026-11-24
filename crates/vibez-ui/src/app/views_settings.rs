@@ -47,12 +47,6 @@ const SECTIONS: [Section; 8] = [
         hint: "Where Vibez looks for VST3 and CLAP plugins.",
     },
     Section {
-        tab: SettingsTab::Dropbox,
-        label: "Dropbox",
-        icon: icons::CLOUD,
-        hint: "Browse and audition your Dropbox, and how much of it stays on disk.",
-    },
-    Section {
         tab: SettingsTab::Warping,
         label: "Warping",
         icon: icons::AUDIO_LINES,
@@ -69,6 +63,13 @@ const SECTIONS: [Section; 8] = [
         label: "Appearance",
         icon: icons::PALETTE,
         hint: "How Vibez looks. Changes apply at once and are saved for you, not in the project.",
+    },
+    Section {
+        tab: SettingsTab::Shortcuts,
+        label: "Shortcuts",
+        icon: icons::ARROW_RIGHT_LEFT,
+        hint:
+            "Rebind the keyboard shortcuts. Click a binding, then press the new keys; Esc cancels.",
     },
     Section {
         tab: SettingsTab::Updates,
@@ -167,10 +168,10 @@ impl App {
             SettingsTab::Audio => self.view_settings_audio_tab(),
             SettingsTab::Project => self.view_settings_project_tab(),
             SettingsTab::Plugins => self.view_settings_plugins_tab(),
-            SettingsTab::Dropbox => self.view_settings_dropbox_tab(),
             SettingsTab::Warping => self.view_settings_warping_tab(),
             SettingsTab::Perform => self.view_settings_perform_tab(),
             SettingsTab::Appearance => self.view_settings_appearance_tab(),
+            SettingsTab::Shortcuts => self.view_settings_shortcuts_tab(),
             SettingsTab::Updates => self.view_settings_updates_tab(),
         };
         let body =
@@ -381,21 +382,6 @@ fn settings_tab_style(is_active: bool, status: button::Status) -> button::Style 
             ..Default::default()
         },
         ..Default::default()
-    }
-}
-
-/// Shared with the Dropbox tab, which reports Media Cache usage in the
-/// same units.
-pub(super) fn format_settings_bytes(bytes: u64) -> String {
-    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
-    const MIB: f64 = 1024.0 * 1024.0;
-    const KIB: f64 = 1024.0;
-    if bytes as f64 >= GIB {
-        format!("{:.1} GiB", bytes as f64 / GIB)
-    } else if bytes as f64 >= MIB {
-        format!("{:.1} MiB", bytes as f64 / MIB)
-    } else {
-        format!("{:.1} KiB", bytes as f64 / KIB)
     }
 }
 

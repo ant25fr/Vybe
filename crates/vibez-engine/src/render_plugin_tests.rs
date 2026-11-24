@@ -98,6 +98,7 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: Default::default(),
+        color_index: None,
         notes: vec![0.0, 0.07]
             .into_iter()
             .map(|start_beat| MidiNote {

@@ -78,6 +78,7 @@ pub(super) fn looped_note_clip(
         loop_start_beats: 0.0,
         loop_end_beats: pass_beats,
         groove_grid: first.groove_grid,
+        color_index: None,
     })
 }
 

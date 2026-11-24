@@ -1,4 +1,4 @@
-//! Sample-browser, audition, and remote-catalog UI state.
+//! Sample-browser and audition UI state.
 //! Split from state/mod.rs.
 
 use super::*;
@@ -7,7 +7,104 @@ use super::*;
 pub enum SampleBrowserMode {
     #[default]
     Local,
-    Remote,
+}
+
+/// A device category the browser can show in place of samples, listed in
+/// the Places pane above the sample roots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrowserCategory {
+    Instruments,
+    Fx,
+    Plugins,
+}
+
+impl BrowserCategory {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Instruments => "Instruments",
+            Self::Fx => "FX",
+            Self::Plugins => "Plugins",
+        }
+    }
+
+    /// The small-caps caption over the category's entries in the results pane.
+    pub fn caption(self) -> &'static str {
+        match self {
+            Self::Instruments => "INSTRUMENTS",
+            Self::Fx => "FX",
+            Self::Plugins => "PLUGINS",
+        }
+    }
+
+    pub fn icon(self) -> char {
+        match self {
+            Self::Instruments => crate::icons::MUSIC,
+            Self::Fx => crate::icons::SLIDERS_VERTICAL,
+            Self::Plugins => crate::icons::PLUG,
+        }
+    }
+}
+
+/// What the results pane shows for the current sample browsing scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BrowserResultsView {
+    #[default]
+    List,
+    /// The sample map: one coloured point per sample, on a grid.
+    SampleMap,
+}
+
+/// A special sidebar place, shown in the results pane like a folder but
+/// listing the library's pins or recent items instead of a folder's files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecialPlace {
+    Pinned,
+    Recent,
+    /// Items carrying any of these tag ids.
+    Tags(Vec<u32>),
+}
+
+impl SpecialPlace {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pinned => "Pinned",
+            Self::Recent => "Recent",
+            Self::Tags(_) => "Tags",
+        }
+    }
+
+    pub fn icon(&self) -> char {
+        match self {
+            Self::Pinned => crate::icons::PIN,
+            Self::Recent => crate::icons::HISTORY,
+            Self::Tags(_) => crate::icons::PALETTE,
+        }
+    }
+
+    /// The small-caps caption over the place's rows in the results pane.
+    pub fn caption(&self) -> &'static str {
+        match self {
+            Self::Pinned => "PINNED",
+            Self::Recent => "RECENT",
+            Self::Tags(_) => "TAGS",
+        }
+    }
+}
+
+/// The persistent form of a pinned or recent entry: its absolute path.
+/// Only local files can be pinned or recent, so one string is enough.
+pub fn browser_path_string(source: &MediaSourceRef) -> String {
+    match source {
+        MediaSourceRef::LocalFile { path } => path.display().to_string(),
+        MediaSourceRef::StagedProjectMedia { source_path, .. } => source_path.display().to_string(),
+        MediaSourceRef::StagedRemoteProjectMedia { provenance, .. } => match provenance.as_ref() {
+            vibez_core::track::MediaProvenance::Local { source_path } => {
+                source_path.display().to_string()
+            }
+            _ => String::new(),
+        },
+        MediaSourceRef::ProjectMedia { .. } | MediaSourceRef::DropboxFile { .. } => String::new(),
+    }
 }
 
 pub const BROWSER_DOCK_MIN_WIDTH: f32 = 300.0;
@@ -17,6 +114,8 @@ pub const ARRANGE_MIN_WIDTH_WITH_BROWSER: f32 = 560.0;
 pub const BROWSER_PLACES_MIN_WIDTH: f32 = 124.0;
 pub const BROWSER_PLACES_MAX_WIDTH: f32 = 176.0;
 pub const BROWSER_RESULTS_PAGE_SIZE: usize = 200;
+/// How many recent items the browser keeps.
+pub const BROWSER_RECENT_CAP: usize = 50;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BrowserAuditionPlan {
     Raw,
@@ -34,7 +133,6 @@ pub struct MidiAuditionStart {
 /// What the Audition footer says the Audition is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuditionStatus {
-    Fetching,
     /// A Raw buffer plays while its Warp treatment is prepared.
     Warping,
     Preparing,
@@ -51,7 +149,6 @@ pub enum AuditionStatus {
 impl AuditionStatus {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Fetching => "FETCHING",
             Self::Warping => "WARPING",
             Self::Preparing => "PREPARING",
             Self::Queued => "QUEUED",
@@ -102,7 +199,7 @@ impl LocalRootCatalogState {
     }
 }
 
-/// Browser domain slice: local and remote sample browsing, and
+/// Browser domain slice: local sample browsing, and
 /// drag-and-drop from the browser into the arrangement.
 #[derive(Debug, Clone)]
 pub struct BrowserState {
@@ -132,6 +229,44 @@ pub struct BrowserState {
     pub scan_warnings: Vec<String>,
     pub scan_error: Option<String>,
     pub selected_source: Option<MediaSourceRef>,
+    /// Extra selected rows of a multi-selection (Ctrl+click); the primary
+    /// selection stays `selected_source`, so preview/audition keep working.
+    pub selected_extra: std::collections::HashSet<MediaSourceRef>,
+    /// Which sidebar place is shown besides folders and categories.
+    pub special_place: Option<SpecialPlace>,
+    /// Pinned items, most recently pinned last. Persisted in ui.json.
+    pub pins: Vec<MediaSourceRef>,
+    /// Recently imported items, newest first, capped at 50. Persisted.
+    pub recent: Vec<MediaSourceRef>,
+    /// Row under the pointer, to show its play button.
+    pub hovered_source: Option<MediaSourceRef>,
+    /// Sidebar section open state: "PINNED", "LIBRARY", "FOLDERS".
+    pub sections_open: std::collections::HashMap<&'static str, bool>,
+    /// Double-click detection for result rows.
+    pub entry_double_click: crate::widgets::double_click::DoubleClick,
+    /// Colour tags of the library, seven at first. Persisted in ui.json.
+    pub tags: Vec<TagDef>,
+    /// Tag folders tree (top level). Persisted.
+    pub tag_tree: Vec<TagFolderNode>,
+    /// Tag ids sitting at the top level (not inside any folder).
+    pub top_tag_ids: Vec<u32>,
+    /// Per-item tagging, keyed by absolute path. Persisted.
+    pub item_tags: std::collections::HashMap<String, Vec<u32>>,
+    /// Active footer-dot tag filters (any-of); empty shows everything.
+    pub tag_filters: Vec<u32>,
+    /// Whether the results pane shows the list or the sample map.
+    pub results_view: BrowserResultsView,
+    /// The sample map's legend filter: `Some(kind)` dims every other kind.
+    pub sample_map_kind_filter: Option<SampleMapKind>,
+    /// Expanded tag folders in the sidebar.
+    pub expanded_tag_folders: std::collections::HashSet<u32>,
+    /// Inline rename shown inside a tag context menu (transient).
+    pub renaming_tag: Option<u32>,
+    pub renaming_folder: Option<u32>,
+    pub rename_text: String,
+    /// Two-step remove confirmation inside the tag context menus.
+    pub confirm_remove_tag: Option<u32>,
+    pub confirm_remove_folder: Option<u32>,
     /// Decoded audio used only for the selected Browser source's visual
     /// waveform. Audition still travels through the existing engine path.
     pub waveform_source: Option<MediaSourceRef>,
@@ -139,6 +274,11 @@ pub struct BrowserState {
     pub waveform_loop_fit: Option<crate::warp::LoopGridFit>,
     pub waveform_loading: bool,
     pub waveform_error: Option<String>,
+    /// Decoded previews of recently selected local files, so selecting one
+    /// again neither decodes nor re-analyses it. Bounded by entry count
+    /// and total cached frames.
+    pub preview_cache: HashMap<PathBuf, Arc<crate::message::AnalysedBrowserAudio>>,
+    pub preview_cache_order: std::collections::VecDeque<PathBuf>,
     pub audition_enabled: bool,
     pub audition_gain: f32,
     pub audition_loading: bool,
@@ -165,9 +305,20 @@ pub struct BrowserState {
     pub audition_mode: AuditionMode,
     pub scan_in_progress: bool,
     pub mode: SampleBrowserMode,
-    pub remote: RemoteUiState,
+    /// The device category shown in the results pane instead of samples;
+    /// `None` while browsing samples.
+    pub category: Option<BrowserCategory>,
     pub pending_drag: Option<PendingMediaDrag>,
     pub drag_source: Option<MediaSourceRef>,
+    /// The other selected rows of a multi-row drag (primary is drag_source).
+    pub drag_extra: Vec<MediaSourceRef>,
+    /// A press on a device row that has not moved far enough to be a drag.
+    pub pending_taggable: Option<PendingTaggableDrag>,
+    /// The device (instrument / effect / plug-in) an active drag carries.
+    pub tag_drag: Option<BrowserTaggable>,
+    /// Transient: the track a multi-row empty-area drop's group created, so
+    /// the group's other clips land on it instead of making new tracks.
+    pub new_track_group: Option<(u64, vibez_core::id::TrackId)>,
     pub drag_label: Option<String>,
     pub drag_target: Option<BrowserDropTarget>,
     /// Set while the drag in flight is a file from another app.
@@ -213,11 +364,40 @@ impl Default for BrowserState {
             scan_warnings: Vec::new(),
             scan_error: None,
             selected_source: None,
+            selected_extra: std::collections::HashSet::new(),
+            special_place: None,
+            pins: Vec::new(),
+            recent: Vec::new(),
+            hovered_source: None,
+            sections_open: [
+                ("PINNED", true),
+                ("TAGS", true),
+                ("LIBRARY", true),
+                ("FOLDERS", true),
+            ]
+            .into_iter()
+            .collect(),
+            entry_double_click: Default::default(),
+            tags: Self::default_tags(),
+            tag_tree: Vec::new(),
+            top_tag_ids: (1..=7).collect(),
+            item_tags: std::collections::HashMap::new(),
+            tag_filters: Vec::new(),
+            results_view: BrowserResultsView::List,
+            sample_map_kind_filter: None,
+            expanded_tag_folders: std::collections::HashSet::new(),
+            renaming_tag: None,
+            renaming_folder: None,
+            rename_text: String::new(),
+            confirm_remove_tag: None,
+            confirm_remove_folder: None,
             waveform_source: None,
             waveform_audio: None,
             waveform_loop_fit: None,
             waveform_loading: false,
             waveform_error: None,
+            preview_cache: HashMap::new(),
+            preview_cache_order: std::collections::VecDeque::new(),
             audition_enabled: true,
             audition_gain: 1.0,
             audition_loading: false,
@@ -233,9 +413,13 @@ impl Default for BrowserState {
             audition_mode: AuditionMode::default(),
             scan_in_progress: false,
             mode: SampleBrowserMode::default(),
-            remote: RemoteUiState::default(),
+            category: None,
             pending_drag: None,
             drag_source: None,
+            drag_extra: Vec::new(),
+            pending_taggable: None,
+            tag_drag: None,
+            new_track_group: None,
             drag_label: None,
             drag_target: None,
             desktop_drop: None,
@@ -333,6 +517,7 @@ impl BrowserState {
 
     pub fn select_local_folder(&mut self, folder: Option<PathBuf>) {
         self.current_folder = folder;
+        self.category = None;
         if let Some(folder) = &self.current_folder {
             self.expanded_local_folders.insert(folder.clone());
         }
@@ -371,21 +556,6 @@ impl BrowserState {
     }
 
     pub fn cycle_search_scope(&mut self) {
-        if self.mode == SampleBrowserMode::Remote {
-            self.search_scope = match self.search_scope {
-                BrowserSearchScope::SelectedFolder if self.remote.current_path.is_empty() => {
-                    BrowserSearchScope::Everywhere
-                }
-                BrowserSearchScope::SelectedFolder => BrowserSearchScope::Root,
-                BrowserSearchScope::Root => BrowserSearchScope::Everywhere,
-                BrowserSearchScope::Everywhere if self.remote.current_path.is_empty() => {
-                    BrowserSearchScope::SelectedFolder
-                }
-                BrowserSearchScope::Everywhere => BrowserSearchScope::SelectedFolder,
-            };
-            self.reset_results_window();
-            return;
-        }
         self.search_scope = match self.search_scope {
             BrowserSearchScope::SelectedFolder
                 if self.current_folder.is_some()
@@ -442,6 +612,28 @@ impl BrowserState {
         total.min(self.results_visible_limit)
     }
 
+    /// Root and folder rows shown above the media rows for `query`
+    /// (already the visible window the media limit subtracts from).
+    pub fn visible_folder_row_count(&self, query: &str) -> usize {
+        let searching = !query.is_empty();
+        let root_results = if !searching && self.current_folder.is_none() {
+            self.roots.len()
+        } else if searching && self.search_scope_path().is_none() {
+            self.roots
+                .iter()
+                .filter(|root| root.display().to_string().to_lowercase().contains(query))
+                .count()
+        } else {
+            0
+        };
+        let folder_results = self
+            .folders
+            .iter()
+            .filter(|folder| self.local_folder_is_result(folder, query))
+            .count();
+        root_results + folder_results
+    }
+
     pub fn has_more_results(&self, total: usize) -> bool {
         self.results_visible_limit < total
     }
@@ -457,7 +649,93 @@ impl BrowserState {
 
     pub fn clear_selection(&mut self) {
         self.selected_source = None;
+        self.selected_extra.clear();
         self.clear_waveform();
+    }
+
+    /// Whether `source` is part of the current selection.
+    pub fn is_selected(&self, source: &MediaSourceRef) -> bool {
+        self.selected_source.as_ref() == Some(source) || self.selected_extra.contains(source)
+    }
+
+    /// Every selected source: the primary one first, then the extras in
+    /// list order. Empty when nothing is selected.
+    pub fn selection_sources(&self, ordered_results: &[MediaSourceRef]) -> Vec<MediaSourceRef> {
+        let mut out = Vec::new();
+        if let Some(primary) = &self.selected_source {
+            out.push(primary.clone());
+        }
+        for source in ordered_results {
+            if self.selected_extra.contains(source) && Some(source) != self.selected_source.as_ref()
+            {
+                out.push(source.clone());
+            }
+        }
+        out
+    }
+
+    pub fn selection_count(&self) -> usize {
+        self.selected_extra.len() + usize::from(self.selected_source.is_some())
+    }
+
+    pub fn is_pinned(&self, source: &MediaSourceRef) -> bool {
+        self.pins.contains(source)
+    }
+
+    /// Pin or unpin `source`; returns the new pinned state.
+    pub fn toggle_pin(&mut self, source: MediaSourceRef) -> bool {
+        if let Some(index) = self.pins.iter().position(|pinned| pinned == &source) {
+            self.pins.remove(index);
+            false
+        } else {
+            self.pins.push(source);
+            true
+        }
+    }
+
+    /// Record `source` as recently used (imported into the project),
+    /// newest first, deduplicated, capped at 50.
+    pub fn push_recent(&mut self, source: MediaSourceRef) {
+        self.recent.retain(|recent| recent != &source);
+        self.recent.insert(0, source);
+        self.recent.truncate(BROWSER_RECENT_CAP);
+    }
+
+    /// Show a special place in the results pane, leaving any folder or
+    /// category. `None` goes back to folders/categories.
+    pub fn select_special_place(&mut self, place: Option<SpecialPlace>) {
+        if place.is_some() {
+            self.current_folder = None;
+            self.category = None;
+            self.results_view = BrowserResultsView::List;
+        }
+        self.special_place = place;
+    }
+
+    pub fn section_open(&self, section: &'static str) -> bool {
+        self.sections_open.get(section).copied().unwrap_or(true)
+    }
+
+    pub fn toggle_section(&mut self, section: &'static str) {
+        let open = self.section_open(section);
+        self.sections_open.insert(section, !open);
+    }
+
+    /// Sources a special place lists: pins in pin order, recent newest
+    /// first. Missing files are kept (shown as missing), not dropped.
+    pub fn special_place_sources(&self, place: &SpecialPlace) -> Vec<MediaSourceRef> {
+        match place {
+            SpecialPlace::Pinned => self.pins.clone(),
+            SpecialPlace::Recent => self.recent.clone(),
+            SpecialPlace::Tags(ids) => self.items_with_any_tags(ids),
+        }
+    }
+
+    /// Resolve a special-place source against the catalog: the indexed
+    /// entry when the file is still there, else a bare reference shown as
+    /// missing.
+    pub fn entry_for_source(&self, source: &MediaSourceRef) -> Option<&SampleBrowserEntry> {
+        self.entries.iter().find(|entry| &entry.source == source)
     }
 
     pub fn begin_waveform_load(&mut self, source: &MediaSourceRef) {
@@ -553,10 +831,20 @@ impl BrowserState {
             .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
     }
 
+    /// The footer waveform's playhead: the playing audition's position, or
+    /// the position dragged while stopped, relative to the shown audio.
+    pub fn preview_playhead_fraction(&self) -> Option<f32> {
+        if let Some(fraction) = self.audition_playhead_fraction() {
+            return Some(fraction);
+        }
+        let audio = self.waveform_audio.as_ref()?;
+        let frames = audio.num_frames();
+        (frames > 0 && self.audition_position_frames > 0)
+            .then(|| (self.audition_position_frames as f64 / frames as f64).clamp(0.0, 1.0) as f32)
+    }
+
     pub fn audition_status(&self) -> AuditionStatus {
-        if self.remote.preview_in_progress {
-            AuditionStatus::Fetching
-        } else if self.audition_loading
+        if self.audition_loading
             && self.audition_playing
             && self.audition_playback_mode == Some(AuditionMode::Raw)
         {
@@ -686,18 +974,96 @@ impl BrowserState {
 
     pub fn begin_pending_drag(
         &mut self,
-        source: MediaSourceRef,
+        sources: Vec<MediaSourceRef>,
         label: String,
         origin_x: f32,
         origin_y: f32,
     ) {
         self.cancel_media_drag();
+        self.new_track_group = None;
+        let mut sources = sources;
+        let Some(source) = sources.first().cloned() else {
+            return;
+        };
+        let extra = sources.split_off(1);
+        // A multi-row drag is labelled with its count: "kick.wav +2".
+        let label = if extra.is_empty() {
+            label
+        } else {
+            format!("{label} +{}", extra.len())
+        };
         self.pending_drag = Some(PendingMediaDrag {
             source,
+            extra,
             label,
             origin_x,
             origin_y,
         });
+    }
+
+    /// Start a pending drag of a device row (instrument, effect, plug-in);
+    /// it becomes a tag drag once the pointer moves far enough.
+    pub fn begin_pending_taggable_drag(
+        &mut self,
+        item: BrowserTaggable,
+        label: String,
+        origin_x: f32,
+        origin_y: f32,
+    ) {
+        self.cancel_media_drag();
+        self.pending_taggable = Some(PendingTaggableDrag {
+            item,
+            label,
+            origin_x,
+            origin_y,
+        });
+    }
+
+    /// Past the drag threshold, the pending device drag becomes active.
+    pub fn move_pending_taggable_drag(&mut self, x: f32, y: f32) -> bool {
+        let Some(pending) = self.pending_taggable.as_ref() else {
+            return false;
+        };
+        let dx = x - pending.origin_x;
+        let dy = y - pending.origin_y;
+        if dx * dx + dy * dy <= MEDIA_DRAG_THRESHOLD_PX * MEDIA_DRAG_THRESHOLD_PX {
+            return false;
+        }
+        let pending = self.pending_taggable.take().expect("pending taggable drag");
+        self.tag_drag = Some(pending.item);
+        self.drag_label = Some(pending.label);
+        self.drag_target = None;
+        true
+    }
+
+    /// Whether any drag is in flight, media or device.
+    pub fn drag_in_flight(&self) -> bool {
+        self.drag_source.is_some() || self.tag_drag.is_some()
+    }
+
+    /// Every source the active drag carries, primary first; empty when no
+    /// drag is active. Takes the drag's sources but leaves the rest of the
+    /// drag state for `cancel_media_drag`.
+    pub fn take_drag_sources(&mut self) -> Vec<MediaSourceRef> {
+        let mut sources = Vec::new();
+        if let Some(source) = self.drag_source.take() {
+            sources.push(source);
+        }
+        sources.append(&mut self.drag_extra);
+        sources
+    }
+
+    /// A catalog entry's duration in samples at `sample_rate`, when known;
+    /// used to place a multi-row drop's clips one after another.
+    pub fn entry_duration_samples(&self, source: &MediaSourceRef, sample_rate: u32) -> u64 {
+        let seconds = self
+            .entry_for_source(source)
+            .and_then(|entry| entry.duration_seconds)
+            .unwrap_or(0.0);
+        if sample_rate == 0 || !(seconds.is_finite() && seconds > 0.0) {
+            return 0;
+        }
+        (seconds * sample_rate as f64) as u64
     }
 
     pub fn move_pending_drag(&mut self, x: f32, y: f32) -> bool {
@@ -711,6 +1077,7 @@ impl BrowserState {
         }
         let pending = self.pending_drag.take().expect("pending drag exists");
         self.drag_source = Some(pending.source);
+        self.drag_extra = pending.extra;
         self.drag_label = Some(pending.label);
         self.drag_target = None;
         true
@@ -718,11 +1085,15 @@ impl BrowserState {
 
     pub fn cancel_pending_drag(&mut self) {
         self.pending_drag = None;
+        self.pending_taggable = None;
     }
 
     pub fn cancel_media_drag(&mut self) {
         self.pending_drag = None;
+        self.pending_taggable = None;
+        self.tag_drag = None;
         self.drag_source = None;
+        self.drag_extra.clear();
         self.drag_label = None;
         self.drag_target = None;
         self.desktop_drop = None;
@@ -760,6 +1131,45 @@ impl BrowserState {
             .imported_beats(seconds, self.waveform_loop_fit, project_bpm)
     }
 
+    /// Decoded preview for a local file decoded recently, if still cached.
+    pub fn cached_preview(
+        &self,
+        path: &std::path::Path,
+    ) -> Option<crate::message::AnalysedBrowserAudio> {
+        self.preview_cache
+            .get(path)
+            .map(|cached| (**cached).clone())
+    }
+
+    /// Keeps a decoded preview for its file, evicting the oldest entries
+    /// past the entry-count or total-frames budget.
+    pub fn remember_preview(
+        &mut self,
+        path: PathBuf,
+        analysed: crate::message::AnalysedBrowserAudio,
+    ) {
+        const MAX_ENTRIES: usize = 6;
+        const MAX_FRAMES: u64 = 30_000_000;
+        self.preview_cache_order.retain(|entry| *entry != path);
+        self.preview_cache_order.push_back(path.clone());
+        self.preview_cache.insert(path, Arc::new(analysed));
+        let mut total: u64 = self
+            .preview_cache
+            .values()
+            .map(|cached| cached.audio.num_frames() as u64)
+            .sum();
+        while (self.preview_cache.len() > MAX_ENTRIES || total > MAX_FRAMES)
+            && self.preview_cache_order.len() > 1
+        {
+            let Some(oldest) = self.preview_cache_order.pop_front() else {
+                break;
+            };
+            if let Some(removed) = self.preview_cache.remove(&oldest) {
+                total = total.saturating_sub(removed.audio.num_frames() as u64);
+            }
+        }
+    }
+
     pub fn install_waveform(
         &mut self,
         source: MediaSourceRef,
@@ -767,6 +1177,9 @@ impl BrowserState {
     ) -> bool {
         if self.selected_source.as_ref() != Some(&source) {
             return false;
+        }
+        if let MediaSourceRef::LocalFile { path } = &source {
+            self.remember_preview(path.clone(), analysed.clone());
         }
         let channels = analysed.audio.num_channels();
         let sample_rate = analysed.audio.sample_rate;
@@ -786,6 +1199,22 @@ impl BrowserState {
         self.waveform_loading = false;
         self.waveform_error = None;
         true
+    }
+
+    /// Stores the preview's asynchronously analysed loop fit.
+    pub fn set_waveform_loop_fit(&mut self, fit: Option<crate::warp::LoopGridFit>) {
+        self.waveform_loop_fit = fit;
+    }
+
+    /// Keeps a cached preview's loop fit in step with the shown waveform.
+    pub fn update_cached_preview_fit(
+        &mut self,
+        path: &std::path::Path,
+        fit: Option<crate::warp::LoopGridFit>,
+    ) {
+        if let Some(cached) = self.preview_cache.get_mut(path) {
+            Arc::make_mut(cached).loop_fit = fit;
+        }
     }
 
     pub fn fail_waveform_load(&mut self, source: &MediaSourceRef, error: String) {
@@ -841,233 +1270,5 @@ impl BrowserState {
         let results_width =
             self.effective_dock_width(window_width) - self.places_pane_width(window_width);
         results_width >= 400.0
-    }
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub enum RemoteCatalogState {
-    #[default]
-    Ready,
-    Loading,
-    Refreshing,
-    Stale {
-        error: String,
-    },
-    Partial {
-        pages: usize,
-        error: String,
-    },
-    AuthenticationRequired {
-        error: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RemoteAvailability {
-    RemoteOnly,
-    Cached,
-    Fetching,
-    ReconnectRequired,
-    Unavailable { error: String },
-}
-
-impl RemoteAvailability {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::RemoteOnly => "REMOTE",
-            Self::Cached => "CACHED",
-            Self::Fetching => "FETCH",
-            Self::ReconnectRequired => "RETRY",
-            Self::Unavailable { .. } => "ERROR",
-        }
-    }
-}
-
-impl RemoteCatalogState {
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Ready => "READY",
-            Self::Loading => "LOADING",
-            Self::Refreshing => "REFRESHING",
-            Self::Stale { .. } => "STALE",
-            Self::Partial { .. } => "PARTIAL",
-            Self::AuthenticationRequired { .. } => "SIGN IN",
-        }
-    }
-}
-
-#[cfg(test)]
-mod remote_catalog_state_tests {
-    use super::RemoteCatalogState;
-
-    #[test]
-    fn refresh_auth_stale_and_partial_states_have_distinct_labels() {
-        assert_eq!(RemoteCatalogState::Loading.label(), "LOADING");
-        assert_eq!(RemoteCatalogState::Refreshing.label(), "REFRESHING");
-        assert_eq!(
-            RemoteCatalogState::AuthenticationRequired {
-                error: "sign in".into()
-            }
-            .label(),
-            "SIGN IN"
-        );
-        assert_eq!(
-            RemoteCatalogState::Stale {
-                error: "offline".into()
-            }
-            .label(),
-            "STALE"
-        );
-        assert_eq!(
-            RemoteCatalogState::Partial {
-                pages: 1,
-                error: "offline".into()
-            }
-            .label(),
-            "PARTIAL"
-        );
-    }
-}
-
-/// Provider-neutral Browser state for Remote Connections. Dropbox V1 auth
-/// fields remain here because Dropbox is the sole shipped adapter.
-#[derive(Debug, Clone)]
-pub struct RemoteUiState {
-    pub connected: bool,
-    pub account_email: Option<String>,
-    /// App key entered in settings (may be empty until the user pastes one).
-    pub app_key_input: String,
-    /// Whether any source of app key is present (settings, env, build-time).
-    pub has_app_key: bool,
-    /// An OAuth flow is in progress; Connect button is disabled.
-    pub auth_in_progress: bool,
-    pub last_error: Option<String>,
-    pub catalog: Arc<RemoteCatalogSnapshot>,
-    pub catalog_state: RemoteCatalogState,
-    /// Pages and entries applied during the current progressive Catalog Refresh.
-    pub refresh_pages: usize,
-    pub refresh_items: usize,
-    /// Current provider folder (`""` means the connection root).
-    pub current_path: String,
-    /// Whether the Remote place reveals its configured connections.
-    pub place_expanded: bool,
-    /// Whether the Dropbox connection reveals its folder tree.
-    pub connection_expanded: bool,
-    /// Paths expanded beneath the connection in Places.
-    pub expanded: HashSet<String>,
-    /// Derived catalog lookup used by Places and ordinary folder navigation.
-    /// Values are indexes into `catalog.entries`, sorted folder-first by name.
-    pub catalog_children: HashMap<String, Vec<usize>>,
-    /// Provider item identity of the current Remote selection.
-    pub selected_path: Option<String>,
-    /// A preview fetch / playback is in flight.
-    pub preview_in_progress: bool,
-    /// UI-owned availability per provider item. Mutate ONLY through
-    /// [`Self::set_availability`] / [`Self::replace_availability`] so the
-    /// runtime revision below stays in sync; direct inserts reintroduce the
-    /// refresh-clobber race those methods exist to prevent.
-    pub availability: HashMap<String, RemoteAvailability>,
-    /// Changes made by materialization/import flows while a catalog refresh
-    /// snapshot is being prepared. Prepared snapshots use this to detect and
-    /// rebase over newer UI-owned metadata instead of replacing it. Bumped
-    /// internally by the mutation methods on this type; never write it
-    /// directly.
-    pub catalog_runtime_revision: u64,
-    pub cache_usage_bytes: u64,
-    pub cache_entries: usize,
-    pub cache_budget_bytes: u64,
-    pub cache_automatic_eviction: bool,
-    pub cache_error: Option<String>,
-}
-
-impl Default for RemoteUiState {
-    fn default() -> Self {
-        Self {
-            connected: false,
-            account_email: None,
-            app_key_input: String::new(),
-            has_app_key: false,
-            auth_in_progress: false,
-            last_error: None,
-            catalog: Arc::new(RemoteCatalogSnapshot::default()),
-            catalog_state: RemoteCatalogState::default(),
-            refresh_pages: 0,
-            refresh_items: 0,
-            current_path: String::new(),
-            place_expanded: true,
-            connection_expanded: true,
-            expanded: HashSet::new(),
-            catalog_children: HashMap::new(),
-            selected_path: None,
-            preview_in_progress: false,
-            availability: HashMap::new(),
-            catalog_runtime_revision: 0,
-            cache_usage_bytes: 0,
-            cache_entries: 0,
-            cache_budget_bytes: vibez_dropbox::DEFAULT_MEDIA_CACHE_BUDGET_BYTES,
-            cache_automatic_eviction: true,
-            cache_error: None,
-        }
-    }
-}
-
-impl RemoteUiState {
-    fn mark_catalog_runtime_changed(&mut self) {
-        self.catalog_runtime_revision = self.catalog_runtime_revision.wrapping_add(1);
-    }
-
-    /// Record a UI-owned availability change and bump the runtime revision so
-    /// an in-flight refresh preparation rebases over it instead of clobbering
-    /// it.
-    pub(crate) fn set_availability(
-        &mut self,
-        provider_item_id: String,
-        availability: RemoteAvailability,
-    ) {
-        self.availability.insert(provider_item_id, availability);
-        self.mark_catalog_runtime_changed();
-    }
-
-    /// Replace the whole availability map (startup load, cache reseed) and
-    /// bump the runtime revision.
-    pub(crate) fn replace_availability(
-        &mut self,
-        availability: HashMap<String, RemoteAvailability>,
-    ) {
-        self.availability = availability;
-        self.mark_catalog_runtime_changed();
-    }
-
-    /// Write derived metadata for one catalog entry (post-materialization)
-    /// and bump the runtime revision.
-    pub(crate) fn set_entry_derived_metadata(
-        &mut self,
-        provider_item_id: &str,
-        metadata: vibez_dropbox::DerivedMetadata,
-    ) {
-        if let Some(entry) = Arc::make_mut(&mut self.catalog)
-            .entries
-            .iter_mut()
-            .find(|entry| entry.provider_item_id == provider_item_id)
-        {
-            entry.derived_metadata = Some(metadata);
-        }
-        self.mark_catalog_runtime_changed();
-    }
-
-    /// Rebuild the parent/children lookup after the catalog is loaded or
-    /// reconciled. UI redraws can then navigate one folder without rescanning
-    /// the complete provider catalog.
-    #[cfg(test)]
-    pub fn rebuild_catalog_children(&mut self) {
-        self.catalog_children =
-            crate::remote_provider::build_remote_catalog_children(&self.catalog);
-    }
-
-    pub fn catalog_child_indices(&self, parent: &str) -> &[usize] {
-        self.catalog_children
-            .get(parent)
-            .map(Vec::as_slice)
-            .unwrap_or_default()
     }
 }

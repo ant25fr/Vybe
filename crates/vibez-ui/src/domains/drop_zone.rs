@@ -46,6 +46,8 @@ impl BrowserDropTarget {
                 })
             }
             Self::Sampler { .. } => DropAction::Load,
+            // A tag row takes the drag: the release tags the dragged items.
+            Self::TagRow { .. } => DropAction::Add,
             Self::ClipSlot { .. } | Self::NewTrackSlot { .. } => return None,
             Self::DevicePanel { drop, .. } => match drop {
                 DevicePanelDrop::AddSampler => DropAction::Add,

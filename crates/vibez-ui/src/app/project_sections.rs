@@ -59,6 +59,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
                         loop_start_beats: clip.loop_start_beats,
                         loop_end_beats: clip.loop_end_beats,
                         groove_grid: clip.groove_grid,
+                        color_index: clip.color_index,
                     }),
             );
         if !content.automation.is_empty() {
@@ -117,6 +118,7 @@ pub(super) fn timeline_without_audio(info: &TimelineInfo) -> ArrangementTimeline
             loop_start_beats: clip.loop_start_beats,
             loop_end_beats: clip.loop_end_beats,
             groove_grid: clip.groove_grid,
+            color_index: clip.color_index,
         });
     }
     timeline
@@ -405,6 +407,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 4.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+                color_index: None,
             });
 
         let info = section_info_from_ui(&section);

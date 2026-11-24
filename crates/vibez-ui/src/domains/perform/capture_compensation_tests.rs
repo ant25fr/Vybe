@@ -127,6 +127,7 @@ fn midi_offsets_preserve_note_duration_velocity_and_groove() {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: GrooveGrid::Sixteenth,
+                color_index: None,
             });
     }
     let mut capture = capture();

@@ -864,6 +864,26 @@ pub fn track_color(index: u8) -> Color {
     let palette = CURRENT.read().unwrap();
     colour_strength().track(palette.track_colors[index as usize % palette.track_colors.len()])
 }
+/// Number of swatches a pattern (note clip) can pick from: the track
+/// palette plus one lighter variant per entry.
+pub const CLIP_COLOR_COUNT: u8 = 16;
+
+/// Get a pattern (note clip) color by index: the 8 track colors, then 8
+/// lighter variants of them, wrapping at [`CLIP_COLOR_COUNT`]. Unlike
+/// tracks, clips may pick any of the 16 so two patterns on one track can
+/// still be told apart.
+pub fn clip_color(index: u8) -> Color {
+    let palette = CURRENT.read().unwrap();
+    let base_count = palette.track_colors.len() as u8;
+    let slot = index % CLIP_COLOR_COUNT;
+    let base = palette.track_colors[slot as usize % base_count as usize];
+    let color = if slot < base_count {
+        base
+    } else {
+        blend(base, Color::WHITE, 0.38)
+    };
+    colour_strength().track(color)
+}
 
 /// Darken a color by a factor (for borders, etc.)
 pub fn darken(color: Color, factor: f32) -> Color {

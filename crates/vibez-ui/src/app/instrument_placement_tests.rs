@@ -53,7 +53,7 @@ async fn a_saved_instrument_on_an_audio_track_still_loads_and_can_be_removed() {
         save_project_async(path.clone(), None, project)
             .await
             .unwrap();
-        let loaded = load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        let loaded = load_project_async(path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap();
         let mut app = app();

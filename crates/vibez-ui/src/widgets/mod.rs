@@ -53,6 +53,8 @@ pub mod limiter_display;
 pub mod local_drag;
 pub mod mini_waveform;
 pub mod mixer_strip;
+pub mod multiband_dynamics_device;
+pub mod multiband_dynamics_display;
 pub mod on_blur;
 pub mod phaser_device;
 pub mod phaser_display;

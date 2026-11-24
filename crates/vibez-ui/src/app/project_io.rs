@@ -235,10 +235,6 @@ impl App {
 
     pub(super) fn reset_to_new_project(&mut self) {
         self.save_runtime.reset_document();
-        self.remote_import_request.cancel();
-        self.remote_materialization_request.cancel();
-        self.remote_audition_cache_lease = None;
-        let _ = self.dropbox_cache.set_policy(self.dropbox_cache.policy());
         self.clear_project_runtime();
         self.state
             .perform
@@ -274,10 +270,39 @@ impl App {
             fixed_computer_velocity: self.state.perform.fixed_computer_velocity(),
             track_mute_quantization: self.state.perform.track_mute_quantization(),
             sample_library_roots: self.state.browser.roots.clone(),
+            browser_pins: self
+                .state
+                .browser
+                .pins
+                .iter()
+                .map(crate::state::browser_path_string)
+                .collect(),
+            browser_recent: self
+                .state
+                .browser
+                .recent
+                .iter()
+                .map(crate::state::browser_path_string)
+                .collect(),
+            browser_tags: self.state.browser.tags.clone(),
+            browser_tag_tree: self.state.browser.tag_tree.clone(),
+            browser_top_tag_ids: self.state.browser.top_tag_ids.clone(),
+            browser_item_tags: self
+                .state
+                .browser
+                .item_tags
+                .iter()
+                .map(|(path, tags)| crate::state::StoredItemTags {
+                    path: path.clone(),
+                    tags: tags.clone(),
+                })
+                .collect(),
             sample_browser_open: self.state.browser.open,
             sample_browser_width: self.state.browser.dock_width,
             perform_surface_width: self.state.view.perform_surface_width,
             detail_panel_height: self.state.view.detail_panel_height,
+            automation_lane_heights: self.state.automation_ui.saved_lane_heights(),
+            shortcut_overrides: self.shortcuts.overrides().clone(),
             mix_detail_panel_height: self.state.view.mix_detail_panel_height,
             arrange_grid: self.state.view.arrange_grid,
             clip_grid: self.state.view.clip_grid,
@@ -295,8 +320,6 @@ impl App {
             audio_sample_rate: Some(self.state.audio_settings.sample_rate),
             audio_buffer_size: self.state.audio_settings.buffer_size,
             theme: Some(self.state.current_theme_name.clone()),
-            media_cache_budget_bytes: self.state.browser.remote.cache_budget_bytes,
-            media_cache_automatic_eviction: self.state.browser.remote.cache_automatic_eviction,
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
             auto_save_enabled: self.state.auto_save_enabled,
             interface_scale: self.interface_scale,
@@ -812,6 +835,7 @@ impl App {
                 loop_start_beats: note_clip.loop_start_beats,
                 loop_end_beats: note_clip.loop_end_beats,
                 groove_grid: note_clip.groove_grid,
+                color_index: note_clip.color_index,
             };
             self.send_command(clip.add_command(note_clip.track_id));
             if self.state.find_track(note_clip.track_id).is_some() {
@@ -1006,9 +1030,7 @@ mod tests {
         let saved = serde_json::to_value(app.ui_settings()).unwrap();
 
         assert_eq!(saved["mix_detail_panel_height"], 312.0);
-        assert_eq!(
-            saved["detail_panel_height"],
-            f64::from(crate::state::DETAIL_PANEL_DEFAULT_HEIGHT)
-        );
+        // Never dragged in Arrange/Perform, so the arrange split is unset.
+        assert_eq!(saved["detail_panel_height"], serde_json::Value::Null);
     }
 }

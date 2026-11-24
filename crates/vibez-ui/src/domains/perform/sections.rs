@@ -432,6 +432,7 @@ mod tests {
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
                     groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+                    color_index: None,
                 }],
                 automation: vec![lane],
                 ..TrackTimelineContent::default()
@@ -485,6 +486,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                color_index: None,
             });
 
         assert!(arrange.editor.timeline.get(track_id).is_none());
@@ -514,6 +516,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                color_index: None,
             });
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
         assert_eq!(section_clip.name, "Section Pattern");
@@ -585,6 +588,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            color_index: None,
         };
         Arc::make_mut(&mut section.timeline)
             .ensure(track_id)
@@ -626,6 +630,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                color_index: None,
             });
         let tracks = [
             crate::state::ProjectTrack::new(populated_id, "Drums".into(), 0),

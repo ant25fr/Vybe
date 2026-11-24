@@ -23,16 +23,20 @@ use super::*;
 const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
-// Reserve 440 px for the workspace card below the chrome row, above the
-// status bar and between the frame gaps, so a dragged detail panel can never
-// crush Perform or Arrange into a letterbox.
-const APP_CHROME_AND_WORKSPACE_MIN_HEIGHT: f32 = super::views_control_bar_style::BAR_HEIGHT
+// The chrome row above the work column, the status bar below it and the
+// frame gaps around them, which a dragged detail panel always leaves alone.
+const APP_CHROME_AND_GAPS_HEIGHT: f32 = super::views_control_bar_style::BAR_HEIGHT
     + crate::shell_layout::STATUS_HEIGHT
-    + 2.0 * crate::shell_layout::PANE_GAP
-    + 440.0;
+    + 2.0 * crate::shell_layout::PANE_GAP;
+// The room the workspace card keeps at least outside Arrange, where the pad
+// surface needs its height. In Arrange the rack may grow until the card is
+// down to one visible track, so the drag never crushes the timeline into a
+// letterbox either.
+const WORKSPACE_MIN_HEIGHT: f32 = 440.0;
 // The dogfood reference at a 1,920 x 1,040 work area leaves about 364 px for
-// the detail panel. Preserve that 35% composition when a saved drag height is
-// larger than the current window can comfortably show.
+// the detail panel. Keep that 35% composition for the panel's resting height;
+// a dragged height may use all the room the window has, so the rack can be
+// enlarged past it in Arrange.
 const DETAIL_PANEL_MAX_WINDOW_FRACTION: f32 = 0.35;
 
 pub(super) fn resolved_detail_playhead_samples(
@@ -50,18 +54,47 @@ pub(super) fn resolved_detail_playhead_samples(
         .map(|_| section_samples)
 }
 
+/// The tallest the detail card may get in a window `window_height` tall: all
+/// the room the window leaves below the workspace card's `workspace_min`
+/// minimum, never below the card's minimum. A drag may use this whole
+/// range, so in Arrange the rack can be enlarged until one track stays
+/// visible.
+fn detail_panel_maximum_height(window_height: f32, workspace_min: f32) -> f32 {
+    (window_height - APP_CHROME_AND_GAPS_HEIGHT - workspace_min).max(DETAIL_PANEL_MIN_HEIGHT)
+}
+
+/// The tallest the detail card rests at before any drag: the window's room
+/// for it, capped at the 35% composition so the workspace keeps its share.
+fn detail_panel_resting_maximum_height(window_height: f32, workspace_min: f32) -> f32 {
+    detail_panel_maximum_height(window_height, workspace_min)
+        .min(window_height * DETAIL_PANEL_MAX_WINDOW_FRACTION)
+        .max(DETAIL_PANEL_MIN_HEIGHT)
+}
+
+/// The detail card's height from the height `stored` the producer dragged,
+/// if any. Until the divider is first dragged (`None`) the card rests at
+/// the default, grown to an open editor's preferred height, within the 35%
+/// composition; a dragged height is honoured over the whole range the
+/// window allows, so the rack/piano roll can be enlarged or shrunk freely
+/// even while the piano roll is open.
 fn effective_detail_panel_height(
-    preferred_height: f32,
+    stored: Option<f32>,
     window_height: f32,
+    workspace_min: f32,
     editor_preferred_height: f32,
 ) -> f32 {
-    let maximum_by_workspace = window_height - APP_CHROME_AND_WORKSPACE_MIN_HEIGHT;
-    let maximum_by_fraction = window_height * DETAIL_PANEL_MAX_WINDOW_FRACTION;
-    let maximum = maximum_by_workspace
-        .min(maximum_by_fraction)
-        .max(DETAIL_PANEL_MIN_HEIGHT);
-    let preferred_height = preferred_height.max(editor_preferred_height);
-    preferred_height.clamp(DETAIL_PANEL_MIN_HEIGHT, maximum)
+    match stored {
+        Some(height) => height.clamp(
+            DETAIL_PANEL_MIN_HEIGHT,
+            detail_panel_maximum_height(window_height, workspace_min),
+        ),
+        None => crate::state::DETAIL_PANEL_DEFAULT_HEIGHT
+            .max(editor_preferred_height)
+            .clamp(
+                DETAIL_PANEL_MIN_HEIGHT,
+                detail_panel_resting_maximum_height(window_height, workspace_min),
+            ),
+    }
 }
 
 fn visible_note_clip_for_track(editor: &TimelineEditorState, track_id: TrackId) -> Option<ClipId> {
@@ -374,19 +407,37 @@ impl App {
         )
     }
 
+    /// The least height the workspace card keeps: one visible track in
+    /// Arrange, the pad surface's room in Perform.
+    fn workspace_card_min_height(&self) -> f32 {
+        if self.state.view.workspace == crate::state::Workspace::Arrange {
+            super::views_arrangement::ARRANGE_ONE_TRACK_VISIBLE_HEIGHT
+        } else {
+            WORKSPACE_MIN_HEIGHT
+        }
+    }
+
     pub(super) fn effective_detail_height(&self) -> f32 {
         effective_detail_panel_height(
             self.state.view.detail_panel_height,
             self.state.view.window_height,
+            self.workspace_card_min_height(),
             self.detail_editor_preferred_height(),
         )
     }
 
+    /// The height a drag on the divider asks for: the pointer's distance
+    /// from the window's foot, clamped to the card's whole range. The open
+    /// editor's preferred height does not pin a drag, so the rack/piano
+    /// roll can be enlarged until the workspace is at its minimum — one
+    /// visible track in Arrange — and shrunk below the editor's preference.
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
-        effective_detail_panel_height(
-            crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height),
-            self.state.view.window_height,
-            self.detail_editor_preferred_height(),
+        crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height).clamp(
+            DETAIL_PANEL_MIN_HEIGHT,
+            detail_panel_maximum_height(
+                self.state.view.window_height,
+                self.workspace_card_min_height(),
+            ),
         )
     }
 
@@ -455,6 +506,7 @@ impl App {
 
         let clip_view = visible_clip.and_then(|clip| self.state.view.clip_editor_view(clip.id));
         piano_widget.view = clip_view;
+        piano_widget.wheel_zoom = self.wheel_zoom();
         velocity_widget.view = clip_view;
         piano_widget.reserve_arrow_keys = self.state.view.workspace
             == crate::state::Workspace::Perform
@@ -695,37 +747,126 @@ mod tests {
 
     #[test]
     fn detail_panel_height_preserves_the_workspace_at_small_windows() {
-        assert_eq!(effective_detail_panel_height(80.0, 900.0, 180.0), 180.0);
-        assert_eq!(effective_detail_panel_height(280.0, 900.0, 180.0), 280.0);
-        assert_eq!(effective_detail_panel_height(800.0, 900.0, 180.0), 315.0);
-        assert_eq!(effective_detail_panel_height(800.0, 1_000.0, 180.0), 350.0);
-        assert_eq!(effective_detail_panel_height(320.0, 520.0, 180.0), 180.0);
+        // A dragged height is clamped to the window's range, so it never
+        // crushes the workspace card into a letterbox.
+        assert_eq!(
+            effective_detail_panel_height(Some(80.0), 900.0, 440.0, 180.0),
+            180.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(280.0), 900.0, 440.0, 180.0),
+            280.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(320.0), 520.0, 440.0, 180.0),
+            180.0
+        );
+    }
+
+    #[test]
+    fn a_dragged_height_can_enlarge_the_rack_past_the_resting_composition() {
+        // With the 440 px workspace minimum, the rack may grow to all the
+        // room the window leaves below it: 900 - 94 - 440 = 366 px, past
+        // the 35% resting cap of 315 px.
+        assert_eq!(
+            effective_detail_panel_height(Some(800.0), 900.0, 440.0, 180.0),
+            366.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(800.0), 1_000.0, 440.0, 180.0),
+            466.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(500.0), 1_200.0, 440.0, 180.0),
+            500.0
+        );
+    }
+
+    #[test]
+    fn in_arrange_the_rack_grows_until_one_track_stays_visible() {
+        // The Arrange workspace only needs its overview, ruler, one
+        // minimum lane, the master row and the time ruler: 34 + 36 + 62 +
+        // 26 + 20 = 178 px. A 900 px window then leaves 900 - 94 - 178 =
+        // 628 px for the rack.
+        let one_track = super::super::views_arrangement::ARRANGE_ONE_TRACK_VISIBLE_HEIGHT;
+        assert_eq!(one_track, 178.0);
+        assert_eq!(
+            effective_detail_panel_height(Some(800.0), 900.0, one_track, 180.0),
+            628.0
+        );
+        // The resting height still keeps the 35% composition: the 280 px
+        // default fits under the 315 px cap.
+        assert_eq!(
+            effective_detail_panel_height(None, 900.0, one_track, 180.0),
+            280.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(None, 900.0, one_track, 360.0),
+            315.0
+        );
     }
 
     #[test]
     fn detail_panel_cannot_recreate_the_crushed_perform_layout() {
-        let height = effective_detail_panel_height(900.0, 1_032.0, 180.0);
-        assert!((height - 361.2).abs() < 0.001);
+        // Even at the drag maximum, a 1,032 px window keeps its chrome,
+        // status bar, gaps and 440 px of workspace: 1,032 - 94 - 440 = 498 px.
+        let height = effective_detail_panel_height(Some(900.0), 1_032.0, 440.0, 180.0);
+        assert!((height - 498.0).abs() < 0.001);
     }
 
     #[test]
-    fn midi_editor_preference_yields_to_the_workspace_safety_bound() {
-        assert_eq!(effective_detail_panel_height(280.0, 900.0, 360.0), 315.0);
-        assert_eq!(effective_detail_panel_height(420.0, 900.0, 360.0), 315.0);
-        assert_eq!(effective_detail_panel_height(280.0, 520.0, 360.0), 180.0);
-    }
-
-    #[test]
-    fn the_slim_shell_gives_a_small_window_s_detail_card_the_room_its_chrome_freed() {
+    fn until_dragged_the_panel_rests_at_the_default_grown_to_the_editor_s_preference() {
+        assert_eq!(
+            effective_detail_panel_height(None, 900.0, 440.0, 180.0),
+            280.0
+        );
+        // The MIDI editor's 360 px preference yields to the window's bound.
+        assert_eq!(
+            effective_detail_panel_height(None, 900.0, 440.0, 360.0),
+            315.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(None, 520.0, 440.0, 360.0),
+            180.0
+        );
         // 52 px chrome row, 26 px status bar and two 8 px gaps leave 440 px
         // for the workspace of a 760 px window above a 226 px detail card.
-        assert_eq!(effective_detail_panel_height(360.0, 760.0, 360.0), 226.0);
+        assert_eq!(
+            effective_detail_panel_height(None, 760.0, 440.0, 360.0),
+            226.0
+        );
+        // The audio inspector's 260 px does not shrink the 280 px default.
+        assert_eq!(
+            effective_detail_panel_height(None, 900.0, 440.0, 260.0),
+            280.0
+        );
     }
 
     #[test]
-    fn audio_inspector_gets_enough_height_for_its_compact_controls() {
-        assert_eq!(effective_detail_panel_height(180.0, 900.0, 260.0), 260.0);
-        assert_eq!(effective_detail_panel_height(320.0, 900.0, 260.0), 315.0);
+    fn a_dragged_height_wins_over_the_open_editor_s_preference() {
+        // The rack/piano-roll panel can be resized over its whole range even
+        // while the piano roll (360 px preferred) or the audio inspector
+        // (260 px) is open: the drag is no longer pinned from below.
+        assert_eq!(
+            effective_detail_panel_height(Some(200.0), 900.0, 440.0, 360.0),
+            200.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(280.0), 900.0, 440.0, 360.0),
+            280.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(420.0), 900.0, 440.0, 360.0),
+            366.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(180.0), 900.0, 440.0, 260.0),
+            180.0
+        );
+        assert_eq!(
+            effective_detail_panel_height(Some(320.0), 900.0, 440.0, 260.0),
+            320.0
+        );
     }
 
     #[test]

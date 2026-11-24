@@ -21,6 +21,7 @@ fn source(track_id: TrackId, pitch: u8, beats: f64) -> LauncherClip {
         loop_start_beats: 0.0,
         loop_end_beats: beats,
         groove_grid: Default::default(),
+        color_index: None,
     });
     LauncherClip {
         id,

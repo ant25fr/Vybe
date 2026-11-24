@@ -12,7 +12,7 @@ vibez-dsp = { workspace = true }
 vibez-instruments = { workspace = true }
 vibez-plugin-host = { workspace = true }
 vibez-project = { workspace = true }
-vibez-dropbox = { workspace = true }
+open = "5"
 iced = { workspace = true }
 rtrb = { workspace = true }
 serde = { workspace = true }

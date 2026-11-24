@@ -90,6 +90,21 @@ pub enum PianoRollMsg {
         /// (note_index, new_start_beat, new_pitch)
         moves: Vec<(usize, f64, u8)>,
     },
+    /// Append copies of the given notes at their current positions and
+    /// select only the copies. Used by Ctrl+drag in the piano roll: the
+    /// drag then moves the copies, leaving the originals in place.
+    DuplicateNotes {
+        track_id: TrackId,
+        clip_id: ClipId,
+        /// Source note indices; copies are appended in this order, so the
+        /// copy of `source_indices[i]` lands at `notes.len() + i`.
+        source_indices: Vec<usize>,
+    },
+    /// Duplicate every selected note (Ctrl+D in the piano roll).
+    DuplicateSelectedNotes {
+        track_id: TrackId,
+        clip_id: ClipId,
+    },
     DoubleNoteClip(TrackId, ClipId),
     CropNoteClip(TrackId, ClipId),
     ScrollY(f32),
@@ -306,6 +321,7 @@ impl PianoRollState {
                     loop_start_beats: 0.0,
                     loop_end_beats: duration_beats,
                     groove_grid: vibez_core::perform::GrooveGrid::Off,
+                    color_index: None,
                 });
                 engine.send(EngineCommand::AddNoteClip {
                     track_id,
@@ -570,6 +586,67 @@ impl PianoRollState {
                         note_index: idx,
                         note,
                     });
+                }
+            }
+            PianoRollMsg::DuplicateNotes {
+                track_id,
+                clip_id,
+                source_indices,
+            } => {
+                let mut added: Vec<MidiNote> = Vec::new();
+                if let Some(track) = find_track_mut(tracks, track_id) {
+                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        let mut copies = Vec::new();
+                        for &idx in &source_indices {
+                            if let Some(note) = clip.notes.get(idx) {
+                                copies.push(*note);
+                            }
+                        }
+                        let first_new = clip.notes.len();
+                        clip.notes.extend_from_slice(&copies);
+                        clip.selected_notes = (first_new..clip.notes.len()).collect();
+                        added = copies;
+                    }
+                }
+                for note in added {
+                    engine.send(EngineCommand::AddNote {
+                        track_id,
+                        clip_id,
+                        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(note),
+                    });
+                }
+                action.status = Some("Duplicated notes".to_string());
+            }
+            PianoRollMsg::DuplicateSelectedNotes { track_id, clip_id } => {
+                let source_indices: Vec<usize> = if let Some(track) = find_track(tracks, track_id) {
+                    if let Some(clip) = track.note_clips.iter().find(|c| c.id == clip_id) {
+                        let mut indices: Vec<usize> = clip
+                            .selected_notes
+                            .iter()
+                            .copied()
+                            .filter(|&i| i < clip.notes.len())
+                            .collect();
+                        indices.sort_unstable();
+                        indices
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                if source_indices.is_empty() {
+                    action.status = Some("No notes selected".to_string());
+                } else {
+                    return self.update(
+                        PianoRollMsg::DuplicateNotes {
+                            track_id,
+                            clip_id,
+                            source_indices,
+                        },
+                        engine,
+                        editor,
+                        ctx,
+                    );
                 }
             }
             PianoRollMsg::DoubleNoteClip(track_id, clip_id) => {

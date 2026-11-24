@@ -139,6 +139,12 @@ impl PluginWindowManager {
     pub fn is_open(&self, key: PluginGuiKey) -> bool {
         self.windows.contains_key(&key)
     }
+    /// Whether any plugin GUI window is currently open. The UI tick
+    /// stays at 60 fps while one is, because CLAP plugin timers and
+    /// JUCE-style event loops must be pumped smoothly.
+    pub fn any_open(&self) -> bool {
+        !self.windows.is_empty()
+    }
 
     pub fn close_track_effects(&mut self, track_id: vibez_core::id::TrackId) {
         self.windows.retain(|key, _| key.track_id() != track_id);

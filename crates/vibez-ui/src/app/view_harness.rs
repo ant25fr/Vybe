@@ -47,6 +47,11 @@ fn messages_at(app: &App, point: Point, events: &[iced::Event]) -> Vec<Message> 
     })
 }
 
+/// What the view sends when `events` reach it with the pointer at `point`.
+pub(super) fn events_at(app: &App, point: Point, events: &[iced::Event]) -> Vec<Message> {
+    messages_at(app, point, events)
+}
+
 /// What the view sends when the pointer moves to `point`.
 pub(super) fn hover_at(app: &App, point: Point) -> Vec<Message> {
     messages_at(

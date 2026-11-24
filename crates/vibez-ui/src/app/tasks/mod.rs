@@ -4,7 +4,6 @@ mod browser;
 mod clip_dsp;
 mod device_presets;
 mod project;
-mod remote;
 mod render;
 mod sample_rate;
 
@@ -12,7 +11,6 @@ pub(in crate::app) use browser::*;
 pub(in crate::app) use clip_dsp::*;
 pub(in crate::app) use device_presets::*;
 pub(in crate::app) use project::*;
-pub(in crate::app) use remote::*;
 pub(in crate::app) use render::*;
 pub(in crate::app) use sample_rate::*;
 

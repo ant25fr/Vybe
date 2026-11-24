@@ -11,16 +11,10 @@ use crate::state::SampleBrowserEntry;
 use crate::theme as th;
 use crate::widgets::fitted_label::FittedLabel;
 
-pub(super) const REMOTE_CONNECTION_INDENT: f32 = 14.0;
 pub(super) const BROWSER_TREE_INDENT_STEP: f32 = 8.0;
 pub(super) const BROWSER_ROW_RADIUS: f32 = 7.0;
 pub(super) const BROWSER_FIELD_RADIUS: f32 = 8.0;
 pub(super) const BROWSER_TREE_MAX_DEPTH: f32 = 5.0;
-pub(super) fn remote_places_indent(depth: usize) -> f32 {
-    REMOTE_CONNECTION_INDENT
-        + ((depth as f32 + 1.0).min(BROWSER_TREE_MAX_DEPTH) * BROWSER_TREE_INDENT_STEP)
-}
-
 pub(super) fn browser_root_name(root: &Path) -> String {
     root.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -366,19 +360,6 @@ mod browser_table_tests {
         assert_eq!(
             format_browser_duration(entry.duration_seconds.unwrap()),
             "2:00"
-        );
-    }
-
-    #[test]
-    fn remote_folders_begin_beyond_the_connection_and_nest_by_depth() {
-        assert!(remote_places_indent(0) > REMOTE_CONNECTION_INDENT);
-        assert_eq!(
-            remote_places_indent(1) - remote_places_indent(0),
-            BROWSER_TREE_INDENT_STEP
-        );
-        assert_eq!(
-            remote_places_indent(8),
-            REMOTE_CONNECTION_INDENT + BROWSER_TREE_MAX_DEPTH * BROWSER_TREE_INDENT_STEP
         );
     }
 }

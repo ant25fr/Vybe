@@ -23,6 +23,7 @@ fn long_clip(loop_enabled: bool) -> UiNoteClip {
         loop_start_beats: 8.0,
         loop_end_beats: 16.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        color_index: None,
     }
 }
 

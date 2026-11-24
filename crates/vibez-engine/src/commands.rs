@@ -428,6 +428,11 @@ pub enum EngineCommand {
     },
     /// Stop the Audition Bus with a short click-safe fade.
     StopAudition,
+    /// Jump the active audition voice to `position_frames` (clamped to the
+    /// source), click-safe: clears any commanded fade-out.
+    SeekAudition {
+        position_frames: u64,
+    },
     /// Set Audition Bus gain independently from project mixer state.
     SetAuditionGain(f32),
     /// Audition a MIDI file through `target`'s instrument, or through the

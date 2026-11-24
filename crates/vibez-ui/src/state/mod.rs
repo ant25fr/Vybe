@@ -4,22 +4,25 @@ use std::sync::Arc;
 
 mod browser_results;
 mod browser_state;
+mod browser_tags;
 mod clip_drag;
 mod engine_held;
 mod project_tracks;
 mod same_channels;
+mod sample_map;
 mod snapshot;
 pub use project_tracks::ProjectTracksState;
 mod transport_state;
 mod ui_types;
 pub use transport_state::{PlaybackPhase, TransportState};
 
-use crate::remote_provider::RemoteCatalogSnapshot;
 use crate::widgets::clip_editor_view::StoredClipView;
 pub use browser_results::LocalResults;
 pub use browser_state::*;
+pub use browser_tags::*;
 pub use clip_drag::*;
 pub use engine_held::EngineHeld;
+pub use sample_map::*;
 pub use snapshot::*;
 pub use ui_types::*;
 
@@ -111,6 +114,18 @@ pub const DETAIL_PANEL_DEFAULT_HEIGHT: f32 = 280.0;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingMediaDrag {
     pub source: MediaSourceRef,
+    /// The rest of a multi-row selection being dragged along, if any.
+    pub extra: Vec<MediaSourceRef>,
+    pub label: String,
+    pub origin_x: f32,
+    pub origin_y: f32,
+}
+
+/// A press on a device row (instrument, effect, plug-in) that may become a
+/// drag onto a tag row.
+#[derive(Debug, Clone)]
+pub struct PendingTaggableDrag {
+    pub item: BrowserTaggable,
     pub label: String,
     pub origin_x: f32,
     pub origin_y: f32,
@@ -149,6 +164,11 @@ pub enum BrowserDropTarget {
     NewTrackSlot {
         row: u32,
     },
+    /// A tag row of the browser's TAGS section: a release there tags the
+    /// dragged items with that tag.
+    TagRow {
+        tag_id: u32,
+    },
     /// A device panel outside any instrument card, and what a drop there does.
     DevicePanel {
         track_id: TrackId,
@@ -160,7 +180,11 @@ pub enum BrowserDropTarget {
 pub struct ViewState {
     pub workspace: Workspace,
     pub detail_panel_tab: DetailPanelTab,
-    pub detail_panel_height: f32,
+    /// The detail card's height in Arrange and Perform once its divider has
+    /// been dragged. `None` until then, so the resting height can still grow
+    /// to an open editor's preferred one; a dragged height is honoured over
+    /// the whole range, piano roll included.
+    pub detail_panel_height: Option<f32>,
     pub detail_panel_resize_active: bool,
     /// The detail card's height in Mix once its divider has been dragged.
     pub mix_detail_panel_height: Option<f32>,
@@ -181,6 +205,10 @@ pub struct ViewState {
     /// Piano roll and audio clip editor, following their own zoom.
     pub clip_grid: GridConfig,
     pub context_menu: Option<ContextMenu>,
+    /// The Ctrl+P quick-add palette, while open.
+    pub quick_add: Option<QuickAddState>,
+    /// The palette's last query, kept between openings.
+    pub quick_add_last_query: String,
     pub drum_rack_slice_dialog: Option<DrumRackSliceDialog>,
     /// A dropped multi-track MIDI file waiting for the producer to choose
     /// how it lands.
@@ -203,6 +231,9 @@ pub struct ViewState {
     /// Modifier keys held now, for mouse clicks that change meaning with
     /// them.
     pub held_modifiers: iced::keyboard::Modifiers,
+    /// While rebinding a shortcut in Settings → Shortcuts, the action whose
+    /// next key press becomes its new binding.
+    pub shortcut_capture: Option<crate::shortcuts::ShortcutAction>,
     /// The bank of buses the mixer's send rows show.
     pub mixer_send_bank: usize,
 }
@@ -211,7 +242,7 @@ impl Default for ViewState {
         Self {
             workspace: Workspace::Perform,
             detail_panel_tab: DetailPanelTab::Clip,
-            detail_panel_height: DETAIL_PANEL_DEFAULT_HEIGHT,
+            detail_panel_height: None,
             detail_panel_resize_active: false,
             mix_detail_panel_height: None,
             perform_surface_width: PERFORM_SURFACE_DEFAULT_WIDTH,
@@ -223,6 +254,8 @@ impl Default for ViewState {
             arrange_grid: GridConfig::default(),
             clip_grid: GridConfig::default(),
             context_menu: None,
+            quick_add: None,
+            quick_add_last_query: String::new(),
             drum_rack_slice_dialog: None,
             midi_file_layout_choice: None,
             transient_analysis_dialog: None,
@@ -237,6 +270,7 @@ impl Default for ViewState {
             hovered_track_header: None,
             drum_pad_flash_until: HashMap::new(),
             held_modifiers: iced::keyboard::Modifiers::empty(),
+            shortcut_capture: None,
             mixer_send_bank: 0,
         }
     }
@@ -378,6 +412,47 @@ pub struct ContextMenu {
     pub target: ContextMenuTarget,
 }
 
+/// The Ctrl+P quick-add palette's transient state.
+#[derive(Debug, Clone)]
+pub struct QuickAddState {
+    /// The search text; kept between openings.
+    pub query: String,
+    /// The highlighted row in the filtered list.
+    pub selected: usize,
+    /// Which kind of item the list shows.
+    pub kind: QuickAddKind,
+}
+
+/// The kind filters of the quick-add palette's bottom row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuickAddKind {
+    All,
+    Instruments,
+    Effects,
+    Plugins,
+    Samples,
+}
+
+impl QuickAddKind {
+    pub const ALL: [QuickAddKind; 5] = [
+        QuickAddKind::All,
+        QuickAddKind::Instruments,
+        QuickAddKind::Effects,
+        QuickAddKind::Plugins,
+        QuickAddKind::Samples,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            QuickAddKind::All => "All",
+            QuickAddKind::Instruments => "Instruments",
+            QuickAddKind::Effects => "Effects",
+            QuickAddKind::Plugins => "Plugins",
+            QuickAddKind::Samples => "Samples",
+        }
+    }
+}
+
 /// What the context menu targets.
 #[derive(Debug, Clone)]
 pub enum ContextMenuTarget {
@@ -404,6 +479,28 @@ pub enum ContextMenuTarget {
         track_id: TrackId,
     },
     ArrangementEmpty,
+    /// A browser result row: media file entry.
+    BrowserEntry {
+        source: MediaSourceRef,
+    },
+    /// A tag row of the browser's TAGS section.
+    BrowserTag {
+        id: u32,
+    },
+    /// A tag folder row of the browser's TAGS section.
+    BrowserTagFolder {
+        id: u32,
+    },
+    /// A device row of the browser's results (instrument, effect, plug-in),
+    /// for its tag toggles.
+    BrowserTaggable {
+        item: BrowserTaggable,
+    },
+    /// A device parameter control (knob), for its "Automate" item.
+    AutomationParam {
+        track_id: TrackId,
+        target: vibez_core::automation::AutomationTarget,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -435,10 +532,10 @@ pub enum SettingsTab {
     Audio,
     Project,
     Plugins,
-    Dropbox,
     Warping,
     Perform,
     Appearance,
+    Shortcuts,
     Updates,
 }
 
@@ -771,7 +868,7 @@ pub struct AppState {
     /// Arrange lane heights, saved with the project but outside undo.
     pub track_heights: crate::domains::track_heights::TrackHeights,
 
-    // Browser domain slice (sample library, Dropbox, drag-drop).
+    // Browser domain slice (sample library, drag-drop).
     pub browser: BrowserState,
     // Appearance / themes
     pub current_theme_name: String,

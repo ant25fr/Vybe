@@ -6,6 +6,10 @@ use crate::state::{ArrangementSelection, ProjectTrack, UiNoteClip};
 use iced::keyboard::{Key, Modifiers};
 use vibez_core::id::TrackId;
 
+/// Test shim: route through the default shortcut map.
+fn gkh(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> Option<Message> {
+    super::keyboard::global_key_handler(key, modifiers, &crate::shortcuts::Shortcuts::default())
+}
 fn note_clip(position_beats: f64) -> UiNoteClip {
     UiNoteClip {
         name: "Pattern".into(),
@@ -45,7 +49,7 @@ fn command_key(app: &mut App, letter: &str) {
     } else {
         Modifiers::CTRL
     };
-    let message = global_key_handler(Key::Character(letter.into()), command)
+    let message = gkh(Key::Character(letter.into()), command)
         .unwrap_or_else(|| panic!("Command+{letter} is a global shortcut"));
     let _ = app.update(message);
 }

@@ -8,7 +8,7 @@ use super::views_browser_style::*;
 use super::*;
 use crate::icons;
 use crate::message::Message;
-use crate::state::{AuditionMode, SampleBrowserMode};
+use crate::state::AuditionMode;
 use crate::theme as th;
 use crate::widgets::control_style;
 use crate::widgets::device_chrome::tiny_button;
@@ -17,27 +17,13 @@ use crate::widgets::fitted_label::FittedLabel;
 impl App {
     pub(super) fn view_browser_audition_footer(&self) -> Element<'_, Message> {
         let selected_local = self.selected_sample_browser_entry();
-        let selected_dropbox = self.selected_dropbox_entry();
         let selected_midi = self.state.browser.selected_is_midi();
-        let selected_label = match self.state.browser.mode {
-            SampleBrowserMode::Local => selected_local
-                .map(|entry| entry.name.clone())
-                .unwrap_or_else(|| "No source selected".into()),
-            SampleBrowserMode::Remote => selected_dropbox
-                .as_ref()
-                .map(|entry| entry.name.clone())
-                .unwrap_or_else(|| "No source selected".into()),
-        };
+        let selected_label = selected_local
+            .map(|entry| entry.name.clone())
+            .unwrap_or_else(|| "No source selected".into());
 
-        let preview_message = match self.state.browser.mode {
-            SampleBrowserMode::Local => {
-                selected_local.map(|entry| Message::PreviewLocalEntry(entry.source.clone()))
-            }
-            SampleBrowserMode::Remote => selected_dropbox
-                .as_ref()
-                .filter(|entry| entry.is_supported_audio())
-                .map(|entry| Message::DropboxPreview(entry.clone())),
-        };
+        let preview_message =
+            selected_local.map(|entry| Message::PreviewLocalEntry(entry.source.clone()));
         let accent = th::accent();
         let play = tiny_button(icons::PLAY, "Preview", preview_message, None, accent);
         let stop = tiny_button(
@@ -45,6 +31,14 @@ impl App {
             "Stop preview",
             Some(Message::StopBrowserPreview),
             None,
+            accent,
+        );
+        let enabled = self.state.browser.audition_enabled;
+        let auto = tiny_button(
+            icons::REFRESH_CW,
+            "Auto-play the preview when a sample is selected",
+            Some(Message::ToggleAuditionEnabled),
+            enabled.then_some(accent),
             accent,
         );
         let switch = |label: &'static str, on: bool, message: Message| {
@@ -59,12 +53,6 @@ impl App {
                     ..control_style::styled(on.then_some(accent), status)
                 })
         };
-        let enabled = self.state.browser.audition_enabled;
-        let follow_toggle = switch(
-            if enabled { "On" } else { "Off" },
-            enabled,
-            Message::ToggleAuditionEnabled,
-        );
         let raw = switch(
             "Raw",
             self.state.browser.audition_mode == AuditionMode::Raw,
@@ -91,7 +79,8 @@ impl App {
         } else {
             canvas(crate::widgets::browser_waveform::BrowserWaveform {
                 audio: self.state.browser.waveform_audio.clone(),
-                playhead_fraction: self.state.browser.audition_playhead_fraction(),
+                playhead_fraction: self.state.browser.preview_playhead_fraction(),
+                seekable: true,
             })
             .width(Length::Fill)
             .height(Length::Fixed(26.0))
@@ -119,6 +108,7 @@ impl App {
         let controls = row![
             play,
             stop,
+            auto,
             text(status.label())
                 .size(9)
                 .color(th::text_dim())
@@ -171,7 +161,6 @@ impl App {
                         ..iced::Font::DEFAULT
                     })
                     .color(th::text_muted()),
-                follow_toggle,
                 raw,
                 warp,
                 self.view_audition_source_label(selected_label, selected_midi)

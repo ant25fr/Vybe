@@ -280,7 +280,7 @@ fn dragged_source_does_not_inherit_the_selected_sources_tempo() {
             }),
         )
     ));
-    browser.begin_pending_drag(dragged.clone(), "dragged_170.wav".into(), 0.0, 0.0);
+    browser.begin_pending_drag(vec![dragged.clone()], "dragged_170.wav".into(), 0.0, 0.0);
     assert!(browser.move_pending_drag(10.0, 0.0));
 
     assert_eq!(browser.import_input_for_source(&dragged).source_bpm, None);
@@ -500,228 +500,38 @@ fn end_drag_without_target_cancels() {
 }
 
 #[test]
-fn remote_mode_uses_the_persisted_catalog_without_requesting_network_work() {
+fn a_device_category_shows_in_the_results_pane_until_samples_are_chosen_again() {
+    use crate::state::BrowserCategory;
+
     let mut b = BrowserState::default();
-    let action = b.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Remote));
-    assert_eq!(b.mode, SampleBrowserMode::Remote);
-    assert_eq!(action, BrowserAction::default());
-}
+    assert_eq!(b.category, None);
 
-#[test]
-fn remote_navigation_cycles_folder_connection_and_everywhere_scopes() {
-    let mut browser = BrowserState::default();
-    browser.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Remote));
-    browser.update(BrowserMsg::SelectRemoteFolder("/megalodon".into()));
-    assert_eq!(browser.remote.current_path, "/megalodon");
-    assert!(browser.remote.expanded.contains("/megalodon"));
-    assert_eq!(
-        browser.search_scope,
-        crate::state::BrowserSearchScope::SelectedFolder
-    );
+    b.update(BrowserMsg::SetBrowserCategory(Some(
+        BrowserCategory::Plugins,
+    )));
+    assert_eq!(b.category, Some(BrowserCategory::Plugins));
+    b.update(BrowserMsg::SetBrowserCategory(Some(
+        BrowserCategory::Instruments,
+    )));
+    assert_eq!(b.category, Some(BrowserCategory::Instruments));
 
-    browser.update(BrowserMsg::CycleSearchScope);
-    assert_eq!(browser.search_scope, crate::state::BrowserSearchScope::Root);
-    browser.update(BrowserMsg::CycleSearchScope);
-    assert_eq!(
-        browser.search_scope,
-        crate::state::BrowserSearchScope::Everywhere
-    );
-    browser.update(BrowserMsg::CycleSearchScope);
-    assert_eq!(
-        browser.search_scope,
-        crate::state::BrowserSearchScope::SelectedFolder
-    );
-}
+    // Going back to samples clears the category.
+    b.update(BrowserMsg::SetSampleBrowserMode(SampleBrowserMode::Local));
+    assert_eq!(b.category, None);
 
-#[test]
-fn selecting_visible_remote_folder_from_local_activates_that_folder_in_one_click() {
-    let mut browser = BrowserState {
-        mode: SampleBrowserMode::Local,
-        search: "kick".into(),
-        search_scope: crate::state::BrowserSearchScope::Everywhere,
-        results_visible_limit: crate::state::BROWSER_RESULTS_PAGE_SIZE * 2,
-        selected_source: Some(MediaSourceRef::LocalFile {
-            path: PathBuf::from("/samples/kick.wav"),
-        }),
-        ..BrowserState::default()
-    };
-    Arc::make_mut(&mut browser.remote.catalog).entries = vec![
-        RemoteCatalogEntry {
-            provider_item_id: "/megalodon".into(),
-            path: "/Megalodon".into(),
-            parent_path: String::new(),
-            name: "Megalodon".into(),
-            is_folder: true,
-            revision: None,
-            size: None,
-            derived_metadata: None,
-        },
-        RemoteCatalogEntry {
-            provider_item_id: "/megalodon/drums".into(),
-            path: "/Megalodon/Drums".into(),
-            parent_path: "/megalodon".into(),
-            name: "Drums".into(),
-            is_folder: true,
-            revision: None,
-            size: None,
-            derived_metadata: None,
-        },
-    ];
-    browser.remote.rebuild_catalog_children();
-    browser.remote.expanded.insert("/megalodon".into());
-    assert_eq!(browser.remote.catalog_child_indices("").len(), 1);
-    assert_eq!(browser.remote.catalog_child_indices("/megalodon").len(), 1);
+    b.update(BrowserMsg::SetBrowserCategory(Some(
+        BrowserCategory::Plugins,
+    )));
+    b.update(BrowserMsg::SelectLocalFolder(None));
+    assert_eq!(b.category, None);
 
-    browser.update(BrowserMsg::SelectRemoteFolder("/megalodon/drums".into()));
-
-    assert_eq!(browser.mode, SampleBrowserMode::Remote);
-    assert_eq!(browser.remote.current_path, "/megalodon/drums");
-    assert!(browser.remote.expanded.contains("/megalodon"));
-    assert!(browser.remote.expanded.contains("/megalodon/drums"));
-    assert_eq!(
-        browser.search_scope,
-        crate::state::BrowserSearchScope::SelectedFolder
-    );
-    assert_eq!(browser.search, "kick");
-    assert_eq!(browser.remote.catalog.entries.len(), 2);
-    assert_eq!(
-        browser.results_visible_limit,
-        crate::state::BROWSER_RESULTS_PAGE_SIZE
-    );
-    assert!(browser.selected_source.is_none());
-}
-
-#[test]
-fn selecting_visible_remote_connection_from_local_activates_its_root_in_one_click() {
-    let mut browser = BrowserState {
-        mode: SampleBrowserMode::Local,
-        search: "snare".into(),
-        search_scope: crate::state::BrowserSearchScope::Everywhere,
-        results_visible_limit: crate::state::BROWSER_RESULTS_PAGE_SIZE * 2,
-        selected_source: Some(MediaSourceRef::DropboxFile {
-            path_lower: "/megalodon/snare.wav".into(),
-            display_path: "/Megalodon/Snare.wav".into(),
-            rev: Some("rev-7".into()),
-        }),
-        ..BrowserState::default()
-    };
-    browser.remote.current_path = "/megalodon".into();
-    browser.remote.selected_path = Some("/megalodon/snare.wav".into());
-    browser.remote.expanded.insert("/megalodon".into());
-
-    browser.update(BrowserMsg::SelectRemoteFolder(String::new()));
-
-    assert_eq!(browser.mode, SampleBrowserMode::Remote);
-    assert!(browser.remote.current_path.is_empty());
-    assert!(browser.remote.expanded.contains("/megalodon"));
-    assert_eq!(
-        browser.search_scope,
-        crate::state::BrowserSearchScope::SelectedFolder
-    );
-    assert_eq!(browser.search, "snare");
-    assert_eq!(
-        browser.results_visible_limit,
-        crate::state::BROWSER_RESULTS_PAGE_SIZE
-    );
-    assert!(browser.remote.selected_path.is_none());
-    assert!(browser.selected_source.is_none());
-}
-
-#[test]
-fn remote_place_and_connection_collapse_without_losing_navigation_state() {
-    let mut browser = BrowserState::default();
-    browser.remote.current_path = "/megalodon/drums".into();
-    browser.remote.expanded.insert("/megalodon".into());
-
-    browser.update(BrowserMsg::ToggleRemoteFolder("/megalodon".into()));
-    browser.update(BrowserMsg::ToggleRemoteConnection);
-    browser.update(BrowserMsg::ToggleRemotePlace);
-
-    assert_eq!(browser.mode, SampleBrowserMode::Local);
-    assert!(!browser.remote.connection_expanded);
-    assert!(!browser.remote.place_expanded);
-    assert_eq!(browser.remote.current_path, "/megalodon/drums");
-    assert!(!browser.remote.expanded.contains("/megalodon"));
-
-    browser.update(BrowserMsg::ToggleRemotePlace);
-    browser.update(BrowserMsg::ToggleRemoteConnection);
-    browser.update(BrowserMsg::ToggleRemoteFolder("/megalodon".into()));
-    assert!(browser.remote.place_expanded);
-    assert!(browser.remote.connection_expanded);
-    assert!(browser.remote.expanded.contains("/megalodon"));
-    assert_eq!(browser.mode, SampleBrowserMode::Local);
-    assert_eq!(browser.remote.current_path, "/megalodon/drums");
-}
-
-#[test]
-fn remote_catalog_children_are_indexed_folder_first_per_parent() {
-    let entry = |id: &str, parent: &str, name: &str, is_folder: bool| RemoteCatalogEntry {
-        provider_item_id: id.into(),
-        path: id.into(),
-        parent_path: parent.into(),
-        name: name.into(),
-        is_folder,
-        revision: None,
-        size: None,
-        derived_metadata: None,
-    };
-    let mut browser = BrowserState::default();
-    Arc::make_mut(&mut browser.remote.catalog).entries = vec![
-        entry("/z.wav", "", "z.wav", false),
-        entry("/beats", "", "Beats", true),
-        entry("/a.wav", "", "a.wav", false),
-        entry("/beats/kick.wav", "/beats", "kick.wav", false),
-    ];
-
-    browser.remote.rebuild_catalog_children();
-
-    let root_names: Vec<_> = browser
-        .remote
-        .catalog_child_indices("")
-        .iter()
-        .map(|&index| browser.remote.catalog.entries[index].name.as_str())
-        .collect();
-    assert_eq!(root_names, ["Beats", "a.wav", "z.wav"]);
-    assert_eq!(browser.remote.catalog_child_indices("/beats").len(), 1);
-    assert!(browser.remote.catalog_child_indices("/missing").is_empty());
-}
-
-#[test]
-fn remote_selection_preserves_provider_identity_and_source_location() {
-    let mut browser = BrowserState::default();
-    browser.update(BrowserMsg::SelectRemoteEntry(RemoteCatalogEntry {
-        provider_item_id: "/megalodon/kick.wav".into(),
-        path: "/Megalodon/Kick.wav".into(),
-        parent_path: "/megalodon".into(),
-        name: "Kick.wav".into(),
-        is_folder: false,
-        revision: Some("rev-7".into()),
-        size: Some(2048),
-        derived_metadata: None,
-    }));
-    assert_eq!(
-        browser.selected_source,
-        Some(MediaSourceRef::DropboxFile {
-            path_lower: "/megalodon/kick.wav".into(),
-            display_path: "/Megalodon/Kick.wav".into(),
-            rev: Some("rev-7".into()),
-        })
-    );
-    assert_eq!(
-        browser.remote.selected_path.as_deref(),
-        Some("/megalodon/kick.wav")
-    );
-}
-
-#[test]
-fn remote_search_edits_are_catalog_only_and_request_no_provider_effect() {
-    let mut browser = BrowserState {
-        mode: SampleBrowserMode::Remote,
-        ..BrowserState::default()
-    };
-    let action = browser.update(BrowserMsg::SampleBrowserSearchChanged("kick".into()));
-    assert_eq!(browser.search, "kick");
-    assert_eq!(action, BrowserAction::default());
+    b.update(BrowserMsg::SetBrowserCategory(Some(
+        BrowserCategory::Plugins,
+    )));
+    b.update(BrowserMsg::SelectLocalFolder(Some(PathBuf::from(
+        "/samples",
+    ))));
+    assert_eq!(b.category, None);
 }
 
 #[test]
@@ -1120,107 +930,6 @@ fn selecting_a_folder_expands_it_and_resets_the_result_window() {
 }
 
 #[test]
-fn selecting_any_visible_local_node_from_remote_activates_that_exact_local_source() {
-    let targets = [
-        None,
-        Some(PathBuf::from("/samples")),
-        Some(PathBuf::from("/samples/drums")),
-    ];
-
-    let actual: Vec<_> = targets
-        .iter()
-        .map(|target| {
-            let mut browser = BrowserState {
-                mode: SampleBrowserMode::Remote,
-                ..BrowserState::default()
-            };
-
-            browser.update(BrowserMsg::SelectLocalFolder(target.clone()));
-
-            (browser.mode, browser.current_folder)
-        })
-        .collect();
-    let expected: Vec<_> = targets
-        .into_iter()
-        .map(|target| (SampleBrowserMode::Local, target))
-        .collect();
-
-    assert_eq!(actual, expected);
-}
-
-#[test]
-fn local_folder_disclosure_from_remote_activates_the_disclosed_folder() {
-    let current_folder = PathBuf::from("/samples/selected");
-    let disclosed_folder = PathBuf::from("/samples/drums");
-    let mut browser = BrowserState {
-        mode: SampleBrowserMode::Remote,
-        current_folder: Some(current_folder.clone()),
-        ..BrowserState::default()
-    };
-
-    browser.update(BrowserMsg::ToggleLocalFolder(disclosed_folder.clone()));
-
-    assert_eq!(
-        (
-            browser.mode,
-            browser.current_folder,
-            browser.expanded_local_folders
-        ),
-        (
-            SampleBrowserMode::Local,
-            Some(disclosed_folder.clone()),
-            std::collections::HashSet::from([disclosed_folder])
-        )
-    );
-}
-
-#[test]
-fn direct_local_navigation_preserves_browser_context_contracts() {
-    let root = PathBuf::from("/samples");
-    let target = root.join("drums");
-    let selected_source = MediaSourceRef::DropboxFile {
-        path_lower: "/megalodon/kick.wav".into(),
-        display_path: "/Megalodon/Kick.wav".into(),
-        rev: Some("rev-7".into()),
-    };
-    let mut browser = BrowserState {
-        mode: SampleBrowserMode::Remote,
-        search: "kick".into(),
-        selected_source: Some(selected_source.clone()),
-        search_scope: crate::state::BrowserSearchScope::Everywhere,
-        results_visible_limit: crate::state::BROWSER_RESULTS_PAGE_SIZE * 4,
-        root_watch_errors: std::collections::HashMap::from([(
-            root.clone(),
-            "watch limit reached".into(),
-        )]),
-        ..BrowserState::default()
-    };
-
-    browser.update(BrowserMsg::SelectLocalFolder(Some(target.clone())));
-
-    assert_eq!(
-        (
-            browser.mode,
-            browser.current_folder,
-            browser.search,
-            browser.selected_source,
-            browser.search_scope,
-            browser.results_visible_limit,
-            browser.root_watch_errors,
-        ),
-        (
-            SampleBrowserMode::Local,
-            Some(target),
-            "kick".into(),
-            Some(selected_source),
-            crate::state::BrowserSearchScope::SelectedFolder,
-            crate::state::BROWSER_RESULTS_PAGE_SIZE,
-            std::collections::HashMap::from([(root, "watch limit reached".into())]),
-        )
-    );
-}
-
-#[test]
 fn large_results_are_rendered_in_bounded_windows_without_losing_total() {
     let mut browser = BrowserState::default();
     let total = 25_000;
@@ -1552,7 +1261,54 @@ fn the_audition_status_says_what_the_selection_and_audition_are_doing() {
     assert_eq!(browser.audition_status(), AuditionStatus::Preparing);
     browser.audition_playback_mode = Some(AuditionMode::Raw);
     assert_eq!(browser.audition_status(), AuditionStatus::Warping);
-    browser.remote.preview_in_progress = true;
-    assert_eq!(browser.audition_status(), AuditionStatus::Fetching);
     assert!(browser.audition_status().keeps_its_width());
+}
+
+#[test]
+fn preview_cache_remembers_recent_files_and_evicts_the_oldest() {
+    let mut browser = BrowserState::default();
+    let audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 64]],
+        sample_rate: 44_100,
+    });
+    let source = |name: &str| MediaSourceRef::LocalFile {
+        path: PathBuf::from(name),
+    };
+    for name in ["a.wav", "b.wav"] {
+        browser.selected_source = Some(source(name));
+        browser.install_waveform(source(name), analysed(audio.clone(), None));
+    }
+    assert!(browser
+        .cached_preview(std::path::Path::new("a.wav"))
+        .is_some());
+    assert!(browser
+        .cached_preview(std::path::Path::new("b.wav"))
+        .is_some());
+    assert!(browser
+        .cached_preview(std::path::Path::new("c.wav"))
+        .is_none());
+    // Re-installing the same file refreshes its recency.
+    browser.selected_source = Some(source("a.wav"));
+    browser.install_waveform(source("a.wav"), analysed(audio.clone(), None));
+    browser.selected_source = Some(source("c.wav"));
+    browser.install_waveform(source("c.wav"), analysed(audio, None));
+    assert!(browser
+        .cached_preview(std::path::Path::new("a.wav"))
+        .is_some());
+    assert!(browser
+        .cached_preview(std::path::Path::new("c.wav"))
+        .is_some());
+}
+
+#[test]
+fn preview_playhead_shows_the_dragged_position_while_stopped() {
+    let mut browser = BrowserState::default();
+    let audio = Arc::new(vibez_core::audio_buffer::DecodedAudio {
+        channels: vec![vec![0.0; 1_000]],
+        sample_rate: 44_100,
+    });
+    browser.waveform_audio = Some(audio);
+    assert_eq!(browser.preview_playhead_fraction(), None);
+    browser.audition_position_frames = 500;
+    assert_eq!(browser.preview_playhead_fraction(), Some(0.5));
 }

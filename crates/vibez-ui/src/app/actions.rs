@@ -449,7 +449,13 @@ impl App {
             self.state.browser.begin_waveform_load(&source);
             if let MediaSourceRef::LocalFile { path } = source.clone() {
                 return Task::perform(decode_local_for_preview_async(path), move |result| {
-                    Message::BrowserWaveformReady(source.clone(), result)
+                    Message::BrowserWaveformReady(
+                        source.clone(),
+                        result.map(|(audio, _name)| crate::message::AnalysedBrowserAudio {
+                            audio,
+                            loop_fit: None,
+                        }),
+                    )
                 });
             }
         }
@@ -651,7 +657,9 @@ impl App {
         let export_task = self.poll_export();
 
         // A stationary pointer does not produce canvas events. Drive the
-        // active editor's bounded edge-scroll from the 60fps UI clock.
+        // active editor's bounded edge-scroll from the UI clock; the tick
+        // rate varies (60/30/10 fps), so scale by the actual rate.
+        let tick_fps = 1000.0 / f64::from(self.ui_tick_interval().as_millis().max(1) as u32);
         let cursor_x = self.state.view.cursor_x;
         let right_boundary = (self.state.view.window_width - TIMELINE_WINDOW_EDGE_INSET).max(1.0);
         let section_drag = self.state.view.workspace == crate::state::Workspace::Perform
@@ -672,7 +680,7 @@ impl App {
                     .and_then(|id| self.state.perform.sections.by_id(id))
                     .map_or(0.0, |section| section.length_beats);
                 self.state.perform.section_editor.viewport_mut().scroll_by(
-                    velocity / 60.0,
+                    velocity / tick_fps,
                     total_beats,
                     viewport_width,
                 );
@@ -688,10 +696,11 @@ impl App {
             );
             if velocity != 0.0 {
                 let total_beats = self.state.total_beats();
-                self.state
-                    .view
-                    .viewport
-                    .scroll_by(velocity / 60.0, total_beats, viewport_width);
+                self.state.view.viewport.scroll_by(
+                    velocity / tick_fps,
+                    total_beats,
+                    viewport_width,
+                );
             }
         }
         let auto_save_task = if self.save_runtime.auto_save_due(std::time::Instant::now()) {

@@ -42,6 +42,10 @@ pub struct RulerWidget {
     pub selection_end_beats: f64,
     /// Clip edges and markers a seek click locks onto.
     pub snap_targets: std::sync::Arc<SnapTargets>,
+    /// Wheel-zoom bindings (rebindable, Ctrl+Wheel by default) plus the
+    /// modifiers currently held: a matching wheel turn zooms around the
+    /// cursor, as Shift+wheel already does.
+    pub wheel_zoom: crate::shortcuts::WheelZoom,
 }
 
 /// Active drag action on the ruler.
@@ -276,8 +280,9 @@ impl canvas::Program<Message> for RulerWidget {
                             ))),
                         );
                     }
-                    // Shift+scroll for zoom
-                    if state.shift_held && dy.abs() > 0.0 {
+                    // Shift+scroll, or the bound wheel combo, zooms
+                    let zoom_bound = self.wheel_zoom.matches(dy > 0.0, cfg!(target_os = "macos"));
+                    if dy.abs() > 0.0 && (state.shift_held || zoom_bound) {
                         let anchor_x = cursor
                             .position_in(bounds)
                             .map(|position| position.x)

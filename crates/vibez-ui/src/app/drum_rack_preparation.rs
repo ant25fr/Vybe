@@ -202,7 +202,7 @@ mod tests {
         };
         vibez_project::project_format_v1::save_project_v1(&project_path, None, project).unwrap();
 
-        let reopened = crate::app::tasks::load_project_async(project_path, None, 48_000)
+        let reopened = crate::app::tasks::load_project_async(project_path, 48_000)
             .await
             .unwrap();
         assert!(reopened.warnings.is_empty());

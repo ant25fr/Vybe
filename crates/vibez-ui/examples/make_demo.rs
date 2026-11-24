@@ -57,6 +57,7 @@ fn clip(
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        color_index: None,
     }
 }
 

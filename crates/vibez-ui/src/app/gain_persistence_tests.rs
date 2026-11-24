@@ -32,7 +32,7 @@ async fn legacy_gain_project_keeps_its_level_and_accepts_new_stereo_controls() {
         save_project_async(path.clone(), None, project)
             .await
             .unwrap();
-        let loaded = load_project_async(path, None, vibez_core::constants::DEFAULT_SAMPLE_RATE)
+        let loaded = load_project_async(path, vibez_core::constants::DEFAULT_SAMPLE_RATE)
             .await
             .unwrap();
         let mut app = super::test_support::app();

@@ -151,6 +151,7 @@ impl MidiFileImport {
             loop_start_beats: 0.0,
             loop_end_beats: length,
             groove_grid: GrooveGrid::Off,
+            color_index: None,
         }
     }
 }

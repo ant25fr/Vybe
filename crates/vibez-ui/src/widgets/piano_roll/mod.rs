@@ -60,6 +60,10 @@ pub struct PianoRollWidget {
     pub reserve_arrow_keys: bool,
     /// The producer's zoom and scroll for this clip; `None` frames its loop.
     pub view: Option<StoredClipView>,
+    /// Wheel-zoom bindings (rebindable, Ctrl+Wheel by default) plus the
+    /// modifiers currently held: a matching wheel turn zooms around the
+    /// cursor, as Shift+wheel already does.
+    pub wheel_zoom: crate::shortcuts::WheelZoom,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -105,6 +109,7 @@ impl PianoRollWidget {
             edit_mode,
             reserve_arrow_keys: false,
             view: None,
+            wheel_zoom: Default::default(),
         }
     }
 
@@ -120,6 +125,7 @@ impl PianoRollWidget {
             edit_mode: PianoRollEditMode::default(),
             reserve_arrow_keys: false,
             view: None,
+            wheel_zoom: Default::default(),
         }
     }
 
@@ -437,6 +443,9 @@ pub struct PianoRollState {
     last_cursor: Option<Point>,
     shift_held: bool,
     alt_held: bool,
+    /// Command modifier (Ctrl, or Cmd on macOS): held during a note drag,
+    /// the drag moves a copy of the selection instead of the notes.
+    ctrl_held: bool,
     double_click: DoubleClick,
     /// Pitch currently held down via a key-lane click (audition).
     audition_pitch: Option<u8>,
@@ -529,7 +538,9 @@ impl canvas::Program<Message> for PianoRollWidget {
                     let anchor_x = cursor
                         .position_in(bounds)
                         .map_or(width / 2.0, |position| position.x - KEY_WIDTH);
-                    let viewport = match wheel_intent(delta, state.shift_held) {
+                    let (_, dy) = crate::timeline_geometry::wheel_delta_pixels(delta);
+                    let zoom_bound = self.wheel_zoom.matches(dy > 0.0, cfg!(target_os = "macos"));
+                    let viewport = match wheel_intent(delta, state.shift_held || zoom_bound) {
                         WheelIntent::Zoom(factor) => {
                             Some(self.clip_view().zoomed(factor, anchor_x, width))
                         }
@@ -718,6 +729,59 @@ impl canvas::Program<Message> for PianoRollWidget {
                                         s
                                     }
                                 };
+
+                                // Ctrl+drag: duplicate the would-be selection
+                                // and drag the copies; the originals stay put.
+                                // The copies are appended in ascending source
+                                // order, so source_indices[i] lands at
+                                // notes.len() + i.
+                                if state.ctrl_held {
+                                    let mut source_indices: Vec<usize> = selected_set
+                                        .iter()
+                                        .copied()
+                                        .filter(|&i| i < clip_data.notes.len())
+                                        .collect();
+                                    source_indices.sort_unstable();
+                                    let base = clip_data.notes.len();
+                                    let undo_gesture = UndoGestureId::new();
+                                    let original_notes: Vec<MovedNote> = source_indices
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(rank, &idx)| {
+                                            let note = &clip_data.notes[idx];
+                                            MovedNote {
+                                                index: base + rank,
+                                                pitch: note.pitch,
+                                                start_beat: note.start_beat,
+                                                duration_beats: note.duration_beats,
+                                            }
+                                        })
+                                        .collect();
+                                    let sent_moves = original_notes
+                                        .iter()
+                                        .map(|note| (note.index, note.start_beat, note.pitch))
+                                        .collect();
+                                    state.drag = Some(DragAction::MoveNote {
+                                        original_start_beat: note.start_beat,
+                                        original_notes,
+                                        start_x: pos.x,
+                                        start_y: pos.y,
+                                        undo_gesture,
+                                        phase: DragPhase::Pending,
+                                        sent_moves,
+                                    });
+                                    return (
+                                        canvas::event::Status::Captured,
+                                        Some(
+                                            Message::PianoRoll(PianoRollMsg::DuplicateNotes {
+                                                track_id: self.track_id,
+                                                clip_id: clip_data.clip_id,
+                                                source_indices,
+                                            })
+                                            .in_undo_gesture(undo_gesture),
+                                        ),
+                                    );
+                                }
 
                                 let original_notes = grabbed_notes(&clip_data.notes, &selected_set);
 
@@ -1059,6 +1123,11 @@ impl canvas::Program<Message> for PianoRollWidget {
             canvas::Event::Keyboard(iced::keyboard::Event::ModifiersChanged(modifiers)) => {
                 state.shift_held = modifiers.shift();
                 state.alt_held = modifiers.alt();
+                state.ctrl_held = if cfg!(target_os = "macos") {
+                    modifiers.logo()
+                } else {
+                    modifiers.control()
+                };
             }
 
             // Delete/Backspace are handled centrally by the global

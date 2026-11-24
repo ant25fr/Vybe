@@ -225,8 +225,7 @@ pub async fn fetch_latest_tag() -> Option<String> {
 /// wait on a browser launch.
 pub async fn open_releases_page() {
     let _ = tokio::task::spawn_blocking(|| {
-        use vibez_dropbox::BrowserOpener;
-        let _ = vibez_dropbox::SystemBrowserOpener.open(RELEASES_PAGE_URL);
+        let _ = open::that(RELEASES_PAGE_URL);
     })
     .await;
 }

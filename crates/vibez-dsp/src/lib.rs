@@ -13,6 +13,7 @@ pub mod filter;
 pub mod gain;
 pub mod gate;
 pub mod limiter;
+pub mod multiband_dynamics;
 mod oversampled;
 pub mod oversampling;
 pub mod phaser;

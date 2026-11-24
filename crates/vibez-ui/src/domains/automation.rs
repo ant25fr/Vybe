@@ -6,7 +6,7 @@
 //! happens here on the UI thread and the audio thread only swaps
 //! vectors.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use vibez_core::automation::{AutomationLane, AutomationPoint, AutomationTarget};
@@ -80,6 +80,26 @@ pub enum AutomationMsg {
         track_id: TrackId,
         target: AutomationTarget,
     },
+    /// Live preview while the lane's bottom edge is dragged (view-only).
+    PreviewLaneHeight {
+        lane_id: LaneId,
+        height: f32,
+    },
+    /// Commit a lane-height drag; persisted in ui.json, not the project.
+    SetLaneHeight {
+        lane_id: LaneId,
+        height: f32,
+    },
+    /// Toggle pencil (freehand multi-point draw) mode on a lane.
+    TogglePencil {
+        lane_id: LaneId,
+    },
+    /// One pencil stroke: insert every point in beat order, one engine sync.
+    PencilDraw {
+        track_id: TrackId,
+        lane_id: LaneId,
+        points: Vec<(f64, f32)>,
+    },
 }
 
 impl AutomationMsg {
@@ -93,6 +113,9 @@ impl AutomationMsg {
                 | AutomationMsg::LanePickerQuery(_)
                 | AutomationMsg::CloseLanePicker
                 | AutomationMsg::ReenableAutomation { .. }
+                | AutomationMsg::PreviewLaneHeight { .. }
+                | AutomationMsg::SetLaneHeight { .. }
+                | AutomationMsg::TogglePencil { .. }
         )
     }
 }
@@ -102,6 +125,56 @@ impl AutomationMsg {
 pub struct AutomationAction {
     /// Status bar text.
     pub status: Option<String>,
+    /// UI settings changed (lane heights), saved to ui.json.
+    pub persist_settings: bool,
+}
+
+/// Lane strip height range in px: tall enough to read a curve, short
+/// enough to stack several lanes under a track.
+pub const LANE_HEIGHT_MIN: f32 = 28.0;
+pub const LANE_HEIGHT_MAX: f32 = 240.0;
+
+/// The lane strip's height when never resized.
+pub fn lane_height_default() -> f32 {
+    crate::widgets::automation_lane::LANE_HEIGHT
+}
+
+/// The automation target a device control (instrument or effect slot)
+/// automates, resolving plugin devices to `PluginParam`. `None` when the
+/// slot cannot be automated (drum pads).
+pub fn automation_target_for(
+    slot: &crate::domains::device_params::DeviceSlot,
+    param_index: usize,
+    track: &ProjectTrack,
+) -> Option<AutomationTarget> {
+    use crate::domains::device_params::DeviceSlot;
+    match slot {
+        DeviceSlot::Effect(effect_id) => {
+            let effect = track.effects.iter().find(|e| e.id == *effect_id)?;
+            if effect.plugin_ref.is_some() || effect.plugin_name.is_some() {
+                Some(AutomationTarget::PluginParam {
+                    effect_id: Some(*effect_id),
+                    param_id: param_index as u32,
+                })
+            } else {
+                Some(AutomationTarget::EffectParam {
+                    effect_id: *effect_id,
+                    param_index,
+                })
+            }
+        }
+        DeviceSlot::Instrument => {
+            if track.plugin_instrument_ref.is_some() || track.plugin_instrument_name.is_some() {
+                Some(AutomationTarget::PluginParam {
+                    effect_id: None,
+                    param_id: param_index as u32,
+                })
+            } else {
+                Some(AutomationTarget::InstrumentParam { param_index })
+            }
+        }
+        DeviceSlot::DrumPad(_) => None,
+    }
 }
 
 /// Automation domain slice.
@@ -115,6 +188,10 @@ pub struct AutomationState {
     pub picker: Option<(TrackId, String)>,
     /// Runtime parameters whose manual control currently wins over a lane.
     pub overridden: HashSet<(TrackId, AutomationTarget)>,
+    /// Per-lane strip heights in px; lanes never resized are absent.
+    pub lane_heights: HashMap<LaneId, f32>,
+    /// Lanes whose pencil (freehand draw) mode is on.
+    pub pencil: HashSet<LaneId>,
 }
 
 fn sync_lane(engine: &mut impl EngineHandle, track_id: TrackId, lane: &AutomationLane) {
@@ -564,6 +641,73 @@ impl AutomationState {
                         .unwrap_or_else(|| "Parameter".to_string())
                 ));
             }
+            AutomationMsg::PreviewLaneHeight { lane_id, height } => {
+                self.lane_heights
+                    .insert(lane_id, height.clamp(LANE_HEIGHT_MIN, LANE_HEIGHT_MAX));
+            }
+            AutomationMsg::SetLaneHeight { lane_id, height } => {
+                self.lane_heights
+                    .insert(lane_id, height.clamp(LANE_HEIGHT_MIN, LANE_HEIGHT_MAX));
+                action.persist_settings = true;
+            }
+            AutomationMsg::TogglePencil { lane_id } => {
+                if !self.pencil.remove(&lane_id) {
+                    self.pencil.insert(lane_id);
+                }
+            }
+            AutomationMsg::PencilDraw {
+                track_id,
+                lane_id,
+                points,
+            } => {
+                let Some(lane) = timeline
+                    .get_mut(track_id)
+                    .and_then(|content| content.automation.iter_mut().find(|l| l.id == lane_id))
+                else {
+                    return action;
+                };
+                if points.is_empty() {
+                    return action;
+                }
+                let stepped = lane.target.is_stepped();
+                let mut last_beat = None;
+                for (beat, value) in points {
+                    // A stroke may revisit a beat; the last visit wins.
+                    if last_beat == Some(beat) {
+                        continue;
+                    }
+                    last_beat = Some(beat);
+                    lane.insert_point(AutomationPoint {
+                        beat: beat.max(0.0),
+                        value: if stepped {
+                            if value >= 0.5 {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        } else {
+                            value.clamp(0.0, 1.0)
+                        },
+                        curve: 0.0,
+                    });
+                }
+                let count = lane.points.len();
+                let lane = lane.clone();
+                sync_lane(engine, track_id, &lane);
+                if let Some(last) = lane.points.last() {
+                    let index = lane
+                        .points
+                        .iter()
+                        .position(|p| p.beat == last.beat)
+                        .unwrap_or(0);
+                    self.selected = Some((track_id, lane_id, index));
+                }
+                action.status = Some(format!(
+                    "Drew {} point{}",
+                    count,
+                    if count == 1 { "" } else { "s" }
+                ));
+            }
             AutomationMsg::DeleteSelectedPoint => {
                 if let Some((track_id, lane_id, index)) = self.selected.take() {
                     let Some(lane) = timeline.get_mut(track_id).and_then(|content| {
@@ -585,6 +729,35 @@ impl AutomationState {
         action
     }
 
+    /// The strip height a lane draws at: its resized height or the default.
+    pub fn lane_height(&self, lane_id: LaneId) -> f32 {
+        self.lane_heights
+            .get(&lane_id)
+            .copied()
+            .unwrap_or_else(lane_height_default)
+    }
+
+    /// Whether the lane's pencil (freehand draw) mode is on.
+    pub fn pencil_active(&self, lane_id: LaneId) -> bool {
+        self.pencil.contains(&lane_id)
+    }
+
+    /// The lane heights ui.json keeps.
+    pub fn saved_lane_heights(&self) -> Vec<(LaneId, f32)> {
+        let mut saved: Vec<(LaneId, f32)> =
+            self.lane_heights.iter().map(|(k, v)| (*k, *v)).collect();
+        saved.sort_by_key(|(id, _)| id.raw());
+        saved
+    }
+
+    /// Lane heights read back from ui.json.
+    pub fn set_saved_lane_heights(&mut self, saved: Vec<(LaneId, f32)>) {
+        self.lane_heights = saved
+            .into_iter()
+            .map(|(id, h)| (id, h.clamp(LANE_HEIGHT_MIN, LANE_HEIGHT_MAX)))
+            .collect();
+    }
+
     pub fn set_override(&mut self, track_id: TrackId, target: AutomationTarget, overridden: bool) {
         if overridden {
             self.overridden.insert((track_id, target));
@@ -602,6 +775,7 @@ impl AutomationState {
 mod tests {
     use super::super::test_support::RecordingEngine;
     use super::*;
+    use vibez_core::id::EffectId;
 
     fn track() -> (ProjectTracksState, TimelineEditorState, TrackId) {
         let track = ProjectTrack::new(TrackId::new(), "T1".to_string(), 0);
@@ -860,5 +1034,246 @@ mod tests {
         let p = timeline.get(tid).unwrap().automation[0].points[0];
         assert_eq!(p.beat, 0.0);
         assert_eq!(p.value, 1.0);
+    }
+
+    #[test]
+    fn pencil_draw_inserts_a_whole_stroke_in_beat_order_with_one_sync() {
+        let mut a = AutomationState::default();
+        let mut engine = RecordingEngine::default();
+        let (mut tracks, mut timeline, tid) = track();
+        a.update(
+            AutomationMsg::AddLane {
+                track_id: tid,
+                target: AutomationTarget::TrackGain,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        let lane_id = timeline.get(tid).unwrap().automation[0].id;
+        engine.0.clear();
+
+        // A freehand stroke, out of order and with a revisited beat.
+        let action = a.update(
+            AutomationMsg::PencilDraw {
+                track_id: tid,
+                lane_id,
+                points: vec![(8.0, 0.2), (2.0, 0.8), (4.0, 0.5), (2.0, 0.9)],
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        let lane = &timeline.get(tid).unwrap().automation[0];
+        let beats: Vec<(f64, f32)> = lane.points.iter().map(|p| (p.beat, p.value)).collect();
+        // The seed point at beat 0 stays first; the revisited beat keeps the
+        // last value drawn.
+        assert_eq!(beats, vec![(0.0, 0.5), (2.0, 0.9), (4.0, 0.5), (8.0, 0.2)]);
+        assert_eq!(
+            engine
+                .0
+                .iter()
+                .filter(|c| matches!(c, EngineCommand::SetAutomationLane { .. }))
+                .count(),
+            1,
+            "one stroke is one engine sync"
+        );
+        assert_eq!(a.selected, Some((tid, lane_id, 3)));
+        assert_eq!(action.status.as_deref(), Some("Drew 4 points"));
+        assert!(AutomationMsg::PencilDraw {
+            track_id: tid,
+            lane_id,
+            points: vec![]
+        }
+        .marks_dirty());
+    }
+
+    #[test]
+    fn pencil_draw_clamps_stepped_lanes_to_zero_and_one() {
+        let mut a = AutomationState::default();
+        let mut engine = RecordingEngine::default();
+        let (mut tracks, mut timeline, tid) = track();
+        a.update(
+            AutomationMsg::AddLane {
+                track_id: tid,
+                target: AutomationTarget::TrackMute,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        let lane_id = timeline.get(tid).unwrap().automation[0].id;
+        a.update(
+            AutomationMsg::PencilDraw {
+                track_id: tid,
+                lane_id,
+                points: vec![(1.0, 0.7), (2.0, 0.2)],
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        let values: Vec<f32> = timeline.get(tid).unwrap().automation[0]
+            .points
+            .iter()
+            .map(|p| p.value)
+            .collect();
+        // The unmuted seed point at beat 0, then the stroke's clamped steps.
+        assert_eq!(values, vec![0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn lane_height_drag_previews_then_commits_clamped_and_persisted() {
+        let mut a = AutomationState::default();
+        let mut engine = RecordingEngine::default();
+        let (mut tracks, mut timeline, tid) = track();
+        a.update(
+            AutomationMsg::AddLane {
+                track_id: tid,
+                target: AutomationTarget::TrackGain,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        let lane_id = timeline.get(tid).unwrap().automation[0].id;
+
+        assert_eq!(a.lane_height(lane_id), lane_height_default());
+        let preview = a.update(
+            AutomationMsg::PreviewLaneHeight {
+                lane_id,
+                height: 500.0,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        assert_eq!(a.lane_height(lane_id), LANE_HEIGHT_MAX);
+        assert!(!preview.persist_settings, "a preview is not persisted");
+        assert!(!AutomationMsg::PreviewLaneHeight {
+            lane_id,
+            height: 1.0
+        }
+        .marks_dirty());
+
+        let commit = a.update(
+            AutomationMsg::SetLaneHeight {
+                lane_id,
+                height: 4.0,
+            },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        assert_eq!(a.lane_height(lane_id), LANE_HEIGHT_MIN);
+        assert!(commit.persist_settings);
+        assert!(!AutomationMsg::SetLaneHeight {
+            lane_id,
+            height: 1.0
+        }
+        .marks_dirty());
+
+        // Round-trips through the saved form.
+        let saved = a.saved_lane_heights();
+        assert_eq!(saved, vec![(lane_id, LANE_HEIGHT_MIN)]);
+        let mut b = AutomationState::default();
+        b.set_saved_lane_heights(saved);
+        assert_eq!(b.lane_height(lane_id), LANE_HEIGHT_MIN);
+    }
+
+    #[test]
+    fn pencil_mode_toggles_per_lane() {
+        let mut a = AutomationState::default();
+        let lane = LaneId::new();
+        assert!(!a.pencil_active(lane));
+        let mut engine = RecordingEngine::default();
+        let (mut tracks, mut timeline, _tid) = track();
+        a.update(
+            AutomationMsg::TogglePencil { lane_id: lane },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        assert!(a.pencil_active(lane));
+        a.update(
+            AutomationMsg::TogglePencil { lane_id: lane },
+            &mut engine,
+            &mut tracks,
+            &mut timeline,
+        );
+        assert!(!a.pencil_active(lane));
+    }
+
+    #[test]
+    fn device_slots_resolve_to_their_automation_target() {
+        use crate::domains::device_params::DeviceSlot;
+        use crate::state::UiEffect;
+        use vibez_core::effect::EffectType;
+
+        let mut track = ProjectTrack::new(TrackId::new(), "T".into(), 0);
+        let native_id = EffectId::new();
+        track.effects.push(UiEffect {
+            id: native_id,
+            effect_type: EffectType::Gain,
+            bypass: false,
+            params: vec![],
+            descriptors: &[],
+            plugin_name: None,
+            has_plugin_gui: false,
+            plugin_ref: None,
+            sidechains: vec![],
+            inactive_sidechains: vec![],
+            external_inputs: vec![],
+            reconfiguration_failed: false,
+            latency_samples: None,
+        });
+        let plugin_id = EffectId::new();
+        track.effects.push(UiEffect {
+            id: plugin_id,
+            effect_type: EffectType::Gain,
+            bypass: false,
+            params: vec![],
+            descriptors: &[],
+            plugin_name: Some("Some Plug".into()),
+            has_plugin_gui: false,
+            plugin_ref: None,
+            sidechains: vec![],
+            inactive_sidechains: vec![],
+            external_inputs: vec![],
+            reconfiguration_failed: false,
+            latency_samples: None,
+        });
+        track.instrument_kind = Some(vibez_core::midi::InstrumentKind::FmSynth);
+
+        assert_eq!(
+            automation_target_for(&DeviceSlot::Effect(native_id), 2, &track),
+            Some(AutomationTarget::EffectParam {
+                effect_id: native_id,
+                param_index: 2,
+            })
+        );
+        assert_eq!(
+            automation_target_for(&DeviceSlot::Effect(plugin_id), 3, &track),
+            Some(AutomationTarget::PluginParam {
+                effect_id: Some(plugin_id),
+                param_id: 3,
+            })
+        );
+        assert_eq!(
+            automation_target_for(&DeviceSlot::Instrument, 1, &track),
+            Some(AutomationTarget::InstrumentParam { param_index: 1 })
+        );
+        track.plugin_instrument_name = Some("Plug Synth".into());
+        assert_eq!(
+            automation_target_for(&DeviceSlot::Instrument, 1, &track),
+            Some(AutomationTarget::PluginParam {
+                effect_id: None,
+                param_id: 1,
+            })
+        );
+        assert_eq!(
+            automation_target_for(&DeviceSlot::DrumPad(0), 0, &track),
+            None
+        );
     }
 }

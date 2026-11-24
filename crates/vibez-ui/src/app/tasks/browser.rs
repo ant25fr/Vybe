@@ -7,23 +7,36 @@ use std::sync::Arc;
 use vibez_audio_io::file_io;
 use vibez_core::track::MediaSourceRef;
 
+/// Decodes a local file for the browser preview. The loop-tempo analysis
+/// runs separately in [`analyse_preview_loop_fit_async`], so playback can
+/// start as soon as the bytes are decoded.
 pub(in crate::app) async fn decode_local_for_preview_async(
     path: PathBuf,
-) -> Result<crate::message::AnalysedBrowserAudio, String> {
+) -> Result<(Arc<vibez_core::audio_buffer::DecodedAudio>, String), String> {
     tokio::task::spawn_blocking(move || {
         let name = path
             .file_name()
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_default();
         let audio = file_io::decode_audio_file(&path).map_err(|error| error.to_string())?;
-        let loop_fit = crate::warp::analyse_loop_tempo(&audio, &name);
-        Ok(crate::message::AnalysedBrowserAudio {
-            audio: Arc::new(audio),
-            loop_fit,
-        })
+        Ok((Arc::new(audio), name))
     })
     .await
     .map_err(|error| format!("preview decode task failed: {error}"))?
+}
+
+/// Bounded loop-tempo analysis for the preview: onset detection runs on a
+/// 30 s window, so a long file's preview is not held up by it.
+pub(in crate::app) async fn analyse_preview_loop_fit_async(
+    audio: Arc<vibez_core::audio_buffer::DecodedAudio>,
+    source_name: String,
+) -> Option<crate::warp::LoopGridFit> {
+    tokio::task::spawn_blocking(move || {
+        crate::warp::analyse_loop_tempo_bounded(&audio, &source_name)
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 pub(in crate::app) async fn decode_file_async(
@@ -40,24 +53,8 @@ pub(in crate::app) async fn analyse_browser_audio_async(
     audio: vibez_core::audio_buffer::DecodedAudio,
     source_name: String,
 ) -> Result<crate::message::AnalysedBrowserAudio, String> {
-    analyse_browser_audio_with_cached_metadata_async(audio, source_name, None).await
-}
-
-pub(in crate::app) async fn analyse_browser_audio_with_cached_metadata_async(
-    audio: vibez_core::audio_buffer::DecodedAudio,
-    source_name: String,
-    cached_metadata: Option<vibez_dropbox::DerivedMetadata>,
-) -> Result<crate::message::AnalysedBrowserAudio, String> {
     tokio::task::spawn_blocking(move || {
-        let loop_fit = match cached_metadata {
-            Some(metadata) => crate::warp::fit_loop_tempo(
-                audio.num_frames(),
-                audio.sample_rate as f64,
-                &source_name,
-                metadata.bpm,
-            ),
-            None => crate::warp::analyse_loop_tempo(&audio, &source_name),
-        };
+        let loop_fit = crate::warp::analyse_loop_tempo(&audio, &source_name);
         crate::message::AnalysedBrowserAudio {
             audio: Arc::new(audio),
             loop_fit,
