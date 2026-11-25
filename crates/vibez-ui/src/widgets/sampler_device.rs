@@ -41,7 +41,7 @@ const BAND_PAD: f32 = 6.0;
 const WAVE_ALONE_MIN_H: f32 = 16.0;
 /// A section's name and its choice, above its plot.
 const HEADER_H: f32 = 26.0;
-const KNOB: f32 = 30.0;
+const KNOB: f32 = 38.0;
 const PLOT_MIN_H: f32 = 40.0;
 const SIDE_W: f32 = 176.0;
 /// A section's plot and knobs share their row in this proportion.

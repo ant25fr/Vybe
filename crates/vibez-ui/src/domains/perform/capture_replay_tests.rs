@@ -46,6 +46,7 @@ fn source(early: TrackId, full: TrackId, second: bool) -> CapturedTimelineSource
             .ensure(track)
             .clips
             .push(UiClip {
+                color_index: None,
                 id: ClipId::new(),
                 name: "Section pulse".into(),
                 audio,
@@ -128,6 +129,7 @@ fn fully_compensated_bounce_replays_heard_section_and_live_note_relationship_wit
         for clip in &content.clips {
             clip_audio.insert(clip.id, Arc::clone(&clip.audio));
             audio_clips.push(ClipInfo {
+                color_index: None,
                 id: clip.id,
                 track_id: id,
                 name: clip.name.clone(),

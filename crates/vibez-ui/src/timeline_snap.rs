@@ -349,6 +349,7 @@ mod tests {
 
     fn audio_clip(start: f64, end: f64) -> UiClip {
         UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: "Audio".into(),
             audio: Arc::new(DecodedAudio {

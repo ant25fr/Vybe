@@ -740,6 +740,19 @@ impl TimelineEditorState {
             } => {
                 return self.op_set_note_clip_color(track_id, clip_id, color_index);
             }
+            ArrangementMsg::SetAudioClipColor {
+                track_id,
+                clip_id,
+                color_index,
+            } => {
+                return self.op_set_audio_clip_color(track_id, clip_id, color_index);
+            }
+            ArrangementMsg::SetTrackColor {
+                track_id,
+                color_index,
+            } => {
+                return self.op_set_track_color(project_tracks, track_id, color_index);
+            }
             ArrangementMsg::AudioClipInspectorInputChanged {
                 clip_id,
                 field,

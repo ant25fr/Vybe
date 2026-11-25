@@ -25,7 +25,7 @@ use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H, LINE_H};
 use crate::widgets::saturator_display::{SpectrumPlot, TransferPlot};
 
 const PAD: f32 = 10.0;
-const KNOB: f32 = 32.0;
+const KNOB: f32 = 40.0;
 const TABS_H: f32 = 22.0;
 /// A plot under its tabs, the axis labels dropped below 60 px.
 const PLOT_MIN_H: f32 = TABS_H + 4.0 + 40.0;

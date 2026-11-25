@@ -81,6 +81,12 @@ impl NoteOutput {
     pub fn dropped(&self) -> u64 {
         self.dropped
     }
+
+    /// Rebuild from wire parts (used by the out-of-process plugin bridge,
+    /// where the notes crossed a process boundary).
+    pub fn from_parts(notes: Vec<BlockNote>, dropped: u64) -> Self {
+        Self { notes, dropped }
+    }
 }
 
 #[cfg(test)]

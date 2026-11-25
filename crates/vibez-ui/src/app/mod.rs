@@ -58,6 +58,7 @@ struct App {
     device_meters: device_meters::DeviceMeters,
     gain_devices: gain_devices::GainDevices,
     eq_devices: eq_devices::EqDevices,
+    widener_devices: widener_devices::WidenerDevices,
     compressor_devices: compressor_devices::CompressorDevices,
     filter_panels: device_panels::DevicePanels<crate::domains::filter::FilterPanelState>,
     gate_panels: device_panels::DevicePanels<crate::domains::gate::GatePanelState>,
@@ -76,6 +77,13 @@ struct App {
     /// Raw pointers for live state capture at save time, keyed like
     /// the GUI pointers. Entries live exactly as long as the device.
     plugin_state_ptrs: std::collections::HashMap<PluginGuiKey, vibez_plugin_host::PluginStatePtr>,
+    /// Sandboxed plugin instances: bridge subprocess handles kept for GUI
+    /// commands and live state capture. Dropping the last reference kills
+    /// the subprocess.
+    plugin_remote_handles: std::collections::HashMap<
+        PluginGuiKey,
+        std::sync::Arc<vibez_plugin_host::bridge::BridgeChild>,
+    >,
     /// Plugin preflight and render progress for the one active project export.
     export_job: Option<project_export::ExportJob>,
     export_render_progress: Option<Arc<std::sync::atomic::AtomicU8>>,
@@ -170,6 +178,7 @@ mod drum_rack_devices;
 mod drum_rack_preparation;
 mod engine_events;
 mod eq_devices;
+mod widener_devices;
 mod filter_devices;
 mod fm_devices;
 mod gain_devices;
@@ -184,6 +193,7 @@ mod midi_from;
 mod midi_from_tests;
 mod param_entry;
 mod phaser_devices;
+mod plucked_devices;
 mod reverb_devices;
 mod sampler_devices;
 mod synth_devices;
@@ -290,7 +300,11 @@ mod drag_ghost_tests;
 mod new_track_drop_tests;
 
 #[cfg(test)]
+mod clip_color_menu_tests;
+#[cfg(test)]
 mod empty_space_drop_tests;
+#[cfg(test)]
+mod undo_redo_view_tests;
 #[cfg(test)]
 mod view_harness;
 #[cfg(test)]
@@ -354,6 +368,8 @@ impl App {
             .take_transport_sender()
             .expect("a new engine still holds its transport sender");
         let eq_spectrum_rx = engine.take_effect_spectrum_consumer();
+        let side_spectrum_rx = engine.take_side_spectrum_consumer();
+        let mid_spectrum_rx = engine.take_mid_spectrum_consumer();
         let ui_settings = UiSettings::load();
         // Read before the settings are picked apart below, and clamped
         // here rather than at the render site so a hand-edited ui.json
@@ -564,6 +580,11 @@ impl App {
                 spectrum_rx: eq_spectrum_rx,
                 ..Default::default()
             },
+            widener_devices: widener_devices::WidenerDevices {
+                spectrum_rx: side_spectrum_rx,
+                mid_rx: mid_spectrum_rx,
+                ..Default::default()
+            },
             param_entry: None,
             device_presets: Default::default(),
             sidechain_sync_inputs: None,
@@ -574,6 +595,7 @@ impl App {
             plugin_window_manager,
             plugin_gui_raw_ptrs: std::collections::HashMap::new(),
             plugin_state_ptrs: std::collections::HashMap::new(),
+            plugin_remote_handles: std::collections::HashMap::new(),
             export_job: None,
             export_render_progress: None,
             export_plugin_return_rx: None,

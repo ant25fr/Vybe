@@ -238,6 +238,14 @@ impl App {
                 switch(settings.scan_default_paths, Message::ToggleScanDefaultPaths),
             ),
             setting_row(
+                "Sandbox plugins (separate process)",
+                Some(
+                    hint("Each plugin runs in its own process: a crash or hang only disables that plugin, not the DAW.")
+                        .into(),
+                ),
+                switch(settings.sandbox_plugins, Message::ToggleSandboxPlugins),
+            ),
+            setting_row(
                 "Extra folders",
                 Some(
                     hint(if settings.extra_scan_paths.is_empty() {

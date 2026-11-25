@@ -44,12 +44,10 @@ impl DelayHistory {
             return None;
         }
         let count = usize::try_from(frames).ok()?;
-        let mut buffer_l = Vec::new();
-        buffer_l.try_reserve_exact(count).ok()?;
-        buffer_l.resize(count, 0.0);
-        let mut buffer_r = Vec::new();
-        buffer_r.try_reserve_exact(count).ok()?;
-        buffer_r.resize(count, 0.0);
+        // `vec![0.0; n]` maps zeroed pages lazily, so an idle Delay costs
+        // address space rather than resident memory.
+        let buffer_l = vec![0.0_f32; count];
+        let buffer_r = vec![0.0_f32; count];
         Some((buffer_l, buffer_r))
     }
 

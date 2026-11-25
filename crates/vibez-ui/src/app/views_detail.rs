@@ -451,6 +451,37 @@ impl App {
             .into()
     }
 
+    /// The names of a Drum Rack track's pads for the piano roll's keys: the
+    /// pad's own name, else its sample's file name, else its pad number.
+    /// Empty for any other track.
+    fn drum_pad_labels(&self, track_id: TrackId) -> Vec<String> {
+        let Some(track) = self.state.find_track(track_id) else {
+            return Vec::new();
+        };
+        if !crate::domains::sampler::is_native_drum_rack(track) {
+            return Vec::new();
+        }
+        track
+            .drum_rack_pads
+            .iter()
+            .enumerate()
+            .map(|(index, pad)| {
+                pad.name
+                    .clone()
+                    .filter(|name| !name.trim().is_empty())
+                    .or_else(|| {
+                        pad.source.as_ref().map(|source| {
+                            let name = source.display_name();
+                            std::path::Path::new(&name)
+                                .file_stem()
+                                .map_or(name.clone(), |stem| stem.to_string_lossy().into_owned())
+                        })
+                    })
+                    .unwrap_or_else(|| format!("Pad {}", index + 1))
+            })
+            .collect()
+    }
+
     /// Piano roll panel for the detail panel split view.
     pub(super) fn view_piano_roll_panel(
         &self,
@@ -506,6 +537,7 @@ impl App {
 
         let clip_view = visible_clip.and_then(|clip| self.state.view.clip_editor_view(clip.id));
         piano_widget.view = clip_view;
+        piano_widget.pad_labels = self.drum_pad_labels(track_id);
         piano_widget.wheel_zoom = self.wheel_zoom();
         velocity_widget.view = clip_view;
         piano_widget.reserve_arrow_keys = self.state.view.workspace

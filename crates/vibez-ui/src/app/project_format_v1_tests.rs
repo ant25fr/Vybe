@@ -121,6 +121,7 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
                 clips: vec![ClipInfo {
+                    color_index: None,
                     id: ClipId::new(),
                     track_id: track.id,
                     name: file_name.into(),
@@ -257,6 +258,7 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
+                color_index: None,
                 id: ClipId::new(),
                 track_id: track.id,
                 name: "loop.wav".into(),
@@ -369,6 +371,7 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
+                color_index: None,
                 id: ClipId::new(),
                 track_id: track.id,
                 name: "source.wav".into(),
@@ -426,6 +429,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
     let track_id = track.id;
     let section_id = vibez_core::id::SectionId::new();
     let clip = |id, position| ClipInfo {
+        color_index: None,
         id,
         track_id,
         name: "shared.wav".into(),
@@ -558,6 +562,7 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
+                color_index: None,
                 id: clip_id,
                 track_id: track.id,
                 name: "Remote clip".into(),
@@ -621,6 +626,7 @@ async fn sourceless_audio_clip_survives_reopen_and_re_save() {
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
             clips: vec![ClipInfo {
+                color_index: None,
                 id: clip_id,
                 track_id: track.id,
                 name: "Joined".into(),

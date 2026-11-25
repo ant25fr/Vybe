@@ -184,6 +184,7 @@ impl TimelineEditorState {
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
+                color_index: None,
                 id: new_id,
                 name: "Joined".to_string(),
                 audio: joined.audio,

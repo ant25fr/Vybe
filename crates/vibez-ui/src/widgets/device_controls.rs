@@ -23,9 +23,9 @@ pub const LABEL_SIZE: f32 = 10.0;
 pub const VALUE_SIZE: f32 = 11.0;
 /// Height of a knob's label and value lines together, for layouts that
 /// size the knob from the space left.
-pub const KNOB_TEXT_H: f32 = 34.0;
-pub const KNOB_MIN: f32 = 28.0;
-pub const KNOB_MAX: f32 = 56.0;
+pub const KNOB_TEXT_H: f32 = 38.0;
+pub const KNOB_MIN: f32 = 36.0;
+pub const KNOB_MAX: f32 = 76.0;
 /// The knob beside a value on a single-line row.
 pub const SMALL_KNOB: f32 = 18.0;
 /// A level meter with its scale, under a heading.

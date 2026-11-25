@@ -864,6 +864,12 @@ pub fn track_color(index: u8) -> Color {
     let palette = CURRENT.read().unwrap();
     colour_strength().track(palette.track_colors[index as usize % palette.track_colors.len()])
 }
+
+/// Number of swatches a track can pick from (the track palette).
+pub fn track_color_count() -> u8 {
+    let palette = CURRENT.read().unwrap();
+    palette.track_colors.len() as u8
+}
 /// Number of swatches a pattern (note clip) can pick from: the track
 /// palette plus one lighter variant per entry.
 pub const CLIP_COLOR_COUNT: u8 = 16;

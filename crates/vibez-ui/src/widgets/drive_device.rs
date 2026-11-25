@@ -21,7 +21,7 @@ use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 use crate::widgets::drive_display::{TransferCurve, Waveform};
 
 const PAD: f32 = 10.0;
-const KNOB: f32 = 32.0;
+const KNOB: f32 = 40.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
 const PLOT_MIN_W: f32 = 200.0;

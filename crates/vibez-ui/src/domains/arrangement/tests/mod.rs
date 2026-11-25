@@ -56,6 +56,7 @@ fn add_audio_clip(
     let id = ClipId::new();
     let tid = a.tracks[track_idx].id;
     let clip = UiClip {
+        color_index: None,
         id,
         name: "Clip".to_string(),
         audio,

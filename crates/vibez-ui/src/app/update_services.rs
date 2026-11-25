@@ -123,6 +123,19 @@ impl App {
                     !self.state.plugin_settings.scan_default_paths;
                 let _ = self.state.plugin_settings.save();
             }
+            Message::ToggleSandboxPlugins => {
+                self.state.plugin_settings.sandbox_plugins =
+                    !self.state.plugin_settings.sandbox_plugins;
+                let _ = self.state.plugin_settings.save();
+            }
+            Message::PluginRemoteGuiResult(_key, result) => match result {
+                Ok(true) => {
+                    self.state.status_text = "Plugin interface opened (sandboxed)".to_string()
+                }
+                Ok(false) => self.state.status_text = "Plugin has no interface to open".to_string(),
+                Err(e) => self.state.status_text = format!("Plugin sandbox error: {e}"),
+            },
+            Message::PluginRemoteGuiClosed(_) => {}
 
             // -- Plugin loading --
             Message::AddPluginToTrack(track_id, plugin_id) => {
@@ -161,8 +174,9 @@ impl App {
                             .plugin_load_requests
                             .begin(PluginGuiKey::Instrument { track_id });
                         let tx = self.plugin_instrument_tx.clone();
+                        let sandbox = self.state.plugin_settings.sandbox_plugins;
                         std::thread::spawn(move || {
-                            match load_plugin_instrument_bg(&info, sample_rate, None) {
+                            match load_plugin_instrument_bg(&info, sample_rate, None, sandbox) {
                                 Ok(mut result) => {
                                     result.load_token = token;
                                     result.track_id = track_id;
@@ -180,8 +194,9 @@ impl App {
                             effect_id,
                         });
                         let tx = self.plugin_effect_tx.clone();
+                        let sandbox = self.state.plugin_settings.sandbox_plugins;
                         std::thread::spawn(move || {
-                            match load_plugin_effect_bg(&info, sample_rate, None) {
+                            match load_plugin_effect_bg(&info, sample_rate, None, sandbox) {
                                 Ok(mut result) => {
                                     result.load_token = token;
                                     result.track_id = track_id;
@@ -209,6 +224,36 @@ impl App {
                         mgr.raise(key);
                         return Task::none();
                     }
+                }
+                if let Some(remote) = self.plugin_remote_handles.get(&key).cloned() {
+                    self.state.status_text =
+                        "Opening plugin interface (sandboxed window)...".to_string();
+                    return Task::perform(
+                        async move {
+                            tokio::task::spawn_blocking(move || {
+                                remote.request(
+                                    vibez_plugin_host::bridge::BridgeRequest::OpenGui {
+                                        width: 900,
+                                        height: 600,
+                                    },
+                                    std::time::Duration::from_secs(15),
+                                )
+                            })
+                            .await
+                            .unwrap_or(Err(vibez_plugin_host::bridge::BridgeError::Timeout))
+                        },
+                        move |result| {
+                            Message::PluginRemoteGuiResult(
+                                key,
+                                result.map(|resp| {
+                                    matches!(
+                                        resp,
+                                        vibez_plugin_host::bridge::BridgeResponse::Bool(true)
+                                    )
+                                }),
+                            )
+                        },
+                    );
                 }
                 if let Some(&raw_ptr) = self.plugin_gui_raw_ptrs.get(&key) {
                     let title = match key {

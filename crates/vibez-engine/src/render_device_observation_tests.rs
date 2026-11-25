@@ -445,6 +445,7 @@ fn request() -> (BounceRequest, EffectId) {
             }),
         );
         clips.push(ClipInfo {
+            color_index: None,
             id,
             track_id: track.id,
             name: "source".into(),

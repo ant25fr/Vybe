@@ -32,6 +32,7 @@ fn gain_effect() -> UiEffect {
 
 fn steady_clip(frames: u64) -> UiClip {
     UiClip {
+        color_index: None,
         id: ClipId::new(),
         name: "Pad".into(),
         audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {

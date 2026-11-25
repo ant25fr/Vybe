@@ -45,6 +45,7 @@ fn lane() -> Lane {
     let clip_id = ClipId::new();
     let frames = 88_200;
     app.state.arrange_content_mut(track.id).clips.push(UiClip {
+        color_index: None,
         id: clip_id,
         name: "Loop".into(),
         audio: Arc::new(DecodedAudio {

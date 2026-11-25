@@ -392,6 +392,50 @@ impl TimelineEditorState {
         action
     }
 
+    pub(super) fn op_set_audio_clip_color(
+        &mut self,
+        track_id: TrackId,
+        clip_id: ClipId,
+        color_index: Option<u8>,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        let changed = self
+            .find_content_mut(track_id)
+            .and_then(|t| t.clips.iter_mut().find(|c| c.id == clip_id))
+            .is_some_and(|clip| {
+                clip.color_index = color_index;
+                true
+            });
+        if changed {
+            action.mark_dirty = true;
+            action.status = Some(match color_index {
+                Some(index) => format!("Clip color set to {}", index + 1),
+                None => "Clip color reset to the track color".to_string(),
+            });
+        }
+        action
+    }
+
+    pub(super) fn op_set_track_color(
+        &mut self,
+        project_tracks: &mut ProjectTracksState,
+        track_id: TrackId,
+        color_index: u8,
+    ) -> ArrangementAction {
+        let mut action = ArrangementAction::default();
+        let track = project_tracks
+            .tracks
+            .iter_mut()
+            .find(|t| t.id == track_id)
+            .or_else(|| project_tracks.buses.iter_mut().find(|b| b.id == track_id));
+        if let Some(track) = track {
+            track.color_index = color_index;
+            action.mark_dirty = true;
+            action.status = Some(format!("Track color set to {}", color_index + 1));
+        }
+        action
+    }
+
     pub(super) fn op_join_selected_clips(
         &mut self,
         engine: &mut impl EngineHandle,

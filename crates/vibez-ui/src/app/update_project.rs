@@ -79,6 +79,7 @@ impl App {
                 let handle = rfd::AsyncFileDialog::new()
                     .set_title("Open Vibez Project")
                     .add_filter("Vibez Project", &["vzp", "vibez", "json"])
+                    .add_filter("DAWproject", &["dawproject"])
                     .pick_file()
                     .await;
                 handle.map(|file| file.path().to_path_buf())

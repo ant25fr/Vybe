@@ -213,6 +213,7 @@ mod tests {
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
                 clips: vec![vibez_core::track::ClipInfo {
+                    color_index: None,
                     id: ClipId::new(),
                     track_id: track.id,
                     name: outcome.clip_name,

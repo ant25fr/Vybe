@@ -101,6 +101,7 @@ mod tests {
             sample_rate: 48_000,
         });
         let clip = crate::state::UiClip {
+            color_index: None,
             id: vibez_core::id::ClipId::new(),
             name: "Loop".into(),
             audio,
@@ -145,6 +146,7 @@ mod tests {
         let source_path = directory.path().join("warped.wav");
         let project_path = directory.path().join("warped-slices.vzp");
         let mut clip = crate::state::UiClip {
+            color_index: None,
             id: vibez_core::id::ClipId::new(),
             name: "Warped Loop".into(),
             audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {

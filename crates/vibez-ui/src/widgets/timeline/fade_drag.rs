@@ -403,6 +403,7 @@ mod tests {
     #[test]
     fn drag_math_is_reciprocal_with_drawn_handle_positions() {
         let clip = TimelineClip {
+            color: None,
             clip_id: ClipId::new(),
             position: 0,
             duration: 48_000,

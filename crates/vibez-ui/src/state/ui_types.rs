@@ -53,6 +53,9 @@ pub struct UiClip {
     /// Project BPM the current warped audio was stretched to. Used to
     /// flag staleness in the timeline when the project tempo changes.
     pub warped_to_bpm: Option<f64>,
+    /// Per-clip color override from the clip's context menu; `None` falls
+    /// back to the track's color.
+    pub color_index: Option<u8>,
     /// Un-warped source audio, retained so the UI can re-warp to a new
     /// project BPM or clear the warp without re-decoding. Populated on
     /// import or on first warp. Not persisted: on reload the UI
@@ -85,6 +88,7 @@ impl PartialEq for UiClip {
             original_bpm,
             warped,
             warped_to_bpm,
+            color_index,
             original_audio,
         } = self;
         *id == other.id
@@ -107,6 +111,7 @@ impl PartialEq for UiClip {
             && *original_bpm == other.original_bpm
             && *warped == other.warped
             && *warped_to_bpm == other.warped_to_bpm
+            && *color_index == other.color_index
             && same_audio(original_audio, &other.original_audio)
     }
 }
@@ -702,6 +707,7 @@ impl UiClip {
     /// for tests to fill in the fields they care about.
     pub(crate) fn test_clip(position: u64, duration: u64) -> Self {
         Self {
+            color_index: None,
             id: ClipId::new(),
             name: "Audio".into(),
             audio: Arc::new(DecodedAudio {

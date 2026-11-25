@@ -23,7 +23,7 @@ use crate::widgets::device_layout::{pack, KNOB_ROW_H, LINE_H};
 use crate::widgets::limiter_display::{HistoryPlot, ReductionMeter};
 
 const PAD: f32 = 10.0;
-const KNOB: f32 = 32.0;
+const KNOB: f32 = 40.0;
 const HEADING_H: f32 = 14.0;
 /// The plots under their headings, the axis labels dropped below 50 px.
 const PLOT_MIN_H: f32 = HEADING_H + 4.0 + 38.0;

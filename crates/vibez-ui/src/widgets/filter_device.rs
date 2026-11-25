@@ -22,7 +22,7 @@ use crate::widgets::device_controls::{
 use crate::widgets::filter_display::{ModulationPreview, ResponsePlot};
 
 const PAD: f32 = 10.0;
-const KNOB: f32 = 32.0;
+const KNOB: f32 = 40.0;
 const KNOB_COL_W: f32 = 68.0;
 const KNOB_ROW_H: f32 = 74.0;
 const LINE_H: f32 = 24.0;

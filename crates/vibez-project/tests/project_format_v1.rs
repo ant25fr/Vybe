@@ -164,6 +164,7 @@ fn project_with_source(source: MediaSourceRef) -> Project {
         tracks: vec![track.clone()],
         arrange: TimelineInfo {
             clips: vec![ClipInfo {
+                color_index: None,
                 id: ClipId::new(),
                 track_id: track.id,
                 name: source.display_name(),
@@ -202,6 +203,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
     let track = TrackInfo::new("Audio");
     let track_id = track.id;
     let clip = |id| ClipInfo {
+        color_index: None,
         id,
         track_id,
         name: "shared.wav".into(),

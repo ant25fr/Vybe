@@ -11,6 +11,7 @@ fn section(name: &str, early: TrackId, full: TrackId, lead: u32) -> CapturedTime
             .ensure(track)
             .clips
             .push(UiClip {
+                color_index: None,
                 id: ClipId::new(),
                 name: name.into(),
                 audio: Arc::new(DecodedAudio {

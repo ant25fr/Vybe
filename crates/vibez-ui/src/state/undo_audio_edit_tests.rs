@@ -12,6 +12,7 @@ fn add_move_and_delete_transient_markers_each_restore_through_undo() {
         .ensure(track_id)
         .clips
         .push(UiClip {
+            color_index: None,
             id: clip_id,
             name: "Loop".into(),
             audio: Arc::new(DecodedAudio {
@@ -158,6 +159,7 @@ fn one_marker_slice_action_undoes_back_to_the_original_audio_clip() {
         .tracks
         .push(ProjectTrack::new(track_id, "Audio".into(), 0));
     let mut clip = UiClip {
+        color_index: None,
         id: clip_id,
         name: "Loop".into(),
         audio: Arc::new(DecodedAudio {
@@ -229,6 +231,7 @@ fn slice_to_drum_rack_undo_removes_the_track_instrument_and_midi_clip_together()
         .tracks
         .push(ProjectTrack::new(source_track_id, "Audio".into(), 0));
     let mut clip = UiClip {
+        color_index: None,
         id: source_clip_id,
         name: "Loop".into(),
         audio: Arc::new(DecodedAudio {

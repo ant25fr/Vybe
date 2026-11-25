@@ -41,10 +41,10 @@ const PADDING: iced::Padding = iced::Padding {
     left: 8.0,
 };
 const HEADER_H: f32 = 20.0;
-const GAP: f32 = 6.0;
+const GAP: f32 = 5.0;
 const COLUMN_GAP: f32 = 4.0;
 const TITLE_H: f32 = 12.0;
-const PAN_H: f32 = 24.0;
+const PAN_H: f32 = 28.0;
 const BUTTONS_H: f32 = 17.0;
 const DB_H: f32 = 14.0;
 const METER_W: f32 = 10.0;
@@ -70,7 +70,7 @@ pub struct MixerStripView<'a> {
 
 /// One row of send knobs.
 const SEND_ROW_H: f32 = 22.0;
-const SEND_KNOB: f32 = 20.0;
+const SEND_KNOB: f32 = 22.0;
 /// The sends section: its legend and a full bank of rows. Returns and the
 /// master leave the same room so every strip is the same height.
 const SENDS_H: f32 = TITLE_H + SENDS_PER_BANK as f32 * SEND_ROW_H;

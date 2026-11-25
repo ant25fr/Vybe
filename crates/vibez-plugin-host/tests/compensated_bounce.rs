@@ -65,6 +65,7 @@ fn render(
         }],
     });
     let clip = ClipInfo {
+        color_index: None,
         id: ClipId::new(),
         track_id: main.id,
         name: "Pulses".into(),

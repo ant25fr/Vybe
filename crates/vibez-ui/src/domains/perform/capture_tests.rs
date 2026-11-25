@@ -11,6 +11,7 @@ fn audio_section(name: &str, length_beats: f64, frames: u64) -> Section {
         .ensure(track_id)
         .clips
         .push(UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: format!("{name} Audio"),
             audio: Arc::new(DecodedAudio {

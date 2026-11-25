@@ -542,6 +542,12 @@ pub enum Message {
     PluginScanPathSelected(Option<PathBuf>),
     RemovePluginScanPath(usize),
     ToggleScanDefaultPaths,
+    ToggleSandboxPlugins,
+    PluginRemoteGuiResult(
+        PluginGuiKey,
+        Result<bool, vibez_plugin_host::bridge::BridgeError>,
+    ),
+    PluginRemoteGuiClosed(PluginGuiKey),
 
     // Plugin loading (via device menu)
     AddPluginToTrack(TrackId, PluginId),
@@ -652,6 +658,9 @@ pub enum Message {
 
     // Export
     ExportProject,
+    ExportDawProject,
+    DawProjectExportPathSelected(Option<PathBuf>),
+    DawProjectExported(Result<(PathBuf, Vec<String>), String>),
     ExportPathSelected(Option<PathBuf>),
     ExportComplete(Result<PathBuf, String>),
 }

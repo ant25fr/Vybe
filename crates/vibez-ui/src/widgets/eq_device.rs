@@ -36,11 +36,11 @@ const BAND_GROUP_RADIUS: f32 = 5.0;
 const BAND_GROUP_W: f32 = 172.0;
 /// Input and output meters side by side.
 const OUTPUT_W: f32 = METER_W * 2.0;
-const STRIP_KNOB: f32 = 28.0;
-const ROW_KNOB: f32 = 24.0;
+const STRIP_KNOB: f32 = 34.0;
+const ROW_KNOB: f32 = 30.0;
 /// A single line of controls for the shortest cards.
 const LINE_H: f32 = 24.0;
-const LINE_KNOB: f32 = 18.0;
+const LINE_KNOB: f32 = 22.0;
 /// A one-line Advanced has room for the output trim after both cuts.
 const LINE_OUTPUT_W: f32 = 480.0;
 /// The shortest level meter that still reads as one.

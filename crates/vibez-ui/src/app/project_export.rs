@@ -71,6 +71,7 @@ impl App {
             instrument_requests,
             sender,
             sample_rate as f64,
+            self.state.plugin_settings.sandbox_plugins,
         );
         self.export_job = Some(ExportJob {
             request: Some(request),
@@ -279,6 +280,7 @@ fn spawn_export_plugin_preflight(
     instruments: Vec<ExportInstrumentRequest>,
     sender: std::sync::mpsc::Sender<ExportPluginLoadEvent>,
     sample_rate: f64,
+    sandbox: bool,
 ) {
     std::thread::spawn(move || {
         for (track_id, effect_id, device) in effects {
@@ -292,6 +294,7 @@ fn spawn_export_plugin_preflight(
                     &info,
                     sample_rate,
                     state,
+                    sandbox,
                 )?;
                 loaded.track_id = track_id;
                 loaded.effect_id = effect_id;
@@ -326,6 +329,7 @@ fn spawn_export_plugin_preflight(
                     &info,
                     sample_rate,
                     state,
+                    sandbox,
                 )?;
                 loaded.track_id = track_id;
                 Ok::<_, String>(loaded)

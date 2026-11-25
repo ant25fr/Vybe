@@ -17,7 +17,7 @@ use crate::widgets::multiband_dynamics_display::BandScope;
 
 const PAD: f32 = 10.0;
 /// One knob column's width including its spacing.
-const KNOB_COL_W: f32 = 68.0;
+const KNOB_COL_W: f32 = 78.0;
 /// One knob row's height, matching the shared device layout.
 const KNOB_ROW_H: f32 = crate::widgets::device_layout::KNOB_ROW_H;
 /// The scope's smallest and largest height, so it follows the rack's

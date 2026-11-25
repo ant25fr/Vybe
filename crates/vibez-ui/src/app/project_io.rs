@@ -104,6 +104,7 @@ impl App {
         }
         self.plugin_gui_raw_ptrs.clear();
         self.plugin_state_ptrs.clear();
+        self.plugin_remote_handles.clear();
         self.state.arrangement.selected_track = None;
         Arc::make_mut(&mut self.state.project_tracks).next_track_number = 1;
         self.state.arrangement.selected_note_clip = None;
@@ -353,6 +354,22 @@ impl App {
     /// UI thread via the pointer stashed at load time.
     pub(super) fn capture_device_state(&self, key: PluginGuiKey) -> Option<String> {
         use base64::Engine;
+        // Sandboxed plugins live in their own process: ask the bridge for
+        // the state instead of dereferencing an in-process pointer.
+        if let Some(remote) = self.plugin_remote_handles.get(&key) {
+            let resp = remote
+                .request(
+                    vibez_plugin_host::bridge::BridgeRequest::SaveState,
+                    std::time::Duration::from_secs(10),
+                )
+                .ok()?;
+            return match resp {
+                vibez_plugin_host::bridge::BridgeResponse::State(Some(data)) => {
+                    Some(base64::engine::general_purpose::STANDARD.encode(data))
+                }
+                _ => None,
+            };
+        }
         let ptr = self.plugin_state_ptrs.get(&key)?;
         let data = unsafe { vibez_plugin_host::capture_plugin_state(ptr) }?;
         Some(base64::engine::general_purpose::STANDARD.encode(data))
@@ -575,7 +592,8 @@ impl App {
                 match native {
                     InstrumentStateInfo::SubtractiveSynth { params }
                     | InstrumentStateInfo::WavetableSynth { params }
-                    | InstrumentStateInfo::FmSynth { params } => {
+                    | InstrumentStateInfo::FmSynth { params }
+                    | InstrumentStateInfo::PluckedString { params } => {
                         track.instrument_params = params.clone();
                         for (idx, value) in params.iter().copied().enumerate() {
                             self.send_command(EngineCommand::SetInstrumentParam {
@@ -919,8 +937,11 @@ impl App {
         self.state
             .perform
             .sync_project_tracks(&self.state.project_tracks.tracks);
-        self.state.project.current_path = Some(loaded.path.clone());
-        self.state.project.dirty = false;
+        // An imported DAWproject is a new unsaved Vibez project, not a file
+        // Save could write back to.
+        let imported = vibez_project::dawproject::is_dawproject(&loaded.path);
+        self.state.project.current_path = (!imported).then(|| loaded.path.clone());
+        self.state.project.dirty = imported;
         self.save_runtime.reset_document();
         let provenance_suffix = remote_provenance
             .map(|label| format!(" · Remote source {label}"))

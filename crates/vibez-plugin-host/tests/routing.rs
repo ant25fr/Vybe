@@ -619,6 +619,7 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
                 }],
             });
             let clip = ClipInfo {
+                color_index: None,
                 id: ClipId::new(),
                 track_id: bass.id,
                 name: "Main".into(),

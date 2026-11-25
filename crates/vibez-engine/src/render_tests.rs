@@ -186,6 +186,7 @@ fn master_bounce_routes_sends_through_buses() {
     let audio = audio_of(200, 0.5);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        color_index: None,
         id: cid,
         track_id: tid,
         name: "c".into(),
@@ -255,6 +256,7 @@ fn master_render_applies_audio_clip_gain() {
     let audio = audio_of(200, 0.5);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        color_index: None,
         id: cid,
         track_id: tid,
         name: "c".into(),
@@ -315,6 +317,7 @@ fn offline_render_uses_the_same_reverse_traversal_as_live_playback() {
     let track_id = track.id;
     let clip_id = ClipId::new();
     let clip = ClipInfo {
+        color_index: None,
         id: clip_id,
         track_id,
         name: "reverse".into(),
@@ -381,6 +384,7 @@ fn offline_and_prepared_live_paths_share_the_exact_piecewise_warp_map() {
     let mut warp_markers = vibez_core::warp_marker::WarpMarkers::default();
     assert!(warp_markers.add(1, 2, 0, 4, 4));
     let clip = ClipInfo {
+        color_index: None,
         id: clip_id,
         track_id,
         name: "piecewise".into(),
@@ -466,6 +470,7 @@ fn clip_bounce_keeps_reverse_warp_and_shaped_fades_in_one_render() {
         .with_fade_in_curve(vibez_core::track::FadeCurve::new(70))
         .with_fade_out_curve(vibez_core::track::FadeCurve::new(-60));
     let clip = ClipInfo {
+        color_index: None,
         id: clip_id,
         track_id,
         name: "edited".into(),
@@ -545,6 +550,7 @@ fn mute_silences_master_bounce() {
     let audio = audio_of(100, 0.7);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        color_index: None,
         id: cid,
         track_id: tid,
         name: "c".into(),
@@ -597,6 +603,7 @@ fn track_mode_ignores_mute() {
     let audio = audio_of(100, 0.5);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        color_index: None,
         id: cid,
         track_id: tid,
         name: "c".into(),
@@ -650,6 +657,7 @@ fn clip_mode_isolates_single_clip() {
     let audio_a = audio_of(100, 0.3);
     let audio_b = audio_of(100, 0.9);
     let clip_a = ClipInfo {
+        color_index: None,
         id: cid_a,
         track_id: tid,
         name: "a".into(),
@@ -673,6 +681,7 @@ fn clip_mode_isolates_single_clip() {
         warped_to_bpm: None,
     };
     let clip_b = ClipInfo {
+        color_index: None,
         id: cid_b,
         track_id: tid,
         name: "b".into(),

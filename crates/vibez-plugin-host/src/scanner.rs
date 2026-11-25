@@ -143,7 +143,10 @@ fn scan_in_subprocess(
     use std::io::Read;
     use std::process::{Command, Stdio};
 
-    let mut child = Command::new(helper)
+    let mut command = Command::new(helper);
+    #[cfg(not(windows))]
+    crate::bridge::sandbox::apply_env(&mut command);
+    let mut child = command
         .arg(format_arg)
         .arg(path)
         .stdin(Stdio::null())

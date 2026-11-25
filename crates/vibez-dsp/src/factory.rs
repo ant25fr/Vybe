@@ -2,6 +2,7 @@ use vibez_core::effect::EffectType;
 
 use crate::auto_pan::AutoPanEffect;
 use crate::bitcrush::BitcrushEffect;
+use crate::chorus::ChorusEffect;
 use crate::compressor::CompressorEffect;
 use crate::delay::DelayEffect;
 use crate::drive::DriveEffect;
@@ -9,13 +10,18 @@ use crate::echo::EchoEffect;
 use crate::effect::AudioEffect;
 use crate::eq::EqEffect;
 use crate::filter::FilterEffect;
+use crate::flanger::FlangerEffect;
+use crate::frequency_shifter::FrequencyShifterEffect;
 use crate::gain::GainEffect;
 use crate::gate::GateEffect;
 use crate::limiter::LimiterEffect;
 use crate::multiband_dynamics::MultibandDynamicsEffect;
 use crate::phaser::PhaserEffect;
+use crate::pitch_shifter::PitchShifterEffect;
 use crate::reverb::ReverbEffect;
+use crate::ring_modulator::RingModulatorEffect;
 use crate::saturator::SaturatorEffect;
+use crate::stereo_widener::StereoWidenerEffect;
 
 /// Create an effect instance from its type.
 pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn AudioEffect> {
@@ -35,6 +41,12 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::Limiter => Box::new(LimiterEffect::new(sample_rate)),
         EffectType::Saturator => Box::new(SaturatorEffect::new(sample_rate)),
         EffectType::MultibandDynamics => Box::new(MultibandDynamicsEffect::new(sample_rate)),
+        EffectType::Chorus => Box::new(ChorusEffect::new(sample_rate)),
+        EffectType::Flanger => Box::new(FlangerEffect::new(sample_rate)),
+        EffectType::StereoWidener => Box::new(StereoWidenerEffect::new(sample_rate)),
+        EffectType::PitchShifter => Box::new(PitchShifterEffect::new(sample_rate)),
+        EffectType::RingModulator => Box::new(RingModulatorEffect::new(sample_rate)),
+        EffectType::FrequencyShifter => Box::new(FrequencyShifterEffect::new(sample_rate)),
     }
 }
 

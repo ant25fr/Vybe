@@ -499,6 +499,20 @@ impl AudioEngine {
                                 &destination.samples[..len],
                                 channels,
                             );
+                            self.side_spectrum.observe(
+                                node.channel,
+                                effect_id,
+                                crate::effect_spectrum::EffectSpectrumPosition::Output,
+                                &destination.samples[..len],
+                                channels,
+                            );
+                            self.mid_spectrum.observe(
+                                node.channel,
+                                effect_id,
+                                crate::effect_spectrum::EffectSpectrumPosition::Output,
+                                &destination.samples[..len],
+                                channels,
+                            );
                             track.observe_effect(
                                 effect_id,
                                 crate::mixer::MeterSide::Output,
@@ -607,6 +621,20 @@ impl AudioEngine {
                             offset = end;
                         }
                         self.effect_spectrum.observe(
+                            node.channel,
+                            effect_id,
+                            crate::effect_spectrum::EffectSpectrumPosition::Output,
+                            &destination.samples[..len],
+                            channels,
+                        );
+                        self.side_spectrum.observe(
+                            node.channel,
+                            effect_id,
+                            crate::effect_spectrum::EffectSpectrumPosition::Output,
+                            &destination.samples[..len],
+                            channels,
+                        );
+                        self.mid_spectrum.observe(
                             node.channel,
                             effect_id,
                             crate::effect_spectrum::EffectSpectrumPosition::Output,

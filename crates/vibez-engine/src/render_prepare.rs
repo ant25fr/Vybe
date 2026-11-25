@@ -52,7 +52,8 @@ pub(super) fn channel(
             match state {
                 InstrumentStateInfo::SubtractiveSynth { params }
                 | InstrumentStateInfo::WavetableSynth { params }
-                | InstrumentStateInfo::FmSynth { params } => {
+                | InstrumentStateInfo::FmSynth { params }
+                | InstrumentStateInfo::PluckedString { params } => {
                     for (index, value) in params.iter().enumerate() {
                         instrument.set_param(index, *value);
                     }

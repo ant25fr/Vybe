@@ -62,6 +62,31 @@ impl PianoRollWidget {
                 iced::Size::new(grid_width, KEY_HEIGHT),
                 row_bg,
             );
+            if !self.pad_labels.is_empty() {
+                // Pads stand out from the rows no pad answers to, which are
+                // dimmed; each pad row carries its sample's name.
+                match self.pad_label(pitch) {
+                    Some(label) => {
+                        frame.fill_rectangle(
+                            iced::Point::new(KEY_WIDTH, y),
+                            iced::Size::new(grid_width, KEY_HEIGHT),
+                            theme::with_alpha(self.track_color, 0.08),
+                        );
+                        frame.fill_text(canvas::Text {
+                            content: label.to_string(),
+                            position: iced::Point::new(KEY_WIDTH + 6.0, y + 3.0),
+                            color: theme::with_alpha(theme::text_dim(), 0.8),
+                            size: iced::Pixels(9.0),
+                            ..Default::default()
+                        });
+                    }
+                    None => frame.fill_rectangle(
+                        iced::Point::new(KEY_WIDTH, y),
+                        iced::Size::new(grid_width, KEY_HEIGHT),
+                        theme::with_alpha(theme::bg_dark(), 0.55),
+                    ),
+                }
+            }
 
             // Horizontal grid line
             let is_c = pitch.is_multiple_of(12);
@@ -601,6 +626,56 @@ impl PianoRollWidget {
             }
         }
 
+        // Drum Rack: the keys over the pads become flat, named pad keys.
+        if !self.pad_labels.is_empty() {
+            for i in first_visible..last_visible {
+                let pitch = HIGH_NOTE - 1 - i as u8;
+                let y = i as f32 * KEY_HEIGHT + RULER_HEIGHT - self.scroll_y;
+                if y + KEY_HEIGHT < RULER_HEIGHT || y > h {
+                    continue;
+                }
+                let key = iced::Point::new(0.0, y);
+                let size = iced::Size::new(KEY_WIDTH, KEY_HEIGHT);
+                let Some(label) = self.pad_label(pitch) else {
+                    frame.fill_rectangle(key, size, theme::bg_dark());
+                    continue;
+                };
+                let fill = if pressed_pitch == Some(pitch) {
+                    self.track_color
+                } else if hovered_pitch == Some(pitch) {
+                    theme::border_light()
+                } else {
+                    theme::bg_surface()
+                };
+                frame.fill_rectangle(key, size, fill);
+                frame.stroke(
+                    &canvas::Path::line(
+                        iced::Point::new(0.0, y + KEY_HEIGHT),
+                        iced::Point::new(KEY_WIDTH, y + KEY_HEIGHT),
+                    ),
+                    canvas::Stroke::default()
+                        .with_color(theme::divider())
+                        .with_width(0.5),
+                );
+                let mut name: String = label.chars().take(9).collect();
+                if label.chars().count() > 9 {
+                    name.pop();
+                    name.push('…');
+                }
+                frame.fill_text(canvas::Text {
+                    content: name,
+                    position: iced::Point::new(4.0, y + 3.0),
+                    color: if pressed_pitch == Some(pitch) {
+                        Color::WHITE
+                    } else {
+                        theme::text()
+                    },
+                    size: iced::Pixels(9.0),
+                    ..Default::default()
+                });
+            }
+        }
+
         // C note labels, drawn after the keys so the keys never cover them
         for i in first_visible..last_visible {
             let pitch = HIGH_NOTE - 1 - i as u8;
@@ -610,7 +685,9 @@ impl PianoRollWidget {
                 continue;
             }
 
-            if pitch.is_multiple_of(12) {
+            if pitch.is_multiple_of(12)
+                && (self.pad_labels.is_empty() || self.pad_label(pitch).is_none())
+            {
                 let label = pitch_name(pitch);
                 frame.fill_text(canvas::Text {
                     content: label,

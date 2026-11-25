@@ -692,6 +692,7 @@ impl App {
         });
         if self.state.find_track(track_id).is_some() {
             self.state.arrange_content_mut(track_id).clips.push(UiClip {
+                color_index: None,
                 id: clip_id,
                 name: name.clone(),
                 audio: Arc::clone(&audio),
@@ -772,6 +773,7 @@ impl App {
         };
         let clip_id = ClipId::new();
         let clip = UiClip {
+            color_index: None,
             id: clip_id,
             name: name.clone(),
             audio,

@@ -413,6 +413,7 @@ impl App {
                 };
                 clip_canvas_widget =
                     clip_canvas_widget.with_audio_recording_preview(TimelineClip {
+                        color: None,
                         clip_id: preview.clip_id,
                         position: preview.position,
                         duration: preview.duration,

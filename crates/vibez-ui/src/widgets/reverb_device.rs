@@ -20,7 +20,7 @@ use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H};
 use crate::widgets::reverb_display::ImpulsePlot;
 
 const PAD: f32 = 10.0;
-const KNOB: f32 = 32.0;
+const KNOB: f32 = 40.0;
 const KNOB_COL_W: f32 = 68.0;
 const PLOT_MIN_H: f32 = 72.0;
 const DIVISION_W: f32 = 72.0;

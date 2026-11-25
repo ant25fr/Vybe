@@ -475,6 +475,7 @@ fn undo_snapshot_restores_complete_audio_clip_inspector_state() {
         .ensure(track_id)
         .clips
         .push(UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: "Loop".into(),
             audio: Arc::new(DecodedAudio {
@@ -533,6 +534,7 @@ fn reverse_fades_and_crossfade_curve_restore_as_individual_undo_steps() {
         sample_rate: 48_000,
     });
     let make_clip = |id, position| UiClip {
+        color_index: None,
         id,
         name: "Loop".into(),
         audio: Arc::clone(&audio),
@@ -661,6 +663,7 @@ fn cut_and_each_paste_are_separate_undo_steps_while_clipboard_survives_undo() {
         .ensure(track_id)
         .clips
         .push(UiClip {
+            color_index: None,
             id: source_id,
             name: "Source".into(),
             audio: Arc::new(DecodedAudio {

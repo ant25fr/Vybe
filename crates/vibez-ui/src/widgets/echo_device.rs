@@ -24,7 +24,7 @@ use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H, LINE_H};
 use crate::widgets::echo_display::{MotionPlot, TapsPlot};
 
 const PAD: f32 = 10.0;
-const KNOB: f32 = 32.0;
+const KNOB: f32 = 40.0;
 const KNOB_COL_W: f32 = 64.0;
 /// Below 60 px the plot drops its axis labels, still worth its room.
 const PLOT_MIN_H: f32 = 40.0;

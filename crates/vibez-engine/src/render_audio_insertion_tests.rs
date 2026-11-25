@@ -31,6 +31,7 @@ fn offline_channel_prepares_matching_audio_storage_at_content_boundaries() {
             let mut markers = vibez_core::warp_marker::WarpMarkers::default();
             assert!(markers.add(2, 4, 0, 8, 8));
             request.audio_clips.push(ClipInfo {
+                color_index: None,
                 id,
                 track_id,
                 name: format!("clip {index}"),

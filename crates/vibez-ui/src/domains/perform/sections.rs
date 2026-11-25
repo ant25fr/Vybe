@@ -331,6 +331,7 @@ mod tests {
             .ensure(track_id)
             .clips
             .push(UiClip {
+                color_index: None,
                 id: ClipId::new(),
                 name: "Loop".into(),
                 audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
@@ -374,6 +375,7 @@ mod tests {
             .ensure(track_id)
             .clips
             .push(UiClip {
+                color_index: None,
                 id: clip_id,
                 name: "Reverse loop".into(),
                 audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {

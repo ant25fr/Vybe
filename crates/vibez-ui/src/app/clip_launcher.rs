@@ -63,6 +63,7 @@ impl App {
         let duration = audio.num_frames() as u64;
         let warped = treatment.mode == AuditionMode::Warp;
         let clip = UiClip {
+            color_index: None,
             id,
             name: name.clone(),
             audio,

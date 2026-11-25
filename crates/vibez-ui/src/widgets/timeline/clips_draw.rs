@@ -482,7 +482,7 @@ impl TrackClipCanvas {
         let ppb = geometry.pixels_per_beat();
         let spb = self.sample_rate as f64 * 60.0 / self.bpm;
         let is_selected = !is_recording_preview && self.selected_clips.contains(&clip.clip_id);
-        let colors = self.clip_colors(is_selected, is_recording_preview, None);
+        let colors = self.clip_colors(is_selected, is_recording_preview, clip.color);
         let clip_start_beat = clip.position as f64 / spb;
         let clip_dur_beats = clip.duration as f64 / spb;
 

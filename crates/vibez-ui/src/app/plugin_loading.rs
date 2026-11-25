@@ -51,7 +51,21 @@ impl App {
                     }
                 };
 
-            let has_gui = gui_raw_ptr.is_some();
+            if let Some(remote) = result.remote.take() {
+                let key = PluginGuiKey::Effect {
+                    track_id,
+                    effect_id,
+                };
+                self.plugin_remote_handles.insert(key, remote);
+            }
+            let has_gui = gui_raw_ptr.is_some()
+                || self
+                    .plugin_remote_handles
+                    .get(&PluginGuiKey::Effect {
+                        track_id,
+                        effect_id,
+                    })
+                    .is_some_and(|c| c.has_gui());
 
             if let Some(raw_ptr) = gui_raw_ptr {
                 let key = PluginGuiKey::Effect {
@@ -161,7 +175,15 @@ impl App {
                     }
                 };
 
-            let has_gui = gui_raw_ptr.is_some();
+            if let Some(remote) = result.remote.take() {
+                let key = PluginGuiKey::Instrument { track_id };
+                self.plugin_remote_handles.insert(key, remote);
+            }
+            let has_gui = gui_raw_ptr.is_some()
+                || self
+                    .plugin_remote_handles
+                    .get(&PluginGuiKey::Instrument { track_id })
+                    .is_some_and(|c| c.has_gui());
 
             if let Some(raw_ptr) = gui_raw_ptr {
                 let key = PluginGuiKey::Instrument { track_id };
@@ -242,6 +264,7 @@ impl App {
             self.plugin_effect_tx.clone(),
             self.plugin_instrument_tx.clone(),
             self.state.transport.sample_rate as f64,
+            self.state.plugin_settings.sandbox_plugins,
         );
     }
 }

@@ -733,6 +733,7 @@ fn input_stream_must_reopen(
 pub(super) fn audio_outcome_clip(outcome: &AudioRecordingOutcome, clip_id: ClipId) -> UiClip {
     let duration = outcome.audio.num_frames() as u64;
     UiClip {
+        color_index: None,
         id: clip_id,
         name: outcome.clip_name.clone(),
         audio: Arc::clone(&outcome.audio),

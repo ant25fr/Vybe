@@ -309,6 +309,18 @@ pub enum ArrangementMsg {
         clip_id: ClipId,
         color_index: Option<u8>,
     },
+    /// Recolors one audio clip from its context menu; `None` falls back to
+    /// the track's color.
+    SetAudioClipColor {
+        track_id: TrackId,
+        clip_id: ClipId,
+        color_index: Option<u8>,
+    },
+    /// Recolors a whole track from its header's context menu.
+    SetTrackColor {
+        track_id: TrackId,
+        color_index: u8,
+    },
     AudioClipInspectorInputChanged {
         clip_id: ClipId,
         field: AudioClipInspectorField,
@@ -427,6 +439,8 @@ impl ArrangementMsg {
                 | Self::CreateNoteClipFromSelection(_)
                 | Self::CreateNoteClipAt { .. }
                 | Self::SetNoteClipColor { .. }
+                | Self::SetAudioClipColor { .. }
+                | Self::SetTrackColor { .. }
                 | Self::AudioClipInspectorInputChanged { .. }
                 | Self::DiscardAudioClipInspectorEdit { .. }
                 | Self::SubmitAudioClipInspectorField { .. }

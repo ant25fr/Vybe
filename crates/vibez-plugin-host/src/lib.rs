@@ -14,6 +14,7 @@ pub(crate) const fn vst3_tuid(b: [u8; 16]) -> [u8; 16] {
     }
 }
 
+pub mod bridge;
 pub mod buffer;
 pub mod clap_host;
 pub mod format;

@@ -185,6 +185,7 @@ impl App {
         }
         self.plugin_gui_raw_ptrs.clear();
         self.plugin_state_ptrs.clear();
+        self.plugin_remote_handles.clear();
 
         // Tear down the engine side.
         let existing_track_ids: Vec<TrackId> = self
@@ -415,7 +416,8 @@ impl App {
                 }
                 InstrumentKind::SubtractiveSynth
                 | InstrumentKind::WavetableSynth
-                | InstrumentKind::FmSynth => {}
+                | InstrumentKind::FmSynth
+                | InstrumentKind::PluckedString => {}
             }
         }
 

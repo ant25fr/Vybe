@@ -72,6 +72,12 @@ impl Message {
             on,
         })
     }
+    pub fn release_audition_notes(track_id: TrackId, pitches: Vec<u8>) -> Self {
+        Self::Devices(crate::domains::devices::DevicesMsg::ReleaseAuditionNotes {
+            track_id,
+            pitches,
+        })
+    }
     pub fn dismiss_device_menu() -> Self {
         Self::Devices(crate::domains::devices::DevicesMsg::DismissContextMenu)
     }

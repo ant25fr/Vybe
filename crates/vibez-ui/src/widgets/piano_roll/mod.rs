@@ -64,6 +64,10 @@ pub struct PianoRollWidget {
     /// modifiers currently held: a matching wheel turn zooms around the
     /// cursor, as Shift+wheel already does.
     pub wheel_zoom: crate::shortcuts::WheelZoom,
+    /// Drum Rack mode: the name of each pad, from the base note up. Empty
+    /// for any other instrument. Pad rows are labelled and highlighted, the
+    /// rest of the keyboard is dimmed, as in Ableton Live's drum-rack roll.
+    pub pad_labels: Vec<String>,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -110,6 +114,7 @@ impl PianoRollWidget {
             reserve_arrow_keys: false,
             view: None,
             wheel_zoom: Default::default(),
+            pad_labels: Vec::new(),
         }
     }
 
@@ -126,6 +131,7 @@ impl PianoRollWidget {
             reserve_arrow_keys: false,
             view: None,
             wheel_zoom: Default::default(),
+            pad_labels: Vec::new(),
         }
     }
 
@@ -163,6 +169,13 @@ impl PianoRollWidget {
     fn snapped_beat_floor(&self, beat: f64, bounds: &Rectangle) -> f64 {
         self.grid
             .snap_beat_floor(beat, self.pixels_per_beat(bounds))
+    }
+
+    /// The pad name for `pitch` when this roll edits a Drum Rack and the
+    /// pitch is one of its pads.
+    fn pad_label(&self, pitch: u8) -> Option<&str> {
+        let index = vibez_core::track::drum_rack_pad_index(pitch)?;
+        self.pad_labels.get(index).map(String::as_str)
     }
 
     fn pitch_to_y(&self, pitch: u8) -> f32 {

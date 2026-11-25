@@ -57,6 +57,20 @@ impl App {
     }
 
     pub(super) fn handle_close_plugin_gui(&mut self, key: PluginGuiKey) -> Task<Message> {
+        if let Some(remote) = self.plugin_remote_handles.get(&key).cloned() {
+            return Task::perform(
+                async move {
+                    tokio::task::spawn_blocking(move || {
+                        let _ = remote.request(
+                            vibez_plugin_host::bridge::BridgeRequest::CloseGui,
+                            std::time::Duration::from_secs(5),
+                        );
+                    })
+                    .await
+                },
+                move |_| Message::PluginRemoteGuiClosed(key),
+            );
+        }
         if let Some(ref mut mgr) = self.plugin_window_manager {
             mgr.close(key);
         }

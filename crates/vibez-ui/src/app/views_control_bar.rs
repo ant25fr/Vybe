@@ -121,10 +121,50 @@ impl App {
             .spacing(2),
             browser,
             self.view_workspace_switch(),
+            self.view_undo_redo(),
         ]
         .spacing(10)
         .align_y(Alignment::Center)
         .into()
+    }
+
+    /// Undo/redo icon buttons, between the Perform/Arrange/Mix workspace
+    /// switch and the transport bar. Disabled (no on_press) when the
+    /// corresponding history stack is empty.
+    fn view_undo_redo(&self) -> Element<'_, Message> {
+        let can_undo = self.state.project.history.can_undo();
+        let can_redo = self.state.project.history.can_redo();
+        let undo_redo_button =
+            |icon: char, enabled: bool, message: Message| -> Element<'_, Message> {
+                let icon = icons::icon(icon).size(14).color(if enabled {
+                    th::text()
+                } else {
+                    th::with_alpha(th::text_dim(), 0.4)
+                });
+                let btn = button(
+                    container(icon)
+                        .center_x(Length::Fill)
+                        .center_y(Length::Fill),
+                )
+                .width(Length::Fixed(28.0))
+                .height(Length::Fixed(24.0))
+                .padding(0)
+                .style(style::segment(None));
+                if enabled {
+                    btn.on_press(message).into()
+                } else {
+                    btn.into()
+                }
+            };
+        let buttons = row![
+            undo_redo_button(icons::UNDO, can_undo, Message::Project(ProjectMsg::Undo)),
+            undo_redo_button(icons::REDO, can_redo, Message::Project(ProjectMsg::Redo)),
+        ]
+        .spacing(2);
+        container(buttons)
+            .padding(style::GROUP_INSET)
+            .style(style::group)
+            .into()
     }
 
     fn view_workspace_switch(&self) -> Element<'_, Message> {

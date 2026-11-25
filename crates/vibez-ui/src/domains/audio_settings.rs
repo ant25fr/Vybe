@@ -270,7 +270,7 @@ impl AudioSettingsState {
     pub fn sample_rate_choices(&self) -> Vec<AudioSampleRate> {
         self.target_output()
             .map(supported_sample_rates)
-            .unwrap_or_else(|| vec![AudioSampleRate(self.sample_rate)])
+            .unwrap_or_else(|| COMMON_SAMPLE_RATES.map(AudioSampleRate).to_vec())
     }
 
     pub fn buffer_size_choices(&self) -> Vec<u32> {
@@ -381,8 +381,12 @@ pub fn supported_sample_rates(device: &DeviceInfo) -> Vec<AudioSampleRate> {
     let mut rates: Vec<u32> = COMMON_SAMPLE_RATES
         .into_iter()
         .filter(|rate| {
-            stream_ranges(device)
-                .any(|config| (config.min_sample_rate..=config.max_sample_rate).contains(rate))
+            // 44.1 kHz and 96 kHz are always offered: shared-mode drivers
+            // resample anything else, and picking an unsupported rate is
+            // rejected later with a status message, not a crash.
+            [44_100, 96_000].contains(rate)
+                || stream_ranges(device)
+                    .any(|config| (config.min_sample_rate..=config.max_sample_rate).contains(rate))
         })
         .collect();
     if let Some(default_rate) = device
@@ -511,6 +515,16 @@ mod tests {
             supported_buffer_sizes(&output, 48_000),
             vec![128, 256, 512, 1024]
         );
+    }
+
+    #[test]
+    fn rates_44100_and_96000_are_always_offered() {
+        // Even a device whose ranges exclude them: shared-mode drivers
+        // resample, and an unusable pick is rejected with a status message.
+        let output = device("Fixed 48k output", 48_000, 48_000);
+        let rates = supported_sample_rates(&output);
+        assert!(rates.contains(&AudioSampleRate(44_100)));
+        assert!(rates.contains(&AudioSampleRate(96_000)));
     }
 
     #[test]

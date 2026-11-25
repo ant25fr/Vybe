@@ -74,6 +74,11 @@ pub enum DevicesMsg {
         pitch: u8,
         on: bool,
     },
+    /// Release every pitch one gesture auditioned (a plucked string).
+    ReleaseAuditionNotes {
+        track_id: TrackId,
+        pitches: Vec<u8>,
+    },
     ShowContextMenu {
         x: f32,
         y: f32,
@@ -99,6 +104,7 @@ impl DevicesMsg {
         !matches!(
             self,
             DevicesMsg::AuditionNote { .. }
+                | DevicesMsg::ReleaseAuditionNotes { .. }
                 | DevicesMsg::SelectDrumRackPad(..)
                 | DevicesMsg::SelectDrumRackBank(..)
                 | DevicesMsg::ShowContextMenu { .. }
@@ -679,6 +685,16 @@ impl DevicesState {
                     velocity: 100,
                     on,
                 });
+            }
+            DevicesMsg::ReleaseAuditionNotes { track_id, pitches } => {
+                for pitch in pitches {
+                    engine.send(EngineCommand::AuditionNote {
+                        track_id,
+                        pitch,
+                        velocity: 100,
+                        on: false,
+                    });
+                }
             }
             DevicesMsg::ShowContextMenu { x, y, track_id } => {
                 let is_midi = tracks

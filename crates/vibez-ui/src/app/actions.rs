@@ -312,6 +312,8 @@ impl App {
                 .retain(|key, _| key.track_id() != track_id);
             self.plugin_state_ptrs
                 .retain(|key, _| key.track_id() != track_id);
+            self.plugin_remote_handles
+                .retain(|key, _| key.track_id() != track_id);
         }
         let track_removed = action.remove_track_from_sections.is_some();
         if let Some(track_id) = action.remove_track_from_sections {
@@ -575,6 +577,7 @@ impl App {
             }
             self.plugin_gui_raw_ptrs.remove(&key);
             self.plugin_state_ptrs.remove(&key);
+            self.plugin_remote_handles.remove(&key);
         }
         if let Some(track_id) = action.select_track {
             self.state.arrangement.selected_track = Some(track_id);
@@ -649,6 +652,7 @@ impl App {
             .view
             .prune_drum_pad_flashes(std::time::Instant::now());
         self.poll_eq_devices();
+        self.poll_widener_devices();
         self.poll_plugin_loads();
         self.poll_plugin_windows();
         self.poll_midi_input();

@@ -781,6 +781,7 @@ fn append_audio_window(
         let (fragment_start, fragment_start_marker, fragment_warp_markers) =
             clip.warp_geometry_for_fragment(delta, fragment_duration);
         let mut fragment = UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: captured_clip_name(source, &clip.name),
             audio: Arc::clone(&clip.audio),

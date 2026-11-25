@@ -375,3 +375,53 @@ fn selected_insert_and_existing_whole_channel_spectra_stream_independently() {
         .iter()
         .all(|sample| (*sample - 0.00625).abs() < 1e-6));
 }
+
+#[test]
+fn side_tap_delivers_the_selected_outputs_side_signal() {
+    let (mut engine, mut commands, track, effect) = fixture(EffectType::Gain);
+    let mut receiver = engine.take_side_spectrum_consumer().unwrap();
+    assert!(engine.take_side_spectrum_consumer().is_none());
+    commands
+        .push(EngineCommand::SetSideSpectrumTap(Some(EffectSpectrumTarget {
+            track_id: track,
+            effect_id: effect,
+            position: EffectSpectrumPosition::Output,
+            generation: 3,
+        })))
+        .unwrap();
+    let input = [0.6, -0.2].repeat(256);
+    let mut output = vec![0.0; input.len()];
+    render(&mut engine, track, &input, &mut output);
+    let samples: Vec<_> = std::iter::from_fn(|| receiver.pop().ok()).collect();
+    assert_eq!(samples.len(), 256);
+    for sample in samples {
+        assert_eq!(sample.generation, 3);
+        // The output mono sum is 0.05 for this fixture; the side is (L - R) / 2.
+        assert!((sample.value - 0.1).abs() < 1e-6, "{}", sample.value);
+    }
+}
+
+#[test]
+fn widener_output_streams_both_mid_and_side_with_one_command() {
+    let (mut engine, mut commands, track, effect) = fixture(EffectType::StereoWidener);
+    let mut side = engine.take_side_spectrum_consumer().unwrap();
+    let mut mid = engine.take_mid_spectrum_consumer().unwrap();
+    commands
+        .push(EngineCommand::SetSideSpectrumTap(Some(EffectSpectrumTarget {
+            track_id: track,
+            effect_id: effect,
+            position: EffectSpectrumPosition::Output,
+            generation: 5,
+        })))
+        .unwrap();
+    let input = [0.6, -0.2].repeat(256);
+    let mut output = vec![0.0; input.len()];
+    render(&mut engine, track, &input, &mut output);
+    let side: Vec<_> = std::iter::from_fn(|| side.pop().ok()).collect();
+    let mid: Vec<_> = std::iter::from_fn(|| mid.pop().ok()).collect();
+    assert_eq!(side.len(), 256);
+    assert_eq!(mid.len(), 256);
+    // Width 1 leaves the signal untouched: side (L - R) / 2 and mid (L + R) / 2.
+    assert!(side.iter().all(|s| s.generation == 5 && s.value.abs() > 0.01));
+    assert!(mid.iter().all(|s| s.generation == 5 && s.value.abs() > 0.01));
+}

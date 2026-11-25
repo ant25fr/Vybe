@@ -200,6 +200,7 @@ impl TrackClipCanvas {
                     && c.warped_to_bpm
                         .map(|b| (b - bpm).abs() > 0.01)
                         .unwrap_or(false),
+                color: c.color_index.map(crate::theme::clip_color),
             })
             .collect();
         let clips_by_id: HashMap<_, _> = clips.iter().map(|clip| (clip.clip_id, clip)).collect();

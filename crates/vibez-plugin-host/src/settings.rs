@@ -14,6 +14,14 @@ pub struct PluginSettings {
     pub cache: Vec<PluginInfo>,
     #[serde(default)]
     pub cache_revision: u32,
+    /// Run each external plugin instance in its own `vibez-plugin-bridge`
+    /// subprocess so a crashing or hanging plugin cannot take the DAW down.
+    #[serde(default = "default_sandbox_plugins")]
+    pub sandbox_plugins: bool,
+}
+
+fn default_sandbox_plugins() -> bool {
+    true
 }
 
 impl Default for PluginSettings {
@@ -23,6 +31,7 @@ impl Default for PluginSettings {
             scan_default_paths: true,
             cache: Vec::new(),
             cache_revision: CURRENT_CACHE_REVISION,
+            sandbox_plugins: default_sandbox_plugins(),
         }
     }
 }

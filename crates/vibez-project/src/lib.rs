@@ -12,6 +12,7 @@ pub use vibez_core::perform::SectionLaunchQuantization;
 use vibez_core::perform::{GrooveProfile, SwingAmount};
 
 mod clip_launcher;
+pub mod dawproject;
 pub mod device_preset;
 pub mod project_format_v1;
 mod track_height;
@@ -326,6 +327,7 @@ mod tests {
 
     fn audio_clip_at(position: u64) -> ClipInfo {
         ClipInfo {
+            color_index: None,
             id: ClipId::new(),
             track_id: TrackId::new(),
             name: "percs.wav".into(),
@@ -611,6 +613,7 @@ mod tests {
             tracks: vec![TrackInfo::new("Synth"), TrackInfo::new("Bass")],
             arrange: TimelineInfo {
                 clips: vec![ClipInfo {
+                    color_index: None,
                     id: ClipId::new(),
                     track_id: TrackId::new(),
                     name: "loop.wav".into(),
@@ -691,6 +694,7 @@ mod tests {
             tracks: vec![track.clone()],
             arrange: TimelineInfo {
                 clips: vec![ClipInfo {
+                    color_index: None,
                     id: ClipId::new(),
                     track_id: track.id,
                     name: "legacy.wav".into(),

@@ -398,6 +398,7 @@ fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
 
     let clip_id = ClipId::new();
     canvas.clips.push(TimelineClip {
+        color: None,
         clip_id,
         position: 0,
         duration: 44_100,
@@ -486,6 +487,7 @@ fn recording_preview_is_visible_but_not_hit_testable() {
 fn audio_recording_waveform_is_visible_but_not_hit_testable() {
     let preview_id = ClipId::new();
     let canvas = empty_track_canvas().with_audio_recording_preview(TimelineClip {
+        color: None,
         clip_id: preview_id,
         position: 0,
         duration: 44_100,
@@ -516,6 +518,7 @@ fn selected_audio_fade_handle_drag_emits_realtime_edits_in_one_undo_gesture() {
     let mut canvas = empty_track_canvas();
     let clip_id = ClipId::new();
     canvas.clips.push(TimelineClip {
+        color: None,
         clip_id,
         position: 0,
         duration: 44_100,
@@ -588,6 +591,7 @@ fn fade_drag_snaps_to_an_overlapping_neighbour_across_pointer_moves() {
     let outgoing_id = ClipId::new();
     let incoming_id = ClipId::new();
     let timeline_clip = |clip_id, position, name: &str| TimelineClip {
+        color: None,
         clip_id,
         position,
         duration: 44_100,
@@ -707,6 +711,7 @@ fn selected_audio_fade_curve_handle_drag_emits_vertical_curve_edits() {
     let mut canvas = empty_track_canvas();
     let clip_id = ClipId::new();
     canvas.clips.push(TimelineClip {
+        color: None,
         clip_id,
         position: 0,
         duration: 44_100,
@@ -828,6 +833,7 @@ fn overlapping_fade_controls_choose_the_handle_nearest_the_pointer() {
     let mut canvas = empty_track_canvas();
     let clip_id = ClipId::new();
     canvas.clips.push(TimelineClip {
+        color: None,
         clip_id,
         position: 0,
         duration: 44_100,
@@ -873,6 +879,7 @@ fn canvas_with_selected_audio_clip() -> (TrackClipCanvas, ClipId) {
     let mut canvas = empty_track_canvas();
     let clip_id = ClipId::new();
     canvas.clips.push(TimelineClip {
+        color: None,
         clip_id,
         position: 0,
         duration: 88_200,

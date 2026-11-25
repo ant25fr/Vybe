@@ -194,6 +194,7 @@ fn audio_section(name: &str, track_id: TrackId, frames: u64) -> Section {
         .ensure(track_id)
         .clips
         .push(UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: name.into(),
             audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {

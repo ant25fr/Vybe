@@ -264,6 +264,8 @@ pub enum EngineCommand {
     SetSpectrumTap(Option<TrackId>),
     /// Selection generations distinguish queued samples after an insert or source changes.
     SetEffectSpectrumTap(Option<crate::effect_spectrum::EffectSpectrumTarget>),
+    /// Stream the side signal of one effect's output to its own ring.
+    SetSideSpectrumTap(Option<crate::effect_spectrum::EffectSpectrumTarget>),
     /// The generation prevents queued readings from a previous panel selection
     /// from appearing after the UI returns to the same channel.
     SetEffectMeterChannel {

@@ -811,10 +811,13 @@ impl App {
             | Message::PluginScanPathSelected(..)
             | Message::RemovePluginScanPath(..)
             | Message::ToggleScanDefaultPaths
+            | Message::ToggleSandboxPlugins
             | Message::AddPluginToTrack(..)
             | Message::PluginLoadError(..)
             | Message::OpenPluginGui(..)
             | Message::ClosePluginGui(..)
+            | Message::PluginRemoteGuiResult(..)
+            | Message::PluginRemoteGuiClosed(..)
             | Message::ToggleCheckForUpdates
             | Message::CheckForUpdatesNow
             | Message::UpdateCheckCompleted(..)
@@ -960,6 +963,69 @@ impl App {
                     },
                     Message::ExportPathSelected,
                 );
+            }
+            Message::ExportDawProject => {
+                let default_name = self
+                    .state
+                    .project
+                    .current_path
+                    .as_ref()
+                    .and_then(|p| p.file_stem())
+                    .map(|n| format!("{}.dawproject", n.to_string_lossy()))
+                    .unwrap_or_else(|| "Untitled.dawproject".to_string());
+                return Task::perform(
+                    async move {
+                        let handle = rfd::AsyncFileDialog::new()
+                            .set_title("Export DAWproject")
+                            .set_file_name(&default_name)
+                            .add_filter("DAWproject", &["dawproject"])
+                            .save_file()
+                            .await;
+                        handle.map(|file| file.path().to_path_buf())
+                    },
+                    Message::DawProjectExportPathSelected,
+                );
+            }
+            Message::DawProjectExportPathSelected(path) => {
+                let Some(mut path) = path else {
+                    return Task::none();
+                };
+                if !vibez_project::dawproject::is_dawproject(&path) {
+                    path.set_extension("dawproject");
+                }
+                let project = self.project_for_save();
+                let container = self
+                    .state
+                    .project
+                    .current_path
+                    .clone()
+                    .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("vzp")));
+                self.state.status_text = format!("Exporting {}...", path.display());
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            vibez_project::dawproject::export(&project, container.as_deref(), &path)
+                                .map(|skipped| (path, skipped))
+                                .map_err(|e| e.to_string())
+                        })
+                        .await
+                        .map_err(|e| format!("export task failed: {e}"))?
+                    },
+                    Message::DawProjectExported,
+                );
+            }
+            Message::DawProjectExported(result) => {
+                self.state.status_text = match result {
+                    Ok((path, skipped)) if skipped.is_empty() => {
+                        format!("Exported DAWproject: {}", path.display())
+                    }
+                    Ok((path, skipped)) => format!(
+                        "Exported DAWproject: {} ({} audio clip(s) without readable media skipped)",
+                        path.display(),
+                        skipped.len()
+                    ),
+                    Err(err) => format!("DAWproject export failed: {err}"),
+                };
             }
             Message::ExportPathSelected(path) => {
                 return self.handle_export_path_selected(path);

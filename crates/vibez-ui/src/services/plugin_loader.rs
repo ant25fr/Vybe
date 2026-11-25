@@ -39,6 +39,8 @@ pub(crate) struct PluginLoadResult {
     pub(crate) pending_state: Option<Vec<u8>>,
     /// Chain position to restore (project reload).
     pub(crate) position: Option<usize>,
+    /// Bridge subprocess handle when the plugin is sandboxed.
+    pub(crate) remote: Option<std::sync::Arc<vibez_plugin_host::bridge::BridgeChild>>,
 }
 
 /// Result of loading a plugin instrument on a background thread.
@@ -60,6 +62,8 @@ pub(crate) struct PluginInstrumentLoadResult {
     pub(crate) state_ptr: Option<vibez_plugin_host::PluginStatePtr>,
     /// Saved state to restore (project reload).
     pub(crate) pending_state: Option<Vec<u8>>,
+    /// Bridge subprocess handle when the plugin is sandboxed.
+    pub(crate) remote: Option<std::sync::Arc<vibez_plugin_host::bridge::BridgeChild>>,
 }
 
 /// Persistent identity for a plugin device, built from scan info.
@@ -118,7 +122,41 @@ pub(crate) fn load_plugin_effect_bg(
     info: &PluginInfo,
     sample_rate: f64,
     saved_state: Option<Vec<u8>>,
+    sandbox: bool,
 ) -> Result<PluginLoadResult, String> {
+    if sandbox {
+        match vibez_plugin_host::bridge::load_remote(info, false, sample_rate, saved_state.clone())
+        {
+            Ok((remote_inst, child)) => {
+                return Ok(PluginLoadResult {
+                    load_token: Default::default(),
+                    track_id: TrackId::default(), // filled in by caller
+                    effect_id: EffectId::new(),
+                    plugin_name: info.name.clone(),
+                    effect: Some(Box::new(vibez_plugin_host::PluginEffectWrapper::new(
+                        Box::new(remote_inst),
+                    ))),
+                    gui_raw_ptr: None,
+                    clap_partial: None,
+                    vst3_partial: None,
+                    sample_rate,
+                    device_ref: plugin_device_ref(info),
+                    state_ptr: None,
+                    remote: Some(child),
+                    pending_state: None,
+                    position: None,
+                });
+            }
+            Err(vibez_plugin_host::bridge::BridgeError::HelperMissing) => {
+                eprintln!(
+                    "vibez: vibez-plugin-bridge helper not found; loading plugin in-process (unsafe)"
+                );
+            }
+            Err(e) => {
+                return Err(format!("plugin failed to load in its sandbox process: {e}"));
+            }
+        }
+    }
     match info.format {
         PluginFormat::Clap => {
             let partial = vibez_plugin_host::clap_host::instance::ClapPluginInstance::load_partial(
@@ -138,6 +176,7 @@ pub(crate) fn load_plugin_effect_bg(
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
+                remote: None,
                 // State restoration requires initialized native interfaces on the main thread.
                 pending_state: saved_state,
                 position: None,
@@ -161,6 +200,7 @@ pub(crate) fn load_plugin_effect_bg(
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
+                remote: None,
                 pending_state: saved_state,
                 position: None,
             })
@@ -173,7 +213,38 @@ pub(crate) fn load_plugin_instrument_bg(
     info: &PluginInfo,
     sample_rate: f64,
     saved_state: Option<Vec<u8>>,
+    sandbox: bool,
 ) -> Result<PluginInstrumentLoadResult, String> {
+    if sandbox {
+        match vibez_plugin_host::bridge::load_remote(info, true, sample_rate, saved_state.clone()) {
+            Ok((remote_inst, child)) => {
+                return Ok(PluginInstrumentLoadResult {
+                    load_token: Default::default(),
+                    track_id: TrackId::default(), // filled in by caller
+                    plugin_name: info.name.clone(),
+                    instrument: Some(Box::new(vibez_plugin_host::PluginInstrumentWrapper::new(
+                        Box::new(remote_inst),
+                    ))),
+                    gui_raw_ptr: None,
+                    clap_partial: None,
+                    vst3_partial: None,
+                    sample_rate,
+                    device_ref: plugin_device_ref(info),
+                    state_ptr: None,
+                    remote: Some(child),
+                    pending_state: None,
+                });
+            }
+            Err(vibez_plugin_host::bridge::BridgeError::HelperMissing) => {
+                eprintln!(
+                    "vibez: vibez-plugin-bridge helper not found; loading plugin in-process (unsafe)"
+                );
+            }
+            Err(e) => {
+                return Err(format!("plugin failed to load in its sandbox process: {e}"));
+            }
+        }
+    }
     match info.format {
         PluginFormat::Clap => {
             let partial = vibez_plugin_host::clap_host::instance::ClapPluginInstance::load_partial(
@@ -192,6 +263,7 @@ pub(crate) fn load_plugin_instrument_bg(
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
+                remote: None,
                 pending_state: saved_state,
             })
         }
@@ -212,6 +284,7 @@ pub(crate) fn load_plugin_instrument_bg(
                 sample_rate,
                 device_ref: plugin_device_ref(info),
                 state_ptr: None,
+                remote: None,
                 pending_state: saved_state,
             })
         }
@@ -227,6 +300,7 @@ pub(crate) fn spawn_device_reloads(
     effect_tx: std::sync::mpsc::Sender<PluginLoadResult>,
     instrument_tx: std::sync::mpsc::Sender<PluginInstrumentLoadResult>,
     sample_rate: f64,
+    sandbox: bool,
 ) {
     std::thread::spawn(move || {
         use base64::Engine;
@@ -259,7 +333,7 @@ pub(crate) fn spawn_device_reloads(
 
         for (token, track_id, effect_id, chain_pos, dev) in effect_requests {
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Effect);
-            match load_plugin_effect_bg(&info, sample_rate, decode(&dev)) {
+            match load_plugin_effect_bg(&info, sample_rate, decode(&dev), sandbox) {
                 Ok(mut result) => {
                     result.device_ref = dev;
                     result.load_token = token;
@@ -275,7 +349,7 @@ pub(crate) fn spawn_device_reloads(
         }
         for (token, track_id, dev) in instrument_requests {
             let info = scan_info(&dev, vibez_plugin_host::PluginCategory::Instrument);
-            match load_plugin_instrument_bg(&info, sample_rate, decode(&dev)) {
+            match load_plugin_instrument_bg(&info, sample_rate, decode(&dev), sandbox) {
                 Ok(mut result) => {
                     result.device_ref = dev;
                     result.load_token = token;

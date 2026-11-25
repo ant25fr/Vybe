@@ -342,6 +342,9 @@ pub enum InstrumentStateInfo {
     FmSynth {
         params: Vec<f32>,
     },
+    PluckedString {
+        params: Vec<f32>,
+    },
     Sampler {
         params: Vec<f32>,
         source: Option<MediaSourceRef>,
@@ -507,6 +510,10 @@ pub struct ClipInfo {
     /// flag staleness when the project tempo changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warped_to_bpm: Option<f64>,
+    /// Per-clip color override from the clip's context menu; `None` falls
+    /// back to the track's color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_index: Option<u8>,
 }
 
 fn skip_if_false(b: &bool) -> bool {
@@ -674,6 +681,7 @@ mod tests {
 
     fn test_clip(position: u64, duration: u64) -> ClipInfo {
         ClipInfo {
+            color_index: None,
             id: ClipId::new(),
             track_id: TrackId::new(),
             name: "test".into(),

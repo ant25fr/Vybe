@@ -41,6 +41,7 @@ fn project_tracks(kinds: &[TrackKind]) -> ProjectTracksState {
 
 fn audio_clip(position: u64) -> UiClip {
     UiClip {
+        color_index: None,
         id: ClipId::new(),
         name: "Audio".into(),
         audio: Arc::new(DecodedAudio {

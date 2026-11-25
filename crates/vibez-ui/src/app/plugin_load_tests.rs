@@ -21,6 +21,7 @@ fn reload(track: TrackId, effect: EffectId, device: &PluginDeviceInfo) -> Plugin
         sample_rate: 44_100.0,
         device_ref: device.clone(),
         state_ptr: None,
+        remote: None,
         pending_state: None,
         position: Some(0),
     }

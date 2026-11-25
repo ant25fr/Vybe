@@ -29,6 +29,7 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
     });
     let audio_id = ClipId::new();
     let audio = vibez_core::track::ClipInfo {
+        color_index: None,
         id: audio_id,
         track_id: audio_track_id,
         name: "Hats".into(),
@@ -138,6 +139,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
         .await
         .unwrap();
         let info = vibez_core::track::ClipInfo {
+            color_index: None,
             id,
             track_id: track.id,
             name: "Hats".into(),

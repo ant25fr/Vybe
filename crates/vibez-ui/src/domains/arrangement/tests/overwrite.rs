@@ -10,6 +10,7 @@ const SPB: f64 = 100.0;
 /// from the start of a long enough sample.
 fn audio(position: u64, duration: u64) -> UiClip {
     UiClip {
+        color_index: None,
         id: ClipId::new(),
         name: "Drums".to_string(),
         audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {

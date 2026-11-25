@@ -86,6 +86,12 @@ pub struct AudioEngine {
     spectrum_track: Option<TrackId>,
     effect_spectrum: crate::effect_spectrum::EffectSpectrumTap,
     effect_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
+    /// The side signal of one effect's output (the Stereo Widener's scope).
+    side_spectrum: crate::effect_spectrum::EffectSpectrumTap,
+    side_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
+    /// The mono sum of the same output, selected with the side tap.
+    mid_spectrum: crate::effect_spectrum::EffectSpectrumTap,
+    mid_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
     effect_meter: effect_meters::EffectMeterTarget,
     effect_meter_frames: u64,
     /// Producer side of the spectrum ring (mono samples).
@@ -251,6 +257,10 @@ impl AudioEngine {
         let (spectrum_tx, spectrum_rx) = RingBuffer::<f32>::new(SPECTRUM_RING_CAPACITY);
         let (effect_spectrum, effect_spectrum_rx) =
             crate::effect_spectrum::EffectSpectrumTap::new(SPECTRUM_RING_CAPACITY);
+        let (side_spectrum, side_spectrum_rx) =
+            crate::effect_spectrum::EffectSpectrumTap::new_side(SPECTRUM_RING_CAPACITY);
+        let (mid_spectrum, mid_spectrum_rx) =
+            crate::effect_spectrum::EffectSpectrumTap::new(SPECTRUM_RING_CAPACITY);
 
         let engine = Self {
             routing: crate::routing::PreparedRouting::prepare(
@@ -295,6 +305,10 @@ impl AudioEngine {
             spectrum_track: None,
             effect_spectrum,
             effect_spectrum_rx: Some(effect_spectrum_rx),
+            side_spectrum,
+            side_spectrum_rx: Some(side_spectrum_rx),
+            mid_spectrum,
+            mid_spectrum_rx: Some(mid_spectrum_rx),
             effect_meter: effect_meters::EffectMeterTarget::default(),
             effect_meter_frames: 0,
             spectrum_tx,
@@ -353,6 +367,22 @@ impl AudioEngine {
         &mut self,
     ) -> Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>> {
         self.effect_spectrum_rx.take()
+    }
+
+    /// Take before moving the engine to its callback thread: the side
+    /// signal of the selected effect's output.
+    pub fn take_side_spectrum_consumer(
+        &mut self,
+    ) -> Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>> {
+        self.side_spectrum_rx.take()
+    }
+
+    /// Take before moving the engine to its callback thread: the mono sum
+    /// of the output the side tap listens to.
+    pub fn take_mid_spectrum_consumer(
+        &mut self,
+    ) -> Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>> {
+        self.mid_spectrum_rx.take()
     }
 
     /// Process one audio callback worth of data.

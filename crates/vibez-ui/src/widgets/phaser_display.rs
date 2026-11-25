@@ -12,8 +12,8 @@ use crate::theme as th;
 
 const TOP_DB: f32 = 12.0;
 const FLOOR_DB: f32 = -24.0;
-const LABEL_W: f32 = 26.0;
-const LABEL_H: f32 = 14.0;
+pub(crate) const LABEL_W: f32 = 26.0;
+pub(crate) const LABEL_H: f32 = 14.0;
 const DISPLAY_RATE: f32 = 48_000.0;
 /// Every 1-2-5 frequency gets a label from this plot width.
 const WIDE_AXIS_W: f32 = 360.0;
@@ -25,14 +25,14 @@ fn value(params: &[f32], index: usize) -> f32 {
         .unwrap_or(PHASER_PARAMS[index].default)
 }
 
-fn grid() -> Color {
+pub(crate) fn grid() -> Color {
     Color {
         a: 0.35,
         ..th::border()
     }
 }
 
-fn label(
+pub(crate) fn label(
     frame: &mut canvas::Frame,
     text: String,
     at: Point,
@@ -51,7 +51,7 @@ fn label(
 
 /// Seconds as the concept writes them: no more digits than the span needs,
 /// and the unit only at the end of the axis.
-fn time_label(seconds: f32, last: bool) -> String {
+pub(crate) fn time_label(seconds: f32, last: bool) -> String {
     let digits = if seconds == 0.0 || seconds >= 10.0 {
         0
     } else if seconds >= 1.0 {
@@ -63,14 +63,14 @@ fn time_label(seconds: f32, last: bool) -> String {
     format!("{seconds:.digits$}{unit}")
 }
 
-fn panel(frame: &mut canvas::Frame, size: Size) {
+pub(crate) fn panel(frame: &mut canvas::Frame, size: Size) {
     frame.fill(
         &canvas::Path::rounded_rectangle(Point::ORIGIN, size, 3.0.into()),
         th::bg_dark(),
     );
 }
 
-fn area(size: Size) -> (Rectangle, bool) {
+pub(crate) fn area(size: Size) -> (Rectangle, bool) {
     let labels = size.height >= 60.0;
     let left = if labels { LABEL_W } else { 4.0 };
     let bottom = if labels { LABEL_H } else { 4.0 };

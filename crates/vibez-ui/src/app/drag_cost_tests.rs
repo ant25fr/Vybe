@@ -12,6 +12,7 @@ const LONG_CLIP_NOTES: usize = 512;
 
 fn audio_clip(position: u64, duration: u64) -> UiClip {
     UiClip {
+        color_index: None,
         id: ClipId::new(),
         name: "Loop".into(),
         audio: Arc::new(DecodedAudio {

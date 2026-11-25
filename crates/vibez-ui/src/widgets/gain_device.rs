@@ -288,7 +288,7 @@ fn gain_column<'a>(
         false,
     );
     let stacked = height >= 104.0;
-    let knob_size = (height - 60.0).clamp(28.0, 64.0);
+    let knob_size = (height - 60.0).clamp(36.0, 84.0);
     let knob = canvas(gain.knob()).width(knob_size).height(knob_size);
     let controls: Element<'a, Message> = if stacked {
         column![knob, gain.value_entry(), unity]

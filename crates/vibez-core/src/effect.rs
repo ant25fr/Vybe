@@ -21,6 +21,12 @@ pub enum EffectType {
     Saturator,
     Limiter,
     MultibandDynamics,
+    Chorus,
+    Flanger,
+    StereoWidener,
+    PitchShifter,
+    RingModulator,
+    FrequencyShifter,
 }
 
 impl EffectType {
@@ -41,6 +47,12 @@ impl EffectType {
             EffectType::Phaser => "Phaser",
             EffectType::Eq => "EQ",
             EffectType::MultibandDynamics => "Multiband Dynamics",
+            EffectType::Chorus => "Chorus",
+            EffectType::Flanger => "Flanger",
+            EffectType::StereoWidener => "Stereo Widener",
+            EffectType::PitchShifter => "Pitch Shifter",
+            EffectType::RingModulator => "Ring Modulator",
+            EffectType::FrequencyShifter => "Frequency Shifter",
         }
     }
 
@@ -61,6 +73,12 @@ impl EffectType {
             EffectType::Phaser,
             EffectType::AutoPan,
             EffectType::MultibandDynamics,
+            EffectType::Chorus,
+            EffectType::Flanger,
+            EffectType::StereoWidener,
+            EffectType::PitchShifter,
+            EffectType::RingModulator,
+            EffectType::FrequencyShifter,
         ]
     }
 }
@@ -169,7 +187,7 @@ mod tests {
     #[test]
     fn effect_type_all() {
         let all = EffectType::all();
-        assert_eq!(all.len(), 15);
+        assert_eq!(all.len(), 21);
     }
 
     #[test]

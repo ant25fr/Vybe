@@ -11,6 +11,7 @@ use vibez_project::Project;
 
 fn looped_audio(track_id: TrackId, source: &Path) -> ClipInfo {
     ClipInfo {
+        color_index: None,
         id: ClipId::new(),
         track_id,
         name: "Percs".into(),
@@ -229,6 +230,7 @@ fn add_looped_percs(
         .ensure(track_id)
         .clips
         .push(UiClip {
+            color_index: None,
             id: clip_id,
             name: "Percs".into(),
             audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {

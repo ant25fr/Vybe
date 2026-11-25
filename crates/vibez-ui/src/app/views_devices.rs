@@ -40,6 +40,12 @@ enum Flexible {
     AutoPan,
     Phaser,
     MultibandDynamics,
+    Chorus,
+    Flanger,
+    StereoWidener,
+    PitchShifter,
+    RingModulator,
+    FrequencyShifter,
 }
 
 /// A built-in instrument whose card takes a flexible share like the
@@ -51,6 +57,7 @@ enum NativeInstrument {
     DrumRack,
     Wavetable,
     Fm,
+    Plucked,
 }
 
 impl NativeInstrument {
@@ -65,6 +72,8 @@ impl NativeInstrument {
             Some(Self::Wavetable)
         } else if crate::domains::fm::is_native_fm(track) {
             Some(Self::Fm)
+        } else if crate::domains::plucked::is_native_plucked(track) {
+            Some(Self::Plucked)
         } else {
             None
         }
@@ -78,6 +87,7 @@ impl NativeInstrument {
             Self::Sampler => sampler_device::WIDTHS,
             Self::DrumRack => drum_rack_device::WIDTHS,
             Self::Wavetable | Self::Fm => instrument_bands::WIDTHS,
+            Self::Plucked => plucked_device::WIDTHS,
         }
         .chain_width(share, available)
     }
@@ -103,9 +113,50 @@ impl Flexible {
             Self::Phaser => phaser_device::WIDTHS,
             Self::AutoPan => auto_pan_device::WIDTHS,
             Self::MultibandDynamics => multiband_dynamics_device::WIDTHS,
+            Self::Chorus | Self::Flanger | Self::PitchShifter | Self::RingModulator
+            | Self::FrequencyShifter => {
+                let count = self.simple_descriptors().map_or(0, <[_]>::len);
+                simple_fx_device::SimpleKind::widths(count)
+            }
+            Self::StereoWidener => stereo_widener_device::WIDTHS,
         }
         .chain_width(share, available)
     }
+}
+
+impl Flexible {
+    /// The parameter descriptors of the simple effects this kind renders.
+    fn simple_descriptors(self) -> Option<&'static [vibez_core::effect::ParamDescriptor]> {
+        use vibez_dsp::{chorus, flanger, frequency_shifter, pitch_shifter, ring_modulator};
+        match self {
+            Self::Chorus => Some(chorus::CHORUS_PARAMS),
+            Self::Flanger => Some(flanger::FLANGER_PARAMS),
+            Self::PitchShifter => Some(pitch_shifter::PITCH_SHIFTER_PARAMS),
+            Self::RingModulator => Some(ring_modulator::RING_MODULATOR_PARAMS),
+            Self::FrequencyShifter => Some(frequency_shifter::FREQUENCY_SHIFTER_PARAMS),
+            _ => None,
+        }
+    }
+
+    fn simple_kind(self) -> Option<crate::widgets::simple_fx_device::SimpleKind> {
+        use crate::widgets::simple_fx_device::SimpleKind;
+        match self {
+            Self::Chorus => Some(SimpleKind::Chorus),
+            Self::Flanger => Some(SimpleKind::Flanger),
+            Self::PitchShifter => Some(SimpleKind::PitchShifter),
+            Self::RingModulator => Some(SimpleKind::RingModulator),
+            Self::FrequencyShifter => Some(SimpleKind::FrequencyShifter),
+            _ => None,
+        }
+    }
+}
+
+/// A built-in effect with no plugin behind it, matched by type alone.
+fn is_native_type(
+    effect: &crate::state::UiEffect,
+    effect_type: vibez_core::effect::EffectType,
+) -> bool {
+    effect.effect_type == effect_type && effect.plugin_ref.is_none() && effect.plugin_name.is_none()
 }
 
 impl App {
@@ -291,6 +342,18 @@ impl App {
                 Some(Flexible::Phaser)
             } else if crate::domains::multiband_dynamics::is_native_multiband_dynamics(effect) {
                 Some(Flexible::MultibandDynamics)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::Chorus) {
+                Some(Flexible::Chorus)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::Flanger) {
+                Some(Flexible::Flanger)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::StereoWidener) {
+                Some(Flexible::StereoWidener)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::PitchShifter) {
+                Some(Flexible::PitchShifter)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::RingModulator) {
+                Some(Flexible::RingModulator)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::FrequencyShifter) {
+                Some(Flexible::FrequencyShifter)
             } else {
                 None
             };
@@ -330,6 +393,9 @@ impl App {
                         self.wavetable_card(track_id, track, track_color, width)
                     }
                     NativeInstrument::Fm => self.fm_card(track_id, track, track_color, width),
+                    NativeInstrument::Plucked => {
+                        self.plucked_card(track_id, track, track_color, width)
+                    }
                 });
             }
             for (position, effect, sidechain, kind) in flexible {
@@ -366,8 +432,17 @@ impl App {
                     Flexible::AutoPan => {
                         self.auto_pan_device_body(track_id, effect, track_color, width)
                     }
+                    Flexible::StereoWidener => {
+                        self.stereo_widener_device_body(track_id, effect, track_color, width)
+                    }
                     Flexible::MultibandDynamics => {
                         self.multiband_dynamics_device_body(track_id, effect, track_color, width)
+                    }
+                    kind => {
+                        let Some(simple) = kind.simple_kind() else {
+                            unreachable!("simple effect without a kind")
+                        };
+                        self.simple_fx_device_body(track_id, effect, track_color, width, simple)
                     }
                 };
                 cards[position] = Some(view_effect_slot(
@@ -437,6 +512,61 @@ impl App {
         // The native synth, sampler and drum rack are laid out with the
         // flexible cards.
         None
+    }
+
+    /// The Stereo Widener's body: the fan scope above its two knobs.
+    fn stereo_widener_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+    ) -> DeviceBody<'a> {
+        let device = crate::domains::device_params::DeviceParams::from(effect);
+        let view = move || crate::widgets::stereo_widener_device::StereoWidenerView {
+            track_id,
+            device,
+            accent,
+            entry: self.param_entry.as_ref(),
+            spectrum: self.widener_devices.spectrum_for(effect.id),
+        };
+        DeviceBody {
+            content: iced::widget::responsive(move |size| view().view(size)).into(),
+            width,
+            padding: iced::Padding::ZERO,
+            preset: Some(Box::new(move |selector_w| {
+                self.view_device_preset_bar(track_id, effect, accent, selector_w)
+            })),
+            advanced: None,
+        }
+    }
+
+    /// A simple built-in effect's body: one knob column per parameter.
+    fn simple_fx_device_body<'a>(
+        &'a self,
+        track_id: TrackId,
+        effect: &'a crate::state::UiEffect,
+        accent: Color,
+        width: f32,
+        kind: crate::widgets::simple_fx_device::SimpleKind,
+    ) -> DeviceBody<'a> {
+        let device = crate::domains::device_params::DeviceParams::from(effect);
+        let view = move || crate::widgets::simple_fx_device::SimpleFxView {
+            kind,
+            track_id,
+            device,
+            accent,
+            entry: self.param_entry.as_ref(),
+        };
+        DeviceBody {
+            content: iced::widget::responsive(move |size| view().view(size)).into(),
+            width,
+            padding: iced::Padding::ZERO,
+            preset: Some(Box::new(move |selector_w| {
+                self.view_device_preset_bar(track_id, effect, accent, selector_w)
+            })),
+            advanced: None,
+        }
     }
 
     fn gain_device_body<'a>(

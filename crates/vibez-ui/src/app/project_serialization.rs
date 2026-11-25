@@ -89,6 +89,9 @@ impl App {
             Some(InstrumentKind::FmSynth) => Some(InstrumentStateInfo::FmSynth {
                 params: track.instrument_params.clone(),
             }),
+            Some(InstrumentKind::PluckedString) => Some(InstrumentStateInfo::PluckedString {
+                params: track.instrument_params.clone(),
+            }),
             Some(InstrumentKind::Sampler) => Some(InstrumentStateInfo::Sampler {
                 params: track.instrument_params.clone(),
                 source: track.sample_source.clone(),

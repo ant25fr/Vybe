@@ -18,6 +18,7 @@ use vibez_engine::events::EngineEvent;
 
 fn clip(name: &str, value: f32) -> UiClip {
     UiClip {
+        color_index: None,
         id: ClipId::new(),
         name: name.into(),
         audio: Arc::new(DecodedAudio {

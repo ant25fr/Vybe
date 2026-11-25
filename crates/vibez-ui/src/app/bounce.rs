@@ -166,6 +166,7 @@ impl App {
 
         if self.state.find_track(track_id).is_some() {
             self.state.arrange_content_mut(track_id).clips.push(UiClip {
+                color_index: None,
                 id: clip_id,
                 name: outcome.clip_name.clone(),
                 audio: Arc::clone(&outcome.audio),

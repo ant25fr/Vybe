@@ -12,6 +12,7 @@ use iced::{Element, Length, Theme};
 use crate::domains::arrangement::{ArrangementMsg, AudioSliceMarkers};
 use crate::domains::automation::{target_label_with_buses, AutomationMsg};
 use crate::domains::piano_roll::PianoRollMsg;
+use crate::domains::project::ProjectMsg;
 use crate::domains::view::ViewMsg;
 use vibez_core::effect::EffectType;
 use vibez_core::midi::InstrumentKind;
@@ -87,6 +88,73 @@ fn menu_ctx_item(icon_char: char, label_text: String, msg: Message) -> Element<'
         .into(),
         Message::menu_item(MenuOverlay::ArrangementContext, msg),
     )
+}
+
+/// A "Color" caption plus one swatch per palette entry (rows of 8), each
+/// running `make_msg(index)` through the context menu's dismissal wrapper.
+/// `current` highlights the active swatch.
+fn color_swatch_grid(
+    current: Option<u8>,
+    palette_count: u8,
+    color_at: impl Fn(u8) -> iced::Color,
+    make_msg: impl Fn(u8) -> Message,
+) -> Element<'static, Message> {
+    let mut swatch_rows = column![].spacing(4);
+    let mut row = row![].spacing(4);
+    for index in 0..palette_count {
+        let swatch_color = color_at(index);
+        let active = current == Some(index);
+        let swatch = button(
+            container(
+                horizontal_space()
+                    .width(Length::Fixed(14.0))
+                    .height(Length::Fixed(14.0)),
+            )
+            .style(move |_theme: &Theme| container::Style {
+                background: Some(swatch_color.into()),
+                border: iced::Border {
+                    color: if active { th::text() } else { th::bg_hover() },
+                    width: if active { 2.0 } else { 1.0 },
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }),
+        )
+        .on_press(Message::menu_item(
+            MenuOverlay::ArrangementContext,
+            make_msg(index),
+        ))
+        .padding(2)
+        .style(|_theme: &Theme, status| {
+            let bg = match status {
+                button::Status::Hovered | button::Status::Pressed => th::bg_hover(),
+                _ => iced::Color::TRANSPARENT,
+            };
+            button::Style {
+                background: Some(bg.into()),
+                text_color: th::text(),
+                border: iced::Border::default(),
+                ..Default::default()
+            }
+        });
+        row = row.push(swatch);
+        if (index + 1) % 8 == 0 || index + 1 == palette_count {
+            swatch_rows = swatch_rows.push(row);
+            row = row![].spacing(4);
+        }
+    }
+    column![
+        container(text("Color").size(11).color(th::text_dim())).padding([4, 12]),
+        swatch_rows,
+    ]
+    .spacing(4)
+    .padding(iced::Padding {
+        top: 0.0,
+        right: 12.0,
+        bottom: 6.0,
+        left: 12.0,
+    })
+    .into()
 }
 
 /// A small muted caption row inside a context menu.
@@ -434,13 +502,13 @@ impl App {
     }
 
     pub(super) fn view_edit_menu_overlay(&self) -> Element<'_, Message> {
-        let item = |icon: char, label: &'static str, shortcut: &'static str, message: Message| {
+        let item = |icon: char, label: &'static str, shortcut: &str, message: Message| {
             button(
                 row![
                     icons::icon(icon).size(12).color(th::text()),
                     text(label).size(12).color(th::text()),
                     horizontal_space(),
-                    text(shortcut).size(10).color(th::text_dim()),
+                    text(shortcut.to_string()).size(10).color(th::text_dim()),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
@@ -461,7 +529,31 @@ impl App {
             })
         };
 
+        let on_macos = cfg!(target_os = "macos");
+        let shortcut_of = |action: crate::shortcuts::ShortcutAction| {
+            self.shortcuts
+                .combos_for(action)
+                .iter()
+                .map(|combo| combo.label(on_macos))
+                .collect::<Vec<_>>()
+                .join(" / ")
+        };
+        let undo_shortcut = shortcut_of(crate::shortcuts::ShortcutAction::Undo);
+        let redo_shortcut = shortcut_of(crate::shortcuts::ShortcutAction::Redo);
+
         let menu = column![
+            item(
+                icons::UNDO,
+                "Undo",
+                &undo_shortcut,
+                Message::Project(ProjectMsg::Undo),
+            ),
+            item(
+                icons::REDO,
+                "Redo",
+                &redo_shortcut,
+                Message::Project(ProjectMsg::Redo),
+            ),
             item(
                 icons::COPY,
                 "Copy",
@@ -934,81 +1026,49 @@ impl App {
                     "Toggle Loop".into(),
                     Message::Arrangement(ArrangementMsg::ToggleSelectedClipLoop),
                 ));
-                // Pattern color: one swatch per palette entry, plus a reset
-                // that falls back to the track color.
-                if is_note_clip {
-                    let current_color = self
-                        .state
+                // Clip color: one swatch per palette entry, for patterns and
+                // audio clips alike; the clip falls back to the track color
+                // until one is picked.
+                let current_color =
+                    self.state
                         .arrangement
                         .timeline
                         .get(track_id)
-                        .and_then(|content| content.note_clips.iter().find(|c| c.id == clip_id))
-                        .and_then(|clip| clip.color_index);
-                    col = col.push(
-                        container(text("Color").size(11).color(th::text_dim())).padding([4, 12]),
-                    );
-                    // Two rows of 8 swatches: the 8 track colors, then 8
-                    // lighter variants, so two patterns on one track can still
-                    // be told apart.
-                    let mut first_row = row![].spacing(4);
-                    let mut second_row = row![].spacing(4);
-                    for index in 0..th::CLIP_COLOR_COUNT {
-                        let swatch_color = th::clip_color(index);
-                        let active = current_color == Some(index);
-                        let swatch = button(
-                            container(
-                                horizontal_space()
-                                    .width(Length::Fixed(14.0))
-                                    .height(Length::Fixed(14.0)),
-                            )
-                            .style(move |_theme: &Theme| {
-                                container::Style {
-                                    background: Some(swatch_color.into()),
-                                    border: iced::Border {
-                                        color: if active { th::text() } else { th::bg_hover() },
-                                        width: if active { 2.0 } else { 1.0 },
-                                        radius: 3.0.into(),
-                                    },
-                                    ..Default::default()
-                                }
-                            }),
-                        )
-                        .on_press(Message::menu_item(
-                            MenuOverlay::ArrangementContext,
+                        .and_then(|content| {
+                            if is_note_clip {
+                                content
+                                    .note_clips
+                                    .iter()
+                                    .find(|c| c.id == clip_id)
+                                    .and_then(|clip| clip.color_index)
+                            } else {
+                                content
+                                    .clips
+                                    .iter()
+                                    .find(|c| c.id == clip_id)
+                                    .and_then(|clip| clip.color_index)
+                            }
+                        });
+                col = col.push(color_swatch_grid(
+                    current_color,
+                    th::CLIP_COLOR_COUNT,
+                    th::clip_color,
+                    |index| {
+                        if is_note_clip {
                             Message::Arrangement(ArrangementMsg::SetNoteClipColor {
                                 track_id,
                                 clip_id,
                                 color_index: Some(index),
-                            }),
-                        ))
-                        .padding(2)
-                        .style(|_theme: &Theme, status| {
-                            let bg = match status {
-                                button::Status::Hovered | button::Status::Pressed => th::bg_hover(),
-                                _ => iced::Color::TRANSPARENT,
-                            };
-                            button::Style {
-                                background: Some(bg.into()),
-                                text_color: th::text(),
-                                border: iced::Border::default(),
-                                ..Default::default()
-                            }
-                        });
-                        if index < th::CLIP_COLOR_COUNT / 2 {
-                            first_row = first_row.push(swatch);
+                            })
                         } else {
-                            second_row = second_row.push(swatch);
+                            Message::Arrangement(ArrangementMsg::SetAudioClipColor {
+                                track_id,
+                                clip_id,
+                                color_index: Some(index),
+                            })
                         }
-                    }
-                    col = col.push(column![first_row, second_row].spacing(4).padding(
-                        iced::Padding {
-                            top: 0.0,
-                            right: 12.0,
-                            bottom: 6.0,
-                            left: 12.0,
-                        },
-                    ));
-                }
+                    },
+                ));
                 col = col.push(menu_btn(
                     icons::SCISSORS,
                     "Split Selection (Ctrl+E)".into(),
@@ -1224,13 +1284,29 @@ impl App {
                 ));
                 col.into()
             }
-            ContextMenuTarget::TrackHeader { track_id } => iced::widget::Column::with_children(
-                track_header_menu(*track_id)
-                    .map(|(icon, label, msg)| menu_btn(icon, label.into(), msg)),
-            )
-            .spacing(0)
-            .width(Length::Fixed(200.0))
-            .into(),
+            ContextMenuTarget::TrackHeader { track_id } => {
+                let track_id = *track_id;
+                let mut col = iced::widget::Column::with_children(
+                    track_header_menu(track_id)
+                        .map(|(icon, label, msg)| menu_btn(icon, label.into(), msg)),
+                )
+                .spacing(0)
+                .width(Length::Fixed(200.0));
+                // Track color: one swatch per track palette entry.
+                let current_color = self.state.find_track(track_id).map(|t| t.color_index);
+                col = col.push(color_swatch_grid(
+                    current_color,
+                    th::track_color_count(),
+                    th::track_color,
+                    |index| {
+                        Message::Arrangement(ArrangementMsg::SetTrackColor {
+                            track_id,
+                            color_index: index,
+                        })
+                    },
+                ));
+                col.into()
+            }
             ContextMenuTarget::ArrangementEmpty => column![
                 menu_btn(
                     icons::AUDIO_WAVEFORM,

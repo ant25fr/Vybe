@@ -313,6 +313,52 @@ const PHASER_KEYS: [(usize, &str, bool); 10] = {
     ]
 };
 
+const CHORUS_KEYS: [(usize, &str, bool); 5] = {
+    use vibez_dsp::chorus::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (DELAY, "delay", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+    ]
+};
+
+const FLANGER_KEYS: [(usize, &str, bool); 5] = {
+    use vibez_dsp::flanger::param::*;
+    [
+        (RATE, "rate", false),
+        (DEPTH, "depth", false),
+        (DELAY, "delay", false),
+        (FEEDBACK, "feedback", false),
+        (MIX, "mix", false),
+    ]
+};
+
+const STEREO_WIDENER_KEYS: [(usize, &str, bool); 2] = {
+    use vibez_dsp::stereo_widener::param::*;
+    [(WIDTH, "width", false), (BASS_MONO, "bass_mono", false)]
+};
+
+const PITCH_SHIFTER_KEYS: [(usize, &str, bool); 3] = {
+    use vibez_dsp::pitch_shifter::param::*;
+    [
+        (SEMITONES, "semitones", false),
+        (FINE, "fine", false),
+        (GRAIN, "grain", false),
+    ]
+};
+
+const RING_MODULATOR_KEYS: [(usize, &str, bool); 2] = {
+    use vibez_dsp::ring_modulator::param::*;
+    [(FREQUENCY, "frequency", false), (MIX, "mix", false)]
+};
+
+const FREQUENCY_SHIFTER_KEYS: [(usize, &str, bool); 2] = {
+    use vibez_dsp::frequency_shifter::param::*;
+    [(SHIFT, "shift", false), (MIX, "mix", false)]
+};
+
 /// Shape is stored as it is, since older projects can sit between two
 /// shapes.
 const AUTO_PAN_KEYS: [(usize, &str, bool); 9] = {
@@ -567,6 +613,9 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         DevicePresetKind::Instrument(InstrumentKind::FmSynth) => {
             return Ok(fm_keys());
         }
+        DevicePresetKind::Instrument(InstrumentKind::PluckedString) => {
+            return Ok(plucked_keys());
+        }
         DevicePresetKind::Instrument(_) => {
             return Err("Presets are not yet supported by this built-in device".into());
         }
@@ -594,6 +643,12 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::AutoPan => Ok(AUTO_PAN_KEYS.to_vec()),
         EffectType::MultibandDynamics => Ok(MULTIBAND_DYNAMICS_KEYS.to_vec()),
         EffectType::Phaser => Ok(PHASER_KEYS.to_vec()),
+        EffectType::Chorus => Ok(CHORUS_KEYS.to_vec()),
+        EffectType::Flanger => Ok(FLANGER_KEYS.to_vec()),
+        EffectType::StereoWidener => Ok(STEREO_WIDENER_KEYS.to_vec()),
+        EffectType::PitchShifter => Ok(PITCH_SHIFTER_KEYS.to_vec()),
+        EffectType::RingModulator => Ok(RING_MODULATOR_KEYS.to_vec()),
+        EffectType::FrequencyShifter => Ok(FREQUENCY_SHIFTER_KEYS.to_vec()),
     }
 }
 
@@ -671,6 +726,7 @@ pub fn presets_for(kind: DevicePresetKind) -> Vec<DevicePreset> {
         DevicePresetKind::Instrument(InstrumentKind::Sampler) => sampler_factory_presets(),
         DevicePresetKind::Instrument(InstrumentKind::WavetableSynth) => wavetable_factory_presets(),
         DevicePresetKind::Instrument(InstrumentKind::FmSynth) => fm_factory_presets(),
+        DevicePresetKind::Instrument(InstrumentKind::PluckedString) => plucked_factory_presets(),
         DevicePresetKind::Instrument(_) => Vec::new(),
     }
 }
@@ -1070,6 +1126,50 @@ fn fm_factory_presets() -> Vec<DevicePreset> {
     )
 }
 
+fn plucked_keys() -> Vec<PresetParam> {
+    use vibez_instruments::plucked::param;
+    [
+        (param::ATTACK, "attack", false),
+        (param::DECAY, "decay", false),
+        (param::SUSTAIN, "sustain", false),
+        (param::RELEASE, "release", false),
+        (param::DAMPING, "damping", false),
+        (param::STRETCH, "stretch", false),
+        (param::VELOCITY, "velocity", false),
+        (param::VOICES, "voices", true),
+        (param::VOLUME_DB, "volume", false),
+    ]
+    .to_vec()
+}
+
+fn plucked_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 5] = [
+        ("Init", &[]),
+        (
+            "Nylon Guitar",
+            &[("damping", 0.35), ("sustain", 0.4), ("decay", 0.8)],
+        ),
+        (
+            "Steel String",
+            &[("damping", 0.15), ("sustain", 0.7), ("decay", 1.5)],
+        ),
+        (
+            "Dull Bass",
+            &[("damping", 0.85), ("sustain", 0.5), ("stretch", 0.3)],
+        ),
+        (
+            "Bright Kalimba",
+            &[("damping", 0.5), ("stretch", 0.6), ("decay", 0.25)],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Instrument(InstrumentKind::PluckedString),
+        &plucked_keys(),
+        vibez_instruments::plucked::PLUCKED_PARAMS,
+        &presets,
+    )
+}
+
 fn synth_keys() -> Vec<PresetParam> {
     SYNTH_KEYS
         .iter()
@@ -1233,7 +1333,153 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::AutoPan => auto_pan_factory_presets(),
         EffectType::Phaser => phaser_factory_presets(),
         EffectType::MultibandDynamics => multiband_dynamics_factory_presets(),
+        EffectType::Chorus => chorus_factory_presets(),
+        EffectType::Flanger => flanger_factory_presets(),
+        EffectType::StereoWidener => stereo_widener_factory_presets(),
+        EffectType::PitchShifter => pitch_shifter_factory_presets(),
+        EffectType::RingModulator => ring_modulator_factory_presets(),
+        EffectType::FrequencyShifter => frequency_shifter_factory_presets(),
     }
+}
+
+fn chorus_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 4] = [
+        ("Init", &[]),
+        (
+            "Wide Choir",
+            &[("rate", 0.4), ("depth", 0.8), ("delay", 25.0), ("mix", 0.6)],
+        ),
+        (
+            "Shimmer",
+            &[
+                ("rate", 2.5),
+                ("depth", 0.6),
+                ("delay", 12.0),
+                ("feedback", 0.35),
+                ("mix", 0.5),
+            ],
+        ),
+        (
+            "Doubler",
+            &[
+                ("rate", 0.8),
+                ("depth", 0.25),
+                ("delay", 30.0),
+                ("mix", 0.35),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Chorus),
+        &CHORUS_KEYS,
+        vibez_dsp::chorus::CHORUS_PARAMS,
+        &presets,
+    )
+}
+
+fn flanger_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 4] = [
+        ("Init", &[]),
+        (
+            "Jet",
+            &[
+                ("rate", 0.15),
+                ("depth", 0.9),
+                ("delay", 4.0),
+                ("feedback", 0.7),
+                ("mix", 0.5),
+            ],
+        ),
+        (
+            "Through Zero",
+            &[
+                ("rate", 0.5),
+                ("depth", 1.0),
+                ("delay", 1.5),
+                ("feedback", -0.6),
+                ("mix", 0.7),
+            ],
+        ),
+        (
+            "Soft Wash",
+            &[
+                ("rate", 1.2),
+                ("depth", 0.4),
+                ("feedback", 0.2),
+                ("mix", 0.3),
+            ],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::Flanger),
+        &FLANGER_KEYS,
+        vibez_dsp::flanger::FLANGER_PARAMS,
+        &presets,
+    )
+}
+
+fn stereo_widener_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 4] = [
+        ("Init", &[]),
+        ("Wide", &[("width", 1.5)]),
+        ("Wide + Mono Bass", &[("width", 1.8), ("bass_mono", 120.0)]),
+        ("Narrow", &[("width", 0.5)]),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::StereoWidener),
+        &STEREO_WIDENER_KEYS,
+        vibez_dsp::stereo_widener::STEREO_WIDENER_PARAMS,
+        &presets,
+    )
+}
+
+fn pitch_shifter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 5] = [
+        ("Init", &[]),
+        ("Up an Octave", &[("semitones", 12.0)]),
+        ("Down a Fifth", &[("semitones", -7.0)]),
+        ("Detune", &[("fine", 12.0), ("grain", 60.0)]),
+        (
+            "Harmony +12",
+            &[("semitones", 12.0), ("grain", 100.0), ("mix", 0.0)],
+        ),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::PitchShifter),
+        &PITCH_SHIFTER_KEYS,
+        vibez_dsp::pitch_shifter::PITCH_SHIFTER_PARAMS,
+        &presets,
+    )
+}
+
+fn ring_modulator_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 4] = [
+        ("Init", &[]),
+        ("Tremolo 30 Hz", &[("frequency", 30.0), ("mix", 1.0)]),
+        ("Metallic 220 Hz", &[("frequency", 220.0), ("mix", 0.8)]),
+        ("Radio Speaker", &[("frequency", 1_000.0), ("mix", 0.6)]),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::RingModulator),
+        &RING_MODULATOR_KEYS,
+        vibez_dsp::ring_modulator::RING_MODULATOR_PARAMS,
+        &presets,
+    )
+}
+
+fn frequency_shifter_factory_presets() -> Vec<DevicePreset> {
+    let presets: [(&str, &[(&str, f32)]); 4] = [
+        ("Init", &[]),
+        ("Vibrato-ish +10 Hz", &[("shift", 10.0), ("mix", 0.5)]),
+        ("Ring-ish +100 Hz", &[("shift", 100.0), ("mix", 1.0)]),
+        ("Deep Down -500 Hz", &[("shift", -500.0), ("mix", 0.7)]),
+    ];
+    keyed_presets(
+        DevicePresetKind::Effect(EffectType::FrequencyShifter),
+        &FREQUENCY_SHIFTER_KEYS,
+        vibez_dsp::frequency_shifter::FREQUENCY_SHIFTER_PARAMS,
+        &presets,
+    )
 }
 
 fn multiband_dynamics_factory_presets() -> Vec<DevicePreset> {

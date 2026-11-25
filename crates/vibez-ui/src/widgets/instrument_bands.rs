@@ -22,7 +22,7 @@ pub const TABS_H: f32 = 24.0;
 pub const HEADER_H: f32 = 22.0;
 /// What `plot_band` keeps clear above and below its content.
 pub const BAND_PAD: f32 = 6.0;
-const KNOB: f32 = 30.0;
+const KNOB: f32 = 38.0;
 /// A knob with its name and value under it.
 const KNOB_W: f32 = 60.0;
 /// A menu with its name above it.

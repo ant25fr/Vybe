@@ -65,6 +65,12 @@ impl App {
             Message::ExportProject,
         );
 
+        let export_daw_btn = make_menu_btn(
+            "Export DAWproject...",
+            icons::AUDIO_WAVEFORM,
+            Message::ExportDawProject,
+        );
+
         let open_btn = make_menu_btn("Open...", icons::MUSIC, Message::OpenProject);
         let recent_btn = button(
             row![
@@ -138,6 +144,7 @@ impl App {
             .push(save_btn)
             .push(save_as_btn)
             .push(export_btn)
+            .push(export_daw_btn)
             .push(settings_btn)
             .push(about_btn)
             .padding(FILE_MENU_CONTENT_PADDING)

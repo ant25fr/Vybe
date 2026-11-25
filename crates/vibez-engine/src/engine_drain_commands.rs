@@ -671,6 +671,10 @@ impl AudioEngine {
             EngineCommand::SetEffectSpectrumTap(target) => {
                 self.effect_spectrum.select(target);
             }
+            EngineCommand::SetSideSpectrumTap(target) => {
+                self.side_spectrum.select(target);
+                self.mid_spectrum.select(target);
+            }
             EngineCommand::SetEffectMeterChannel {
                 track_id,
                 generation,

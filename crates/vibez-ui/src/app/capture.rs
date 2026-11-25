@@ -478,6 +478,7 @@ mod tests {
 
     fn audio_clip(position: u64, duration: u64) -> crate::state::UiClip {
         crate::state::UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: "Existing audio".into(),
             audio: Arc::new(DecodedAudio {

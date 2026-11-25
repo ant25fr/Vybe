@@ -285,6 +285,7 @@ impl TimelineEditorState {
         });
         if let Some(track) = self.find_content_mut(track_id) {
             track.clips.push(UiClip {
+                color_index: None,
                 id: success.new_clip_id,
                 name: success.new_name,
                 audio: Arc::clone(&success.new_audio),

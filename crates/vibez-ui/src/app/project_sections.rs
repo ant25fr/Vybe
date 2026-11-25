@@ -41,6 +41,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
             original_bpm: clip.original_bpm,
             warped: clip.warped,
             warped_to_bpm: clip.warped_to_bpm,
+            color_index: clip.color_index,
         }));
         info.note_clips
             .extend(
@@ -184,6 +185,7 @@ pub(super) fn install_loaded_clip(
         original_bpm: loaded.info.original_bpm,
         warped: loaded.info.warped,
         warped_to_bpm: loaded.info.warped_to_bpm,
+        color_index: loaded.info.color_index,
         original_audio: loaded.original_audio,
     });
 }
@@ -338,6 +340,7 @@ mod tests {
                     original_bpm: None,
                     warped: false,
                     warped_to_bpm: None,
+                    color_index: None,
                 },
                 audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
                     channels: vec![vec![0.0; duration as usize]],

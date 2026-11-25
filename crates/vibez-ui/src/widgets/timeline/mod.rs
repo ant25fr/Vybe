@@ -38,6 +38,9 @@ pub struct TimelineClip {
     /// stripe overlay so the user can see at a glance that a re-warp
     /// is needed.
     pub warp_stale: bool,
+    /// Per-clip color override from the clip's context menu; `None` falls
+    /// back to the track color.
+    pub color: Option<Color>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -287,6 +290,7 @@ mod performance_tests {
             sample_rate: 44_100,
         });
         UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: "Long loop.wav".into(),
             audio,
@@ -349,6 +353,7 @@ mod performance_tests {
             sample_rate: 100,
         });
         let mut clip = UiClip {
+            color_index: None,
             id: ClipId::new(),
             name: "Two halves.wav".into(),
             audio,

@@ -84,6 +84,7 @@ impl GhostMedia {
 pub fn audio_clip(name: String, source: MediaSourceRef, audio: Arc<DecodedAudio>) -> UiClip {
     let duration = audio.num_frames() as u64;
     UiClip {
+        color_index: None,
         id: ClipId::new(),
         name,
         audio,
