@@ -64,22 +64,13 @@ impl PianoRollWidget {
             );
             if !self.pad_labels.is_empty() {
                 // Pads stand out from the rows no pad answers to, which are
-                // dimmed; each pad row carries its sample's name.
+                // dimmed. The pad names sit on the keys.
                 match self.pad_label(pitch) {
-                    Some(label) => {
-                        frame.fill_rectangle(
-                            iced::Point::new(KEY_WIDTH, y),
-                            iced::Size::new(grid_width, KEY_HEIGHT),
-                            theme::with_alpha(self.track_color, 0.08),
-                        );
-                        frame.fill_text(canvas::Text {
-                            content: label.to_string(),
-                            position: iced::Point::new(KEY_WIDTH + 6.0, y + 3.0),
-                            color: theme::with_alpha(theme::text_dim(), 0.8),
-                            size: iced::Pixels(9.0),
-                            ..Default::default()
-                        });
-                    }
+                    Some(_) => frame.fill_rectangle(
+                        iced::Point::new(KEY_WIDTH, y),
+                        iced::Size::new(grid_width, KEY_HEIGHT),
+                        theme::with_alpha(self.track_color, 0.08),
+                    ),
                     None => frame.fill_rectangle(
                         iced::Point::new(KEY_WIDTH, y),
                         iced::Size::new(grid_width, KEY_HEIGHT),
