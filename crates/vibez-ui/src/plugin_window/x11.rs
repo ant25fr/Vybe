@@ -1,5 +1,6 @@
 use super::{gui_handle, requested_resize, PluginRawPtr, PluginWindowEvent};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use vibez_plugin_host::gui::{GuiParent, PluginGuiKey};
 use vibez_plugin_host::PluginGuiHandle;
@@ -31,6 +32,7 @@ pub struct PluginWindowManager {
     wm_protocols: u32,
     wm_delete_window: u32,
     windows: HashMap<PluginGuiKey, OpenPluginWindow>,
+    last_embed: Instant,
 }
 
 impl PluginWindowManager {
@@ -54,6 +56,7 @@ impl PluginWindowManager {
             wm_protocols,
             wm_delete_window,
             windows: HashMap::new(),
+            last_embed: Instant::now(),
         })
     }
 
@@ -300,6 +303,20 @@ impl PluginWindowManager {
                     .width(w as u32)
                     .height(h as u32),
             );
+        }
+
+        // XEmbed editors (GTK) wait for the host to map and size them.
+        if self.last_embed.elapsed() >= Duration::from_millis(100) {
+            self.last_embed = Instant::now();
+            for window in self.windows.values() {
+                let (w, h) = window.size;
+                let _ = vibez_plugin_host::xembed::sync_clients(
+                    &self.conn,
+                    window.x11_window_id,
+                    w.into(),
+                    h.into(),
+                );
+            }
         }
 
         let mut events = Vec::new();

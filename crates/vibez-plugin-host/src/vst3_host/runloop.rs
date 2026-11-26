@@ -84,23 +84,30 @@ pub struct RunLoopRegistry {
     pending_resize: Option<(u32, u32)>,
 }
 
+/// A callback due this tick; `fd` is `None` for a timer.
+struct DueCallback {
+    handler: *mut c_void,
+    fd: Option<i32>,
+}
+
 impl RunLoopRegistry {
-    /// Fire due timers and ready file descriptors. UI thread only.
-    fn service(&mut self) {
+    /// Collect due timers and ready file descriptors, holding a reference on
+    /// each handler until it has been called. UI thread only.
+    fn take_due(&mut self) -> Vec<DueCallback> {
         let now = Instant::now();
-        // Collect first: a callback may re-enter register/unregister
-        // through the same mutex if invoked while iterating.
-        let due_timers: Vec<*mut c_void> = self
+        let mut due: Vec<DueCallback> = self
             .timers
             .iter_mut()
             .filter(|t| now >= t.next_fire)
             .map(|t| {
                 t.next_fire = now + t.interval;
-                t.handler
+                DueCallback {
+                    handler: t.handler,
+                    fd: None,
+                }
             })
             .collect();
 
-        let mut ready_fds: Vec<(*mut c_void, i32)> = Vec::new();
         // VST3 IRunLoop fd watching is a Linux-only contract; libc::poll
         // does not exist on Windows, where handlers simply never fire.
         #[cfg(unix)]
@@ -118,46 +125,60 @@ impl RunLoopRegistry {
             if rc > 0 {
                 for (entry, pfd) in self.event_handlers.iter().zip(&pollfds) {
                     if pfd.revents & (libc::POLLIN | libc::POLLHUP | libc::POLLERR) != 0 {
-                        ready_fds.push((entry.handler, entry.fd));
+                        due.push(DueCallback {
+                            handler: entry.handler,
+                            fd: Some(entry.fd),
+                        });
                     }
                 }
             }
         }
 
-        for handler in due_timers {
-            unsafe {
-                let on_timer: OnTimerFn = std::mem::transmute(handler_vtbl_slot(handler, 3));
-                on_timer(handler);
-            }
+        for callback in &due {
+            unsafe { handler_add_ref(callback.handler) };
         }
-        for (handler, fd) in ready_fds {
-            unsafe {
-                let on_fd: OnFdIsSetFn = std::mem::transmute(handler_vtbl_slot(handler, 3));
-                on_fd(handler, fd);
-            }
+        due
+    }
+
+    fn is_registered(&self, callback: &DueCallback) -> bool {
+        match callback.fd {
+            Some(fd) => self
+                .event_handlers
+                .iter()
+                .any(|e| e.handler == callback.handler && e.fd == fd),
+            None => self.timers.iter().any(|t| t.handler == callback.handler),
         }
     }
 }
 
-/// Service a registry outside the lock held during callbacks:
-/// take the work under the lock, run callbacks after releasing it.
+/// Fire due callbacks without holding the lock while they run: JUCE
+/// paint/input callbacks register, unregister and resize from inside them.
 pub fn service_registry(registry: &Mutex<RunLoopRegistry>) {
-    // Callbacks (JUCE paint/input) may call back into
-    // register/unregister; a held lock would deadlock. Swap the
-    // registry out, service it, merge re-registrations back.
-    let mut taken = {
-        let Ok(mut guard) = registry.lock() else {
-            return;
-        };
-        std::mem::take(&mut *guard)
+    let due = match registry.lock() {
+        Ok(mut guard) => guard.take_due(),
+        Err(_) => return,
     };
-    taken.service();
-    if let Ok(mut guard) = registry.lock() {
-        // Anything the callbacks registered while we serviced.
-        let added = std::mem::take(&mut *guard);
-        *guard = taken;
-        guard.event_handlers.extend(added.event_handlers);
-        guard.timers.extend(added.timers);
+    for callback in due {
+        // An earlier callback of this tick may have unregistered this one.
+        let registered = registry
+            .lock()
+            .is_ok_and(|guard| guard.is_registered(&callback));
+        unsafe {
+            if registered {
+                let slot = handler_vtbl_slot(callback.handler, 3);
+                match callback.fd {
+                    Some(fd) => {
+                        let on_fd: OnFdIsSetFn = std::mem::transmute(slot);
+                        on_fd(callback.handler, fd);
+                    }
+                    None => {
+                        let on_timer: OnTimerFn = std::mem::transmute(slot);
+                        on_timer(callback.handler);
+                    }
+                }
+            }
+            handler_release(callback.handler);
+        }
     }
 }
 

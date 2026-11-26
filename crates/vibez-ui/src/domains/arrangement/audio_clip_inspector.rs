@@ -475,8 +475,7 @@ impl TimelineEditorState {
         match field {
             AudioClipRotaryField::FadeIn | AudioClipRotaryField::FadeOut => unreachable!(),
             AudioClipRotaryField::Gain => {
-                let Some(gain) = ClipGainDb::new(value).filter(|gain| *gain != clip.gain_db)
-                else {
+                let Some(gain) = ClipGainDb::new(value).filter(|gain| *gain != clip.gain_db) else {
                     return action;
                 };
                 clip.gain_db = gain;

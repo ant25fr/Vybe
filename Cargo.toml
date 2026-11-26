@@ -118,6 +118,7 @@ depends = "$auto"
 assets = [
     ["target/release/vibez", "usr/bin/", "755"],
     ["target/release/vibez-plugin-scan", "usr/bin/", "755"],
+    ["target/release/vibez-plugin-bridge", "usr/bin/", "755"],
     ["assets/linux/vibez.desktop", "usr/share/applications/", "644"],
     ["assets/icon/vibez.svg", "usr/share/icons/hicolor/scalable/apps/vibez.svg", "644"],
     ["assets/icon/vibez-16.png", "usr/share/icons/hicolor/16x16/apps/vibez.png", "644"],

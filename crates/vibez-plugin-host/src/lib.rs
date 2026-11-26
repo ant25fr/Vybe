@@ -30,6 +30,8 @@ pub mod settings;
 pub mod state;
 pub mod vst3_host;
 pub mod wrappers;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod xembed;
 
 pub use clap_host::host_impl::{poll_clap_events, set_clap_main_thread};
 pub use format::{PluginCategory, PluginFormat, PluginId};

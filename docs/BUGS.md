@@ -1,5 +1,25 @@
 # Suivi des bugs
 
+## Interfaces des plugins isolés sous Linux (26/11/2026)
+
+Vérifiées en pilotant `vibez-plugin-bridge` avec Surge XT, Vital, ZL Splitter,
+Synth MultiBand 3 et VIBE FM VST. L'ouverture depuis l'application et la saisie
+à la souris et au clavier restent à vérifier.
+
+| Effet | Où | Statut |
+|---|---|---|
+| Éditeurs VST3 vides : le pont ne servait pas leur boucle d'événements | `bridge/helper.rs` | Corrigé |
+| Fenêtre vide à la réouverture d'un éditeur | `bridge/helper.rs` | Corrigé |
+| Éditeurs GTK (XEmbed) noirs, avec ou sans isolation | `xembed.rs` | Corrigé (hors isolation : non vérifié) |
+| La taille provisoire de la fenêtre était renvoyée à l'éditeur, qui changeait de taille | `bridge/helper.rs` | Corrigé |
+| Redimensionnement demandé par un plugin CLAP ignoré dans le pont | `bridge/helper.rs` | Corrigé, non vérifié |
+| Un désabonnement ou un redimensionnement demandé pendant un rappel VST3 était perdu | `vst3_host/runloop.rs` | Corrigé |
+| Le pont n'était pas livré dans les paquets : les plugins s'y chargeaient sans isolation | `Cargo.toml` (deb), `release.yml`, `vibez.iss` | Corrigé ; paquets non construits, à vérifier à la prochaine publication |
+| L'isolation, désormais active dans les paquets, n'a pas été essayée sous Windows ni macOS | `bridge/helper.rs` | À vérifier |
+| Un plugin CLAP qui ajoute ou retire un minuteur ou un descripteur pendant son rappel bloque le fil principal | `clap_host/host_impl.rs`, `poll_timers`, `poll_fds` | Confirmé à la lecture |
+| Hors isolation, la taille provisoire peut aussi être renvoyée à l'éditeur | `plugin_window/x11.rs` | Probable |
+| Les messages d'erreur du pont sont jetés | `bridge/child.rs` | Confirmé à la lecture |
+
 ## Retour au début de la chaîne d'appareils (26/11/2026)
 
 | Effet | Où | Statut |

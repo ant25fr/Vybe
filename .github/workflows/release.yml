@@ -84,7 +84,7 @@ jobs:
         run: |
           PKG="vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}"
           mkdir -p "stage/${PKG}/icon"
-          cp target/release/vibez target/release/vibez-plugin-scan "stage/${PKG}/"
+          cp target/release/vibez target/release/vibez-plugin-scan target/release/vibez-plugin-bridge "stage/${PKG}/"
           cp README.md LICENSE assets/demo.vibez assets/linux/vibez.desktop "stage/${PKG}/"
           cp assets/icon/vibez.svg assets/icon/vibez-*.png assets/icon/vibez.ico "stage/${PKG}/icon/"
           tar -C stage -czf "${PKG}.tar.gz" "${PKG}"
@@ -102,7 +102,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/512x512/apps
-          cp target/release/vibez target/release/vibez-plugin-scan AppDir/usr/bin/
+          cp target/release/vibez target/release/vibez-plugin-scan target/release/vibez-plugin-bridge AppDir/usr/bin/
           cp assets/linux/vibez.desktop AppDir/
           cp assets/linux/vibez.desktop AppDir/usr/share/applications/
           cp assets/icon/vibez-512.png AppDir/vibez.png
@@ -121,7 +121,7 @@ jobs:
         run: |
           APP="stage/vibez.app"
           mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
-          cp target/release/vibez target/release/vibez-plugin-scan "${APP}/Contents/MacOS/"
+          cp target/release/vibez target/release/vibez-plugin-scan target/release/vibez-plugin-bridge "${APP}/Contents/MacOS/"
           cp assets/demo.vibez "${APP}/Contents/Resources/"
           sed "s/__VERSION__/${{ steps.version.outputs.bare }}/g" packaging/macos/Info.plist \
             > "${APP}/Contents/Info.plist"
@@ -158,7 +158,7 @@ jobs:
         run: |
           PKG="vibez-${{ steps.version.outputs.version }}-${{ matrix.label }}"
           mkdir -p "stage/${PKG}/icon"
-          cp target/release/vibez.exe target/release/vibez-plugin-scan.exe "stage/${PKG}/"
+          cp target/release/vibez.exe target/release/vibez-plugin-scan.exe target/release/vibez-plugin-bridge.exe "stage/${PKG}/"
           cp README.md LICENSE assets/demo.vibez "stage/${PKG}/"
           cp assets/icon/vibez.ico assets/icon/vibez-*.png "stage/${PKG}/icon/"
           cd stage && 7z a "../${PKG}.zip" "${PKG}" > /dev/null

@@ -166,16 +166,19 @@ pub fn run() -> ExitCode {
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
         crate::poll_clap_events();
-        // Follow plugin-initiated resizes (VST3) and keep the window matched
-        // to the plugin's size.
-        if let Some((w, h)) = with_gui(|g| g.take_pending_resize()).flatten() {
+        // VST3 Linux editors repaint and handle input only from the host run
+        // loop: without this the window stays blank.
+        let _ = with_gui(|g| g.service_runloop());
+        // Follow plugin-initiated resizes and keep the window matched to the
+        // plugin's size.
+        if let Some((w, h)) = take_requested_resize() {
             platform::resize_to_content(w, h);
             let _ = with_gui(|g| g.set_size(w, h));
         }
         if platform::take_gui_closed() {
+            close_gui();
             let frame = encode_control(&ControlFrame::Event(BridgeEvent::GuiClosed));
             let _ = shared.write_frame(&frame);
-            platform::hide_window();
         }
         platform::pump_messages();
     }
@@ -374,16 +377,26 @@ fn open_gui(width: u32, height: u32) -> Result<BridgeResponse, String> {
         return Ok(BridgeResponse::Bool(false));
     };
     let mut gui = gui;
+    // The editor may still be attached to a window that is no longer shown.
+    if gui.is_open() {
+        gui.hide();
+        gui.destroy();
+    }
     if !gui.create_gui() {
         GUI.with(|g| *g.borrow_mut() = Some(gui));
         return Ok(BridgeResponse::Bool(false));
     }
     // The plugin's own size wins over the requested one.
     let size = gui.get_size().unwrap_or((width.max(320), height.max(240)));
-    platform::ensure_window(size.0, size.1, "vibez plugin (sandboxed)");
+    if !platform::ensure_window(size.0, size.1, "vibez plugin (sandboxed)") {
+        gui.destroy();
+        GUI.with(|g| *g.borrow_mut() = Some(gui));
+        return Err("cannot create the plugin window".to_string());
+    }
     if !unsafe { gui.open_embedded(platform::parent_handle()) } {
         gui.destroy();
         GUI.with(|g| *g.borrow_mut() = Some(gui));
+        platform::hide_window();
         return Ok(BridgeResponse::Bool(false));
     }
     // Re-read after embedding (some plugins resize on attach) and match the
@@ -391,16 +404,35 @@ fn open_gui(width: u32, height: u32) -> Result<BridgeResponse, String> {
     let size = gui.get_size().unwrap_or(size);
     platform::resize_to_content(size.0, size.1);
     let _ = gui.set_size(size.0, size.1);
+    #[cfg(not(any(windows, target_os = "macos")))]
+    platform::set_resizable(gui.can_resize(), size.0, size.1);
     platform::show_window();
     GUI.with(|g| *g.borrow_mut() = Some(gui));
     Ok(BridgeResponse::Bool(true))
 }
 
+/// A resize the plugin asked for: VST3 `resizeView` or CLAP `request_resize`.
+fn take_requested_resize() -> Option<(u32, u32)> {
+    let clap = crate::clap_host::host_impl::take_pending_gui_resizes();
+    with_gui(|g| {
+        g.take_pending_resize().or_else(|| {
+            let ptr = g.clap_plugin_ptr()?;
+            clap.iter()
+                .find(|(p, _, _)| *p == ptr)
+                .map(|&(_, w, h)| (w, h))
+        })
+    })
+    .flatten()
+}
+
+/// Destroy the editor but keep its handle, so it can be opened again.
 fn close_gui() {
-    if let Some(mut gui) = GUI.with(|g| g.borrow_mut().take()) {
-        gui.hide();
-        gui.destroy();
-    }
+    let _ = with_gui(|g| {
+        if g.is_open() {
+            g.hide();
+            g.destroy();
+        }
+    });
     platform::hide_window();
 }
 
@@ -752,8 +784,10 @@ mod platform {
 #[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     use std::cell::{Cell, RefCell};
+    use std::time::{Duration, Instant};
 
     use x11rb::connection::Connection;
+    use x11rb::properties::WmSizeHints;
     use x11rb::protocol::xproto::{self, ConnectionExt as _};
     use x11rb::protocol::Event;
     use x11rb::rust_connection::RustConnection;
@@ -763,10 +797,54 @@ mod platform {
 
     struct X11 {
         conn: RustConnection,
-        screen: usize,
         win: u32,
-        wm_protocols: u32,
         wm_delete: u32,
+        mapped: Cell<bool>,
+        /// Last size known to the plugin, to ignore moves and echoes.
+        size: Cell<(u32, u32)>,
+        resizable: Cell<bool>,
+        last_embed: Cell<Instant>,
+    }
+
+    impl X11 {
+        /// Map the window and wait for the server: the plugin parents its
+        /// editor from its own connection, so the window must exist there.
+        fn map(&self) {
+            let _ = self.conn.map_window(self.win);
+            let _ = self.conn.sync();
+            self.mapped.set(true);
+        }
+
+        /// The window opens at a provisional size before the editor reports
+        /// its own. Drop the notifications of those sizes, which would
+        /// otherwise reach the editor as a resize by the user.
+        fn discard_stale_sizes(&self) {
+            // Give the window manager time to apply the final size.
+            std::thread::sleep(Duration::from_millis(50));
+            let _ = self.conn.sync();
+            while let Ok(Some(event)) = self.conn.poll_for_event() {
+                self.note_close_request(&event);
+            }
+        }
+
+        fn note_close_request(&self, event: &Event) {
+            if let Event::ClientMessage(cm) = event {
+                if cm.format == 32 && cm.data.as_data32()[0] == self.wm_delete {
+                    CLOSED.set(true);
+                }
+            }
+        }
+
+        /// A fixed-size editor locks the window with min == max hints.
+        fn apply_size_hints(&self, width: u32, height: u32) {
+            let lock = (!self.resizable.get()).then_some((width as i32, height as i32));
+            let hints = WmSizeHints {
+                min_size: lock,
+                max_size: lock,
+                ..Default::default()
+            };
+            let _ = hints.set_normal_hints(&self.conn, self.win);
+        }
     }
 
     thread_local! {
@@ -834,20 +912,36 @@ mod platform {
                         &[wm_delete],
                     );
                 }
-                let _ = conn.map_window(win);
-                let _ = conn.flush();
                 *slot = Some(X11 {
                     conn,
-                    screen: screen_num,
                     win,
-                    wm_protocols,
                     wm_delete,
+                    mapped: Cell::new(false),
+                    size: Cell::new((width.max(320), height.max(240))),
+                    resizable: Cell::new(true),
+                    last_embed: Cell::new(Instant::now()),
                 });
-            } else {
-                resize_to_content(width, height);
             }
             true
-        })
+        }) && {
+            resize_to_content(width, height);
+            STATE.with(|s| {
+                if let Some(x) = &*s.borrow() {
+                    x.map();
+                }
+            });
+            true
+        }
+    }
+
+    pub fn set_resizable(resizable: bool, width: u32, height: u32) {
+        STATE.with(|s| {
+            if let Some(x) = &*s.borrow() {
+                x.resizable.set(resizable);
+                x.apply_size_hints(width, height);
+                let _ = x.conn.flush();
+            }
+        });
     }
 
     pub fn parent_handle() -> GuiParent {
@@ -862,6 +956,9 @@ mod platform {
     pub fn resize_to_content(width: u32, height: u32) {
         STATE.with(|s| {
             if let Some(x) = &*s.borrow() {
+                x.size.set((width.max(1), height.max(1)));
+                // Move the lock first or the window manager refuses the size.
+                x.apply_size_hints(width.max(1), height.max(1));
                 let _ = x.conn.configure_window(
                     x.win,
                     &xproto::ConfigureWindowAux::new()
@@ -876,8 +973,8 @@ mod platform {
     pub fn show_window() {
         STATE.with(|s| {
             if let Some(x) = &*s.borrow() {
-                let _ = x.conn.map_window(x.win);
-                let _ = x.conn.flush();
+                x.map();
+                x.discard_stale_sizes();
             }
         });
     }
@@ -887,6 +984,7 @@ mod platform {
             if let Some(x) = &*s.borrow() {
                 let _ = x.conn.unmap_window(x.win);
                 let _ = x.conn.flush();
+                x.mapped.set(false);
             }
         });
     }
@@ -898,14 +996,13 @@ mod platform {
                     x.win,
                     &xproto::ConfigureWindowAux::new().stack_mode(xproto::StackMode::ABOVE),
                 );
-                let _ = x.conn.map_window(x.win);
-                let _ = x.conn.flush();
+                x.map();
             }
         });
     }
 
     pub fn is_visible() -> bool {
-        STATE.with(|s| s.borrow().is_some())
+        STATE.with(|s| s.borrow().as_ref().is_some_and(|x| x.mapped.get()))
     }
 
     pub fn take_gui_closed() -> bool {
@@ -923,27 +1020,28 @@ mod platform {
                     Ok(Some(event)) => match event {
                         Event::ConfigureNotify(cfg) => {
                             let (w, h) = (cfg.width as u32, cfg.height as u32);
-                            if w > 0 && h > 0 {
+                            if w > 0 && h > 0 && (w, h) != x.size.get() {
+                                x.size.set((w, h));
                                 let _ = super::with_gui(|g| {
                                     if let Some((w, h)) = g.resize_from_host(w, h) {
+                                        x.size.set((w, h));
                                         let _ = x.conn.configure_window(
                                             x.win,
                                             &xproto::ConfigureWindowAux::new().width(w).height(h),
                                         );
-                                        let _ = g.set_size(w, h);
                                     }
                                 });
                             }
                         }
-                        Event::ClientMessage(cm) => {
-                            if cm.format == 32 && cm.data.as_data32()[0] == x.wm_delete {
-                                CLOSED.set(true);
-                            }
-                        }
-                        _ => {}
+                        other => x.note_close_request(&other),
                     },
                     _ => break,
                 }
+            }
+            if x.mapped.get() && x.last_embed.get().elapsed() >= Duration::from_millis(100) {
+                x.last_embed.set(Instant::now());
+                let (w, h) = x.size.get();
+                let _ = crate::xembed::sync_clients(&x.conn, x.win, w, h);
             }
             let _ = x.conn.flush();
         });

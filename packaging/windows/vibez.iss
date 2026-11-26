@@ -31,6 +31,7 @@ Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "A
 [Files]
 Source: "..\..\target\release\vibez.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\target\release\vibez-plugin-scan.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\target\release\vibez-plugin-bridge.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\assets\demo.vibez"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
