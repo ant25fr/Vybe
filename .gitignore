@@ -15,3 +15,6 @@ Thumbs.db
 
 # Private dev notes live outside the repo (~/Code/Apps/vibez-private-notes)
 .notes/
+
+# AI session instructions
+CLAUDE.md
