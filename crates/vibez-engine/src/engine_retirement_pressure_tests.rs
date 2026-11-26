@@ -8,6 +8,7 @@ use vibez_core::id::{ClipId, SectionId};
 
 fn pressure_clip(id: ClipId, value: f32) -> EngineClip {
     EngineClip {
+        audition: false,
         id,
         audio: Arc::new(DecodedAudio {
             channels: vec![vec![value; 128]],

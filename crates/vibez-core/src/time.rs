@@ -23,7 +23,8 @@ pub fn frames_at_rate(frames: u64, from_rate: u32, to_rate: u32) -> u64 {
     ((u128::from(frames) * to + from / 2) / from) as u64
 }
 
-/// Every bar is 4/4 until the Project gains a time signature.
+/// A 4/4 bar, which Perform and Clip editors count in. Arrange follows its
+/// [`crate::meter::MeterMap`].
 pub const BEATS_PER_BAR: f64 = 4.0;
 
 /// The finest musical resolution recorded and captured MIDI lands on.

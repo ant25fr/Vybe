@@ -27,6 +27,8 @@ pub struct TimelineClip {
     pub loop_enabled: bool,
     pub loop_start: u64,
     pub loop_end: u64,
+    /// Clip Gain in dB, which scales the drawn waveform.
+    pub gain_db: f32,
     pub fade_in_frames: u64,
     pub fade_out_frames: u64,
     pub fade_in_curve: FadeCurve,
@@ -256,6 +258,7 @@ mod lane_layers;
 mod lane_timing;
 mod loop_tint;
 pub mod marquee;
+mod meter_lines;
 mod minimap;
 mod note_marks;
 mod note_summary;
@@ -264,6 +267,7 @@ mod ruler_drag;
 mod ruler_draw;
 mod ruler_scale;
 mod source_peaks;
+mod take_lane;
 mod time_ruler;
 
 pub use clip_drag::ClipDragAction;
@@ -273,6 +277,7 @@ pub use marquee::{build_row_spans, TrackRowSpan};
 pub use minimap::*;
 pub use note_summary::{NoteSpan, NoteSummary};
 pub use ruler::*;
+pub use take_lane::{TakeClip, TakeLaneWidget};
 pub use time_ruler::{TimeRulerWidget, TIME_RULER_HEIGHT};
 
 #[cfg(test)]

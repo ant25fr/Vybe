@@ -127,6 +127,7 @@ impl App {
     }
 
     pub(super) fn apply_snapshot(&mut self, snapshot: crate::state::ProjectSnapshot) {
+        self.stop_take_audition();
         self.restart_device_metering();
         self.cancel_device_preset_load();
         if clip_only_snapshot(&self.state, &snapshot) {
@@ -304,6 +305,11 @@ impl App {
                 &mut crate::domains::EngineTx(&mut self.cmd_tx),
             );
         }
+        if self.state.transport.meter != snapshot.meter {
+            self.state.transport.meter = snapshot.meter;
+            self.send_command(EngineCommand::SetMeterMap(snapshot.meter));
+        }
+        self.state.transport.signature_text = None;
         if self.state.perform.project_swing() != snapshot.project_swing {
             self.send_command(EngineCommand::SetProjectSwing(snapshot.project_swing));
         }
@@ -351,6 +357,7 @@ impl App {
             // its gain and effect chain.
             self.send_command(EngineCommand::SetTrackGain(track.id, track.gain));
             self.replay_effects_to_engine(track);
+            self.replay_modulators_to_engine(track);
             for lane in &content.automation {
                 self.send_command(EngineCommand::SetAutomationLane {
                     track_id: track.id,
@@ -431,6 +438,21 @@ impl App {
         }
 
         self.replay_effects_to_engine(track);
+        self.replay_modulators_to_engine(track);
+
+        if !track.midi_effects.is_neutral() {
+            self.send_command(EngineCommand::SetMidiEffects(track.id, track.midi_effects));
+        }
+        if track.frozen_clip.is_some() {
+            self.send_command(EngineCommand::SetTrackFrozen(track.id, track.frozen_clip));
+        }
+        for bus_id in &track.pre_fader_sends {
+            self.send_command(EngineCommand::SetSendPreFader {
+                track_id: track.id,
+                bus_id: *bus_id,
+                pre_fader: true,
+            });
+        }
 
         for (bus_id, amount) in &track.sends {
             self.send_command(EngineCommand::SetSend {
@@ -451,7 +473,25 @@ impl App {
 
     /// Recreate a bus in the engine from its UI model: the channel
     /// itself, then gain/pan/mute and the effect chain.
+    fn replay_bus_sends(&mut self, bus: &ProjectTrack) {
+        for bus_id in &bus.pre_fader_sends {
+            self.send_command(EngineCommand::SetSendPreFader {
+                track_id: bus.id,
+                bus_id: *bus_id,
+                pre_fader: true,
+            });
+        }
+        for (bus_id, amount) in &bus.sends {
+            self.send_command(EngineCommand::SetSend {
+                track_id: bus.id,
+                bus_id: *bus_id,
+                amount: *amount,
+            });
+        }
+    }
+
     fn replay_bus_to_engine(&mut self, bus: &ProjectTrack) {
+        self.replay_bus_sends(bus);
         let automation = self
             .state
             .arrange_content(bus.id)
@@ -463,6 +503,7 @@ impl App {
         self.send_command(EngineCommand::SetTrackMute(bus.id, bus.mute));
         self.send_command(EngineCommand::SetTrackSolo(bus.id, bus.solo));
         self.replay_effects_to_engine(bus);
+        self.replay_modulators_to_engine(bus);
         for lane in &automation {
             self.send_command(EngineCommand::SetAutomationLane {
                 track_id: bus.id,
@@ -471,6 +512,15 @@ impl App {
                 ),
             });
         }
+    }
+
+    fn replay_modulators_to_engine(&mut self, track: &ProjectTrack) {
+        crate::domains::modulation::sync_modulators(
+            &mut crate::domains::EngineTx(&mut self.cmd_tx),
+            track.id,
+            &[],
+            &track.modulators,
+        );
     }
 
     /// Replay a channel's built-in effect chain to the engine
@@ -515,6 +565,7 @@ fn clip_only_snapshot(
         && Arc::ptr_eq(&state.arrangement.timeline, &snapshot.arrange_timeline)
         && Arc::ptr_eq(&state.perform.sections, &snapshot.sections)
         && state.transport.bpm == snapshot.bpm
+        && state.transport.meter == snapshot.meter
         && state.perform.project_swing() == snapshot.project_swing
         && state.transport.loop_enabled == snapshot.loop_enabled
         && state.transport.loop_start_beats == snapshot.loop_start_beats

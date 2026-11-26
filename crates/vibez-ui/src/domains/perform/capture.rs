@@ -850,6 +850,7 @@ fn append_note_window(
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: clip.groove_grid,
+            scale: clip.scale,
             color_index: None,
         };
         destination.note_clips.push(fragment);

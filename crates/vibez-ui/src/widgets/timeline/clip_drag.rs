@@ -4,7 +4,7 @@ use crate::state::{ArrangementSelection, ClipEdge, ClipSpan, UndoGestureId};
 use crate::widgets::drag_phase::DragPhase;
 use vibez_core::id::ClipId;
 
-use super::fade_drag::{CrossfadeCurveDrag, FadeClipDrag, FadeCurveDrag};
+use super::fade_drag::{CrossfadeCurveDrag, FadeClipDrag, FadeCurveDrag, GainDrag};
 
 #[derive(Debug, Clone)]
 pub enum ClipDragAction {
@@ -33,6 +33,7 @@ pub enum ClipDragAction {
         /// shaky click never changes the Clip's length.
         phase: DragPhase,
     },
+    ClipGain(GainDrag),
     FadeClip(FadeClipDrag),
     FadeCurve(FadeCurveDrag),
     CrossfadeCurve(CrossfadeCurveDrag),

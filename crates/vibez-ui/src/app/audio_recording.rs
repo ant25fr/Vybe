@@ -14,7 +14,7 @@ use vibez_engine::commands::EngineCommand;
 use crate::domains::audio_recording::{AudioRecordingPhase, AudioRecordingSource};
 use crate::domains::transport::TransportMsg;
 use crate::message::{AudioRecordingOutcome, Message};
-use crate::state::{ArrangementSelection, ProjectTrack, UiClip, Workspace};
+use crate::state::{ProjectTrack, UiClip, Workspace};
 
 use super::audio_take_finalization::{
     finalize_audio_take, recording_target_accepts_finalizer, FinalizeAudioTake,
@@ -35,6 +35,11 @@ impl App {
             return Task::none();
         }
         let name = track.name.clone();
+        if self.state.audio_recording.armed_track != Some(track_id)
+            && self.refuse_frozen_track(track_id)
+        {
+            return Task::none();
+        }
         if self.state.audio_recording.armed_track == Some(track_id) {
             self.state.audio_recording.disarm();
             self.state.audio_recording.monitor_track = self.persisted_monitor_on_track();
@@ -177,6 +182,12 @@ impl App {
     }
 
     fn begin_audio_recording(&mut self) -> Task<Message> {
+        // The take is recorded in real time and could not be placed on a
+        // timeline moving at another pace.
+        if self.state.tempo_lane().is_some() {
+            self.state.status_text = "Remove the tempo automation to record audio".into();
+            return Task::none();
+        }
         if self.state.view.workspace != Workspace::Arrange {
             self.state.status_text = "Audio Track Recording is available in Arrange".into();
             return Task::none();
@@ -202,6 +213,9 @@ impl App {
             self.state.status_text = "Arm an Audio Project Track before recording".into();
             return Task::none();
         };
+        if self.refuse_frozen_track(track_id) {
+            return Task::none();
+        }
         let Some(source) = self.recording_source_for_target(track_id) else {
             self.state.status_text = "The armed Audio Track input is unavailable".into();
             return Task::none();
@@ -221,6 +235,12 @@ impl App {
             self.discard_project_transaction();
             return Task::none();
         }
+        let transport = &self.state.transport;
+        self.state.audio_recording.loop_region = transport.loop_enabled.then(|| {
+            let at = |beats: f64| (beats * transport.samples_per_beat()).round() as u64;
+            (at(transport.loop_start_beats), at(transport.loop_end_beats))
+        });
+        self.stop_take_audition();
         // A take is allowed to extend Arrange beyond the last existing Clip.
         // This must precede Play in the ordered engine queue so the first
         // output callback cannot immediately auto-stop at the old content end.
@@ -365,57 +385,49 @@ impl App {
                 {
                     return self.finish_clip_audio_recording(outcome);
                 }
-                let clip_id = ClipId::new();
                 let duration = outcome.audio.num_frames() as u64;
                 let quality_warning = outcome.quality_warning.clone();
-                self.send_command(EngineCommand::AddClip {
-                    insertion: vibez_engine::clip_insertion::PreparedClipInsertion::new(),
-                    track_id: outcome.track_id,
-                    clip_id,
-                    audio: Arc::clone(&outcome.audio),
-                    position: outcome.start_position_samples,
-                    source_offset: 0,
-                    start_marker: 0,
+                let take = audio_outcome_clip(&outcome, ClipId::new());
+                // A pass shorter than a tenth of a second is Stop's tail.
+                let shortest = u64::from(self.state.transport.sample_rate / 10);
+                let passes = crate::domains::arrangement::recording_passes(
+                    outcome.start_position_samples,
                     duration,
-                    loop_enabled: false,
-                    loop_start: 0,
-                    loop_end: duration,
-                    linear_gain: 1.0,
-                    fades: Default::default(),
-                    playback_direction: Default::default(),
-                    warp_markers: Default::default(),
-                });
-                self.state
-                    .arrange_content_mut(outcome.track_id)
-                    .clips
-                    .push(audio_outcome_clip(&outcome, clip_id));
-                self.state.arrangement.selected_track = Some(outcome.track_id);
-                self.state.arrangement.selected_clips.clear();
-                self.state
-                    .arrangement
-                    .selected_clips
-                    .insert(ArrangementSelection::AudioClip {
-                        track_id: outcome.track_id,
-                        clip_id,
-                    });
+                    self.state.audio_recording.loop_region,
+                    shortest,
+                );
+                let samples_per_beat = self.state.transport.samples_per_beat();
+                let comp = self.state.arrangement.editor.land_recording(
+                    &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                    samples_per_beat,
+                    outcome.track_id,
+                    &take,
+                    &passes,
+                );
                 self.push_undo_snapshot(None);
                 self.mark_project_dirty();
                 self.commit_project_transaction();
                 self.state.audio_recording.finish();
                 self.sync_audio_input_target();
+                let takes = match passes.len() {
+                    1 => String::new(),
+                    count => format!(" · {count} takes"),
+                };
                 let completed = format!(
-                    "{} · {:.2} s · one undo step",
+                    "{} · {:.2} s{takes} · one undo step",
                     outcome.completion_label,
                     duration as f64 / self.state.transport.sample_rate as f64,
                 );
                 self.state.status_text = quality_warning
                     .map(|warning| format!("{completed} · Warning: {warning}"))
                     .unwrap_or(completed);
-                return self.schedule_auto_detect_clip_transients(
-                    vibez_project::TimelineLocation::Arrange,
-                    outcome.track_id,
-                    clip_id,
-                );
+                return Task::batch(comp.into_iter().map(|clip_id| {
+                    self.schedule_auto_detect_clip_transients(
+                        vibez_project::TimelineLocation::Arrange,
+                        outcome.track_id,
+                        clip_id,
+                    )
+                }));
             }
             Err(error) => {
                 if self.state.perform.clip_record.is_active() {

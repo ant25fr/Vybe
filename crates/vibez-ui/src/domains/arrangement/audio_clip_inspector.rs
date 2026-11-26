@@ -7,7 +7,9 @@ use vibez_core::track::{ClipGainDb, ClipTranspose};
 use vibez_engine::commands::EngineCommand;
 
 use crate::message::ClipTransposeSuccess;
-use crate::state::{AudioClipInspectorField, AudioClipRotaryField, TimelineEditorState, UiClip};
+use crate::state::{
+    AudioClipFadeEdge, AudioClipInspectorField, AudioClipRotaryField, TimelineEditorState, UiClip,
+};
 
 use super::{ArrangementAction, ClipRenderedGeometry, ClipTransposeRenderRequest, EngineHandle};
 
@@ -457,9 +459,24 @@ impl TimelineEditorState {
             action.status = Some("Audio Clip is no longer available".into());
             return action;
         };
+        let edge = match field {
+            AudioClipRotaryField::FadeIn => Some(AudioClipFadeEdge::In),
+            AudioClipRotaryField::FadeOut => Some(AudioClipFadeEdge::Out),
+            AudioClipRotaryField::Gain | AudioClipRotaryField::Transpose => None,
+        };
+        if let Some(edge) = edge {
+            if !value.is_finite() {
+                return action;
+            }
+            // The same edit as the timeline handle, crossfade links included.
+            let frames = AudioClipRotaryField::fade_frames_at(value, clip.duration);
+            return self.set_audio_clip_fade(engine, track_id, clip_id, edge, frames);
+        }
         match field {
+            AudioClipRotaryField::FadeIn | AudioClipRotaryField::FadeOut => unreachable!(),
             AudioClipRotaryField::Gain => {
-                let Some(gain) = ClipGainDb::new(value) else {
+                let Some(gain) = ClipGainDb::new(value).filter(|gain| *gain != clip.gain_db)
+                else {
                     return action;
                 };
                 clip.gain_db = gain;

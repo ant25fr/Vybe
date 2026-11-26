@@ -755,6 +755,7 @@ mod tests {
                 track_id,
                 PreparedPlaybackSource::new(
                     vec![EngineClip {
+                        audition: false,
                         id: vibez_core::id::ClipId::new(),
                         audio,
                         position: 0,

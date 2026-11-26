@@ -239,10 +239,9 @@ impl App {
     }
 
     pub(super) fn on_open_midi_input(&mut self, name: String) -> Task<Message> {
-        match vibez_audio_io::midi_input::open_midi_input(&name) {
-            Ok(handle) => {
-                self.state.status_text = format!("MIDI input: {}", handle.port_name);
-                self.midi_input = Some(handle);
+        match self.midi_ports.open(&name) {
+            Ok(()) => {
+                self.state.status_text = format!("MIDI input on: {name}");
                 self.persist_ui_settings();
             }
             Err(err) => {

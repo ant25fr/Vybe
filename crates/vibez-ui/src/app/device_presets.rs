@@ -177,6 +177,10 @@ impl App {
                 | ArrangementMsg::ConfirmRemoveTrack(track)
                 | ArrangementMsg::RemoveBus(track),
             ) => *track == pending.0,
+            // Ungrouping removes the selected group.
+            Message::Arrangement(ArrangementMsg::UngroupSelected) => {
+                self.state.arrangement.selected_track == Some(pending.0)
+            }
             _ => false,
         };
         if invalidated {

@@ -199,7 +199,16 @@ impl App {
             self.state.status_text = "Capture stopped · no performance content recorded".into();
             return;
         };
-        let materialized = completed.materialize();
+        let mut materialized = completed.materialize();
+        // A frozen track keeps its audio: the take passes it by.
+        for track in &self.state.project_tracks.tracks {
+            if track.frozen_clip.is_some() {
+                materialized.by_track.remove(&track.id);
+                materialized
+                    .controlled_track_ids
+                    .retain(|id| *id != track.id);
+            }
+        }
         if materialized.is_empty()
             && !capture_replaces_existing_content(&self.state.arrangement.timeline, &materialized)
         {
@@ -592,6 +601,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         });
 
@@ -639,6 +649,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         });
         let mut gain = AutomationLane::new(AutomationTarget::TrackGain);
@@ -800,6 +811,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         let mut arrange = Arc::new(ArrangementTimeline::default());
@@ -859,6 +871,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         let mut section = crate::domains::perform::Section::new(0);
@@ -918,6 +931,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         });
         let captured = MaterializedCapture {
@@ -982,6 +996,7 @@ mod tests {
                 is_bus: id.is_master(),
                 sends: vec![],
                 effects: vec![],
+                output: None,
                 midi_from: None,
             }
         });
@@ -1011,6 +1026,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         let filler = crate::state::TrackTimelineContent {

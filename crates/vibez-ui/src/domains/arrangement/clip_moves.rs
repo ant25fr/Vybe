@@ -157,12 +157,18 @@ impl TimelineEditorState {
         let delta_beats = (new_position_beats - anchor_beats).max(-earliest);
         let delta_samples = (delta_beats * ctx.samples_per_beat).round() as i64;
 
-        let lane_of = |track_id: TrackId| {
-            project_tracks
-                .tracks
-                .iter()
-                .position(|track| track.id == track_id)
-        };
+        // Lanes are counted as shown: a folded group's tracks are passed
+        // over, unless a dragged clip or the pointer is on one.
+        let lanes: Vec<_> = project_tracks
+            .tracks
+            .iter()
+            .filter(|track| {
+                !project_tracks.is_folded_away(track.id)
+                    || track.id == target_track
+                    || targets.iter().any(|target| target.track_id() == track.id)
+            })
+            .collect();
+        let lane_of = |track_id: TrackId| lanes.iter().position(|track| track.id == track_id);
         let lane_shift = lane_of(target_track)
             .zip(lane_of(anchor.track_id()))
             .map_or(0, |(target, current)| target as isize - current as isize);
@@ -174,7 +180,7 @@ impl TimelineEditorState {
                     .iter()
                     .map(|selection| {
                         let lane = lane_of(selection.track_id())?.checked_add_signed(lane_shift)?;
-                        let track = project_tracks.tracks.get(lane)?;
+                        let track = lanes.get(lane)?;
                         (track.kind.is_midi() == selection.is_note_clip()).then_some(track.id)
                     })
                     .collect()

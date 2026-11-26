@@ -25,6 +25,7 @@ fn source(
             let mut warp_markers = vibez_core::warp_marker::WarpMarkers::default();
             assert!(warp_markers.add(32, 32, 0, 128, 128));
             EngineClip {
+                audition: false,
                 id,
                 audio,
                 position: 0,

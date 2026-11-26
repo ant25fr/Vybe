@@ -10,9 +10,9 @@ use vibez_dsp::stereo_widener::param as sw_param;
 use crate::domains::device_params::DeviceParams;
 use crate::domains::param_entry::ValueEntry;
 use crate::message::Message;
+use crate::spectrum::{SpectrumState, DISPLAY_BINS, FLOOR_DB};
 use crate::theme as th;
 use crate::widgets::device_chrome::CardWidths;
-use crate::spectrum::{SpectrumState, DISPLAY_BINS, FLOOR_DB};
 use crate::widgets::device_controls::{heading, plot_band, rule, Param};
 use crate::widgets::device_layout::{stack, KNOB_ROW_H};
 

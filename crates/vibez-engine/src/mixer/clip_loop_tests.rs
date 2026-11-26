@@ -82,6 +82,7 @@ fn an_audio_clip_shorter_than_its_loop_plays_the_loop_from_its_start_marker() {
     });
     let mut track = EngineTrack::new(TrackId::new());
     track.playback_source.push_audio_clip(EngineClip {
+        audition: false,
         id: ClipId::new(),
         audio,
         position: 0,
@@ -131,6 +132,7 @@ fn an_audio_clip_pulled_earlier_than_its_loop_start_plays_the_loop_end_first() {
     });
     let mut track = EngineTrack::new(TrackId::new());
     track.playback_source.push_audio_clip(EngineClip {
+        audition: false,
         id: ClipId::new(),
         audio,
         position: 10,

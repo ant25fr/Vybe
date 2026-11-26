@@ -4,10 +4,10 @@ use iced::widget::canvas;
 use iced::{Point, Renderer, Size};
 
 use super::loop_tint::LoopSpan;
+use super::meter_lines::metered_ruler_marks;
 use super::ruler::{RulerWidget, LOOP_STRIP_HEIGHT};
 use super::ruler_scale::{ruler_marks, RulerMark};
 use crate::theme;
-use crate::timeline_geometry::TimelineGeometry;
 use crate::typography;
 
 const MID_TICK_HEIGHT: f32 = 7.0;
@@ -31,11 +31,41 @@ impl RulerWidget {
         } else {
             self.paint_section_loop(&mut frame, size);
         }
-        draw_marks(&mut frame, self.geometry(), width, top, size.height);
+        let marks = if self.meter.is_default() {
+            ruler_marks(self.geometry(), width)
+        } else {
+            metered_ruler_marks(self.geometry(), width, self.meter)
+        };
+        draw_marks(&mut frame, marks, width, top, size.height);
+        self.paint_signatures(&mut frame, width, top, size.height);
         self.paint_time_selection(&mut frame, width, top, size.height);
         self.paint_play_start(&mut frame, width, top);
         self.paint_playhead(&mut frame, width, size.height);
         frame.into_geometry()
+    }
+
+    /// Each signature change, written at the foot of its bar.
+    fn paint_signatures(&self, frame: &mut canvas::Frame, width: f32, top: f32, bottom: f32) {
+        if self.meter.is_default() {
+            return;
+        }
+        for change in self.meter.changes() {
+            let x = self
+                .geometry()
+                .beat_to_x(self.meter.bar_start(change.bar))
+                .round();
+            if !(-24.0..=width).contains(&x) {
+                continue;
+            }
+            frame.fill_text(canvas::Text {
+                content: change.signature.to_string(),
+                position: Point::new(x + 3.0, (bottom - 10.0).max(top)),
+                color: theme::accent(),
+                size: 8.0.into(),
+                font: typography::PERFORM_TECH,
+                ..canvas::Text::default()
+            });
+        }
     }
 
     fn paint_loop_strip(&self, frame: &mut canvas::Frame, width: f32) {
@@ -148,15 +178,9 @@ fn down_triangle(x: f32, top: f32, size: Size) -> canvas::Path {
 }
 
 /// The number strip's labels and ticks between `top` and `bottom`.
-fn draw_marks(
-    frame: &mut canvas::Frame,
-    geometry: TimelineGeometry,
-    width: f32,
-    top: f32,
-    bottom: f32,
-) {
+fn draw_marks(frame: &mut canvas::Frame, marks: Vec<RulerMark>, width: f32, top: f32, bottom: f32) {
     let tick = theme::ruler_tick();
-    for mark in ruler_marks(geometry, width) {
+    for mark in marks {
         match mark {
             RulerMark::Label { x, text, bar } => {
                 frame.fill_rectangle(

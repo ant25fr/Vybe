@@ -191,8 +191,8 @@ impl AudioEffect for PitchShifterEffect {
             (self.params[param::GRAIN] as f64 * 0.001 * self.sample_rate as f64 * 0.5).max(8.0);
         let voices = &mut self.voices;
         for frame in buffer.chunks_exact_mut(channels) {
-            for (ch, sample) in frame.iter_mut().enumerate() {
-                let voice = &mut voices[ch.min(1)];
+            // Channels past the second stay dry: they have no voice.
+            for (sample, voice) in frame.iter_mut().zip(voices.iter_mut()) {
                 // The lookback is fixed, so a new Grain only changes how often
                 // the grains crossfade; the output does not jump.
                 voice.hop = hop;
@@ -303,5 +303,22 @@ mod tests {
             fx.process(&mut buf, 2);
             assert!(buf.iter().all(|s| s.is_finite()));
         }
+    }
+
+    #[test]
+    fn channels_past_the_second_do_not_disturb_the_first_two() {
+        let signal = |i: usize| (i as f32 * 0.03).sin() * 0.5;
+        let render = |channels: usize| {
+            let mut fx = PitchShifterEffect::new(48_000.0);
+            let mut buf = vec![0.0_f32; 24_000 * channels];
+            for (i, frame) in buf.chunks_exact_mut(channels).enumerate() {
+                frame.fill(signal(i));
+            }
+            fx.process(&mut buf, channels);
+            buf.chunks_exact(channels)
+                .flat_map(|frame| [frame[0], frame[1]])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(render(2), render(4));
     }
 }

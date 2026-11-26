@@ -78,6 +78,7 @@ fn fixture(master: bool, bus: bool) -> Fixture {
         is_bus: false,
         effects: if !master && !bus { chain() } else { vec![] },
         sends: if bus { vec![selected] } else { vec![] },
+        output: None,
         midi_from: None,
     }];
     if bus {
@@ -86,6 +87,7 @@ fn fixture(master: bool, bus: bool) -> Fixture {
             is_bus: true,
             effects: chain(),
             sends: vec![],
+            output: None,
             midi_from: None,
         });
     }
@@ -94,6 +96,7 @@ fn fixture(master: bool, bus: bool) -> Fixture {
         is_bus: true,
         effects: if master { chain() } else { vec![] },
         sends: vec![],
+        output: None,
         midi_from: None,
     });
     commands

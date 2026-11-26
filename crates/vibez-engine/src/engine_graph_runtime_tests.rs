@@ -49,6 +49,7 @@ fn setup(
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        output: None,
         midi_from: None,
     };
     for _ in 0..effects {
@@ -77,6 +78,7 @@ fn setup(
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
         ],

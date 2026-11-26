@@ -28,6 +28,7 @@ impl TestTrack {
         TrackTimelineContent {
             clips: self.clips.clone(),
             note_clips: self.note_clips.clone(),
+            take_lanes: Vec::new(),
             automation: self.automation.clone(),
         }
     }
@@ -92,6 +93,7 @@ impl ArrangementFixture {
     ) -> ArrangementAction {
         let mut project_tracks = ProjectTracksState {
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             tracks: self
                 .tracks
                 .iter()

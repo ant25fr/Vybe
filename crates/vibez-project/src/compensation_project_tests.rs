@@ -24,6 +24,7 @@ fn legacy_json_and_current_container_roundtrip_monitoring_mode_and_host_bypass()
     for enabled in [false, true] {
         let mut project = Project {
             reduced_latency_monitoring: enabled,
+            midi_mappings: Vec::new(),
             ..Default::default()
         };
         let mut track = TrackInfo::new("Bass");
@@ -66,6 +67,7 @@ fn switching_back_to_a_legacy_project_does_not_inherit_the_previous_mode() {
     let enabled: Project = serde_json::from_value(
         serde_json::to_value(Project {
             reduced_latency_monitoring: true,
+            midi_mappings: Vec::new(),
             ..Default::default()
         })
         .unwrap(),

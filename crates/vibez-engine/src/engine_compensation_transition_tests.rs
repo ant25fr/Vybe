@@ -28,6 +28,7 @@ fn running_reduced_monitoring_changes_never_refill_or_drop_constant_audio() {
             } else {
                 vec![]
             },
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -160,6 +161,7 @@ fn reduced_repeat_coordinates_follow_arrange_history_across_loop_wrap() {
             } else {
                 vec![]
             },
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -260,6 +262,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -267,6 +270,7 @@ fn midrun_bypass_and_unbypass_keep_the_current_delayed_audio_without_stale_wet_i
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];

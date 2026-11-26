@@ -4,6 +4,7 @@
 //! sharp (inharmonicity), while an ADSR shapes the amplitude. Each note takes
 //! a free voice, or else the oldest.
 
+use crate::pitch_bend::PitchBend;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::InstrumentKind;
 
@@ -127,6 +128,8 @@ struct Voice {
     /// Stretch) and the linear-interpolation weight of its fraction.
     delay_int: usize,
     delay_frac: f32,
+    /// The unbent loop delay in samples.
+    period: f64,
     /// One-pole low-pass state inside the feedback loop.
     loop_lp: f32,
     env: Envelope,
@@ -142,6 +145,7 @@ impl Default for Voice {
             write: 0,
             delay_int: 1,
             delay_frac: 0.0,
+            period: 1.0,
             loop_lp: 0.0,
             env: Envelope::default(),
             pitch: 0,
@@ -176,15 +180,29 @@ impl Voice {
         }
     }
 
-    fn start(&mut self, pitch: u8, velocity: u8, age: u64, sample_rate: f32, stretch: f32) {
+    /// Retunes the loop to the note's period bent by `semitones`.
+    fn bend(&mut self, semitones: f32) {
+        let longest = (self.ring.len().max(3) - 2) as f64;
+        let delay = (self.period * f64::from(-semitones / 12.0).exp2()).clamp(1.0, longest);
+        self.delay_int = delay.floor() as usize;
+        self.delay_frac = (delay - delay.floor()) as f32;
+    }
+
+    fn start(
+        &mut self,
+        pitch: u8,
+        velocity: u8,
+        age: u64,
+        sample_rate: f32,
+        stretch: f32,
+        bend: f32,
+    ) {
         self.prepare(sample_rate);
         self.pitch = pitch;
         self.age = age;
         self.velocity = velocity as f32 / 127.0;
-        let delay = (f64::from(sample_rate) / f64::from(frequency(pitch)) + f64::from(stretch))
-            .clamp(1.0, (self.ring.len() - 2) as f64);
-        self.delay_int = delay.floor() as usize;
-        self.delay_frac = (delay - delay.floor()) as f32;
+        self.period = f64::from(sample_rate) / f64::from(frequency(pitch)) + f64::from(stretch);
+        self.bend(bend);
         // The pluck: a burst of noise shaped by the velocity. Only the loop's
         // own length is excited (the tail of the ring, which is what the first
         // reads wrap round to); the rest is written before it is ever read.
@@ -240,6 +258,9 @@ pub struct PluckedString {
     smoothing: f32,
     started: bool,
     age: u64,
+    bend: PitchBend,
+    /// The bend the voices are tuned to.
+    tuned: f32,
 }
 
 impl PluckedString {
@@ -261,6 +282,8 @@ impl PluckedString {
             smoothing: 1.0 - (-1.0 / (SMOOTHING_SECONDS * sample_rate)).exp(),
             started: false,
             age: 0,
+            bend: PitchBend::new(sample_rate),
+            tuned: 0.0,
         };
         synth.retime();
         synth
@@ -312,7 +335,14 @@ impl PluckedString {
         let count = (self.params[param::VOICES] as usize).clamp(1, MAX_VOICES);
         let index = crate::poly::choose(&self.voices[..count], pitch);
         let stretch = self.params[param::STRETCH];
-        self.voices[index].start(pitch, velocity, self.age, self.sample_rate, stretch);
+        self.voices[index].start(
+            pitch,
+            velocity,
+            self.age,
+            self.sample_rate,
+            stretch,
+            self.tuned,
+        );
     }
 
     pub fn note_off(&mut self, pitch: u8) {
@@ -332,6 +362,13 @@ impl PluckedString {
                 self.volume = target;
             }
             self.gain = 10f32.powf(self.volume / 20.0);
+        }
+        let bend = self.bend.tick();
+        if bend != self.tuned {
+            self.tuned = bend;
+            for voice in &mut self.voices {
+                voice.bend(bend);
+            }
         }
         let k = 1.0 - 0.99 * self.params[param::DAMPING].clamp(0.0, 1.0);
         let velocity_sense = self.params[param::VELOCITY];
@@ -402,6 +439,15 @@ impl crate::Instrument for PluckedString {
 
     fn note_off(&mut self, pitch: u8) {
         self.note_off(pitch);
+    }
+
+    fn set_pitch_bend(&mut self, semitones: f32) {
+        self.bend.set(semitones);
+        // A silent string takes the bend at once, ready for the next pluck.
+        if !self.voices.iter().any(Voice::active) {
+            self.bend.snap();
+            self.tuned = self.bend.tick();
+        }
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {

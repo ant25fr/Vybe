@@ -10,6 +10,7 @@ use vibez_core::perform::TrackMuteQuantization;
 
 fn resumed_clip(id: ClipId, value: f32) -> EngineClip {
     EngineClip {
+        audition: false,
         id,
         audio: Arc::new(DecodedAudio {
             channels: vec![vec![value; 1024]],

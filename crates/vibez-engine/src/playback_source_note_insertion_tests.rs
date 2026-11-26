@@ -196,6 +196,7 @@ fn public_add_note_clip_at_exhausted_capacity_preserves_schedule_and_voice_witho
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -389,6 +390,7 @@ fn pending_note_clip_growth_preserves_current_duplicate_edits_and_voice_release_
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -751,6 +753,7 @@ pub(crate) fn verify_prepared_note_storage_growth(
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -1031,6 +1034,7 @@ fn prepare_pending_home(home: PendingHome) -> PendingHomeFixture {
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();

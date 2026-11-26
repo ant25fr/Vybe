@@ -127,6 +127,30 @@ impl App {
     }
 
     pub(super) fn finalize_bounce(&mut self, outcome: crate::message::BounceOutcome) {
+        // A freeze or bounce in place is one undo step with what follows,
+        // the removal of a replaced track included.
+        let in_place = self.pending_track_render.take();
+        let transaction = in_place.is_some() && self.begin_project_transaction();
+        self.place_bounce(outcome, in_place);
+        if transaction {
+            self.commit_project_transaction();
+        }
+    }
+
+    fn place_bounce(
+        &mut self,
+        outcome: crate::message::BounceOutcome,
+        in_place: Option<super::track_freeze::TrackRender>,
+    ) {
+        if in_place.is_some() {
+            let snapshot = self.state.project_snapshot();
+            self.state.project.history.push_edit(snapshot, None);
+        }
+        // Freezing keeps the track: the audio goes onto it.
+        if let Some(render) = in_place.filter(|render| !render.replace) {
+            self.finish_freeze(render.source, outcome);
+            return;
+        }
         let Some(track_id) = ({
             let mut engine = crate::domains::EngineTx(&mut self.cmd_tx);
             Arc::make_mut(&mut self.state.project_tracks).add_numbered_track(
@@ -204,6 +228,9 @@ impl App {
             outcome.clip_name,
             outcome.path.display()
         );
+        if let Some(render) = in_place {
+            self.finish_track_render(render, track_id);
+        }
     }
 
     pub(super) fn handle_bounce_clip_to_audio(

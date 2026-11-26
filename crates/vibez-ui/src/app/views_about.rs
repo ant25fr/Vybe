@@ -6,27 +6,37 @@
 //! Escape key and a menu selection all retire the dialog through the single
 //! path in `menu_lifecycle`.
 
-use iced::widget::{button, center, column, container, horizontal_space, mouse_area, row, text};
+use iced::widget::{
+    button, canvas, center, column, container, horizontal_space, mouse_area, row, stack, text,
+};
 use iced::{Element, Length, Theme};
 
 use crate::about;
 use crate::icons;
 use crate::message::{MenuOverlay, Message};
 use crate::theme as th;
+use crate::widgets::about_banner::{AboutBanner, ACCENT, GROUND, SIZE};
 
 use super::*;
+
+const DIALOG_W: f32 = 640.0;
+const BANNER_H: f32 = DIALOG_W * SIZE.height / SIZE.width;
+// The rest of the dialog continues the banner's dark ground, whatever the
+// theme.
+const INK: iced::Color = iced::Color::from_rgb(0.90, 0.91, 0.92);
+const INK_DIM: iced::Color = iced::Color::from_rgb(0.69, 0.69, 0.71);
 
 impl App {
     pub(super) fn view_about_modal(&self) -> Element<'_, Message> {
         let close = Message::dismiss_menu(MenuOverlay::About);
 
-        let close_btn = button(icons::icon(icons::X).size(14).color(th::text_dim()))
+        let close_btn = button(icons::icon(icons::X).size(14).color(INK))
             .on_press(close)
             .padding([4, 8])
             .style(|_theme: &Theme, status| {
                 let bg = match status {
                     button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
+                        Some(iced::Color::from_rgb(0.16, 0.17, 0.19).into())
                     }
                     _ => None,
                 };
@@ -38,28 +48,28 @@ impl App {
                 }
             });
 
-        let header = row![
-            text(about::APP_NAME).size(22).color(th::accent()),
-            horizontal_space(),
-            close_btn
-        ]
-        .align_y(iced::Alignment::Center);
+        // The banner carries the name; the close button sits over it.
+        let banner = stack![
+            canvas(AboutBanner)
+                .width(Length::Fixed(DIALOG_W))
+                .height(Length::Fixed(BANNER_H)),
+            container(row![horizontal_space(), close_btn])
+                .padding(10)
+                .width(Length::Fixed(DIALOG_W)),
+        ];
 
-        let version = text(about::build_version_line()).size(13).color(th::text());
+        let version = text(about::build_version_line()).size(13).color(INK);
         let license = text(format!("Licensed under {}", about::LICENSE))
             .size(12)
-            .color(th::text_dim());
+            .color(INK_DIM);
 
         // Rendered as label plus URL so the destination is visible before the
         // click; a browser handoff cannot be previewed or undone.
         let link_btn = |label: &'static str, url: &'static str| {
             button(
                 row![
-                    text(label)
-                        .size(12)
-                        .color(th::text())
-                        .width(Length::Fixed(84.0)),
-                    text(url).size(11).color(th::accent()),
+                    text(label).size(12).color(INK).width(Length::Fixed(84.0)),
+                    text(url).size(11).color(ACCENT),
                 ]
                 .spacing(8)
                 .align_y(iced::Alignment::Center),
@@ -70,7 +80,7 @@ impl App {
             .style(|_theme: &Theme, status| {
                 let bg = match status {
                     button::Status::Hovered | button::Status::Pressed => {
-                        Some(th::bg_hover().into())
+                        Some(iced::Color::from_rgb(0.16, 0.17, 0.19).into())
                     }
                     _ => None,
                 };
@@ -98,17 +108,20 @@ impl App {
                 ..Default::default()
             });
 
-        let content = column![header, version, license, divider, links]
+        let details = column![version, license, divider, links]
             .spacing(10)
-            .padding(20)
-            .width(Length::Fixed(460.0));
+            .padding([4, 20]);
+        let content = column![banner, details, iced::widget::Space::with_height(12)]
+            .spacing(6)
+            .width(Length::Fixed(DIALOG_W));
 
         let dialog = container(content).style(|_theme: &Theme| container::Style {
-            background: Some(th::bg_surface().into()),
+            background: Some(GROUND.into()),
             border: iced::Border {
                 color: th::border(),
                 width: 1.0,
-                radius: 8.0.into(),
+                // The banner's own rounding.
+                radius: 15.0.into(),
             },
             ..Default::default()
         });

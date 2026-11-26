@@ -65,6 +65,7 @@ fn render(
         }],
     });
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: ClipId::new(),
         track_id: main.id,
@@ -113,6 +114,7 @@ fn render(
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: Default::default(),
+        scale: None,
         color_index: None,
     };
     let detector_id = detector.id;

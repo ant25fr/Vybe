@@ -61,6 +61,7 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
     let audio_owner = Arc::downgrade(&audio);
     let clip_id = ClipId::new();
     let clip = EngineClip {
+        audition: false,
         id: clip_id,
         audio,
         position: 0,
@@ -90,6 +91,7 @@ fn repeated_small_hints_keep_current_duplicate_lanes_and_live_controls_ahead_of_
         is_bus: id.is_master(),
         sends: vec![],
         effects: vec![],
+        output: None,
         midi_from: None,
     });
     let mut routing = crate::routing::PreparedRouting::prepare(&channels, 64).unwrap();

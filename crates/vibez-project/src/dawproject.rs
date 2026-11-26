@@ -166,7 +166,7 @@ pub fn export(
         bus_channels.insert(bus.id, ids.next());
     }
 
-    let mut channel_xml = |track: &TrackInfo, channel_id: &str, role: &str, dest: Option<&str>| {
+    let channel_xml = |track: &TrackInfo, channel_id: &str, role: &str, dest: Option<&str>| {
         let mut s = String::new();
         let _ = write!(
             s,
@@ -181,11 +181,34 @@ pub fn export(
             s,
             "<Volume max=\"2\" min=\"0\" unit=\"linear\" value=\"{}\"/>\
              <Pan max=\"1\" min=\"0\" unit=\"normalized\" value=\"{}\"/>\
-             <Mute value=\"{}\"/></Channel>",
+             <Mute value=\"{}\"/>",
             track.gain.clamp(0.0, 2.0),
             track.pan.clamp(0.0, 1.0),
             track.mute
         );
+        let sends: Vec<_> = track
+            .sends
+            .iter()
+            .filter_map(|(bus, amount)| Some((bus, bus_channels.get(bus)?, amount)))
+            .collect();
+        if !sends.is_empty() {
+            s.push_str("<Sends>");
+            for (bus, destination, amount) in sends {
+                let kind = if track.pre_fader_sends.contains(bus) {
+                    "pre"
+                } else {
+                    "post"
+                };
+                let _ = write!(
+                    s,
+                    "<Send destination=\"{destination}\" type=\"{kind}\">\
+                     <Volume max=\"1\" min=\"0\" unit=\"linear\" value=\"{}\"/></Send>",
+                    amount.clamp(0.0, 1.0)
+                );
+            }
+            s.push_str("</Sends>");
+        }
+        s.push_str("</Channel>");
         s
     };
 
@@ -201,7 +224,18 @@ pub fn export(
             "<Track contentType=\"{content}\" loaded=\"true\" id=\"{}\" name=\"{}\" color=\"{color}\">{}</Track>",
             track_ids[&track.id],
             escape(&track.name),
-            channel_xml(track, channel_id, "regular", Some(&master_id)),
+            // A member of a group plays into the group's channel.
+            channel_xml(
+                track,
+                channel_id,
+                "regular",
+                Some(
+                    track
+                        .output
+                        .and_then(|group| bus_channels.get(&group))
+                        .unwrap_or(&master_id)
+                ),
+            ),
         );
     }
     for bus in &project.buses {
@@ -211,7 +245,17 @@ pub fn export(
             "<Track contentType=\"audio\" loaded=\"true\" id=\"{}\" name=\"{}\" color=\"{color}\">{}</Track>",
             bus_ids[&bus.id],
             escape(&bus.name),
-            channel_xml(bus, &bus_channels[&bus.id], "effect", Some(&master_id)),
+            channel_xml(
+                bus,
+                &bus_channels[&bus.id],
+                if bus.is_group { "submix" } else { "effect" },
+                // A nested group plays into the group around it.
+                Some(
+                    bus.output
+                        .and_then(|group| bus_channels.get(&group))
+                        .unwrap_or(&master_id)
+                ),
+            ),
         );
     }
     if let Some(master) = &project.master {
@@ -233,7 +277,12 @@ pub fn export(
     let mut arrangement = String::new();
     for track in &project.tracks {
         let mut clips = String::new();
-        for clip in project.arrange.note_clips.iter().filter(|c| c.track_id == track.id) {
+        for clip in project
+            .arrange
+            .note_clips
+            .iter()
+            .filter(|c| c.track_id == track.id)
+        {
             let _ = write!(
                 clips,
                 "<Clip time=\"{}\" duration=\"{}\" name=\"{}\"",
@@ -259,7 +308,13 @@ pub fn export(
             }
             clips.push_str("</Notes></Clip>");
         }
-        for clip in project.arrange.clips.iter().filter(|c| c.track_id == track.id) {
+        // Takes stay in the project: only the comp is exported.
+        for clip in project
+            .arrange
+            .clips
+            .iter()
+            .filter(|c| c.track_id == track.id && c.take_lane.is_none())
+        {
             let Some(source) = clip.resolved_source() else {
                 skipped.push(clip.name.clone());
                 continue;
@@ -287,17 +342,27 @@ pub fn export(
                 continue;
             };
             let seconds = |samples: u64| samples as f64 / f64::from(project.sample_rate.max(1));
+            let loop_attributes = if clip.loop_enabled && clip.loop_end > clip.loop_start {
+                format!(
+                    " loopStart=\"{}\" loopEnd=\"{}\"",
+                    seconds(clip.loop_start),
+                    seconds(clip.loop_end)
+                )
+            } else {
+                String::new()
+            };
             let _ = write!(
                 clips,
-                "<Clip time=\"{}\" duration=\"{}\" name=\"{}\" playStart=\"{}\">\
-                 <Clips><Clip time=\"0\" duration=\"{}\" contentTimeUnit=\"seconds\">\
+                "<Clip time=\"{}\" duration=\"{}\" name=\"{}\">\
+                 <Clips><Clip time=\"0\" duration=\"{}\" contentTimeUnit=\"seconds\" playStart=\"{}\"{loop_attributes}>\
                  <Audio algorithm=\"raw\" channels=\"{channels}\" duration=\"{}\" sampleRate=\"{rate}\">\
                  <File path=\"{}\"/></Audio></Clip></Clips></Clip>",
                 clip.position as f64 * bps,
                 clip.duration as f64 * bps,
                 escape(&clip.name),
-                seconds(clip.source_offset),
-                frames as f64 / f64::from(rate),
+                // The window onto the file, in the beats of the timeline.
+                clip.duration as f64 * bps,
+                seconds(clip.start_marker.unwrap_or(clip.source_offset)),
                 frames as f64 / f64::from(rate),
                 escape(&path),
             );
@@ -315,11 +380,14 @@ pub fn export(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
          <Project version=\"1.0\"><Application name=\"Vibez\" version=\"{}\"/>\
          <Transport><Tempo max=\"999\" min=\"20\" unit=\"bpm\" value=\"{}\"/>\
-         <TimeSignature denominator=\"4\" numerator=\"4\"/></Transport>\
+         <TimeSignature denominator=\"{}\" numerator=\"{}\"/></Transport>\
          <Structure>{structure}</Structure>\
          <Arrangement><Lanes timeUnit=\"beats\">{arrangement}</Lanes></Arrangement></Project>",
         env!("CARGO_PKG_VERSION"),
         project.bpm,
+        // The format's transport holds one signature: the first.
+        project.time_signatures.signature_at_bar(0).denominator(),
+        project.time_signatures.signature_at_bar(0).numerator(),
     );
     let metadata = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>\n\
@@ -357,7 +425,13 @@ fn sanitize(name: &str) -> String {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "audio".into());
     stem.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -421,7 +495,9 @@ fn parse_xml(text: &str) -> Result<XmlNode, DawProjectError> {
                 stack.last_mut().expect("root").children.push(node);
             }
             Event::End(_) => {
-                let node = stack.pop().ok_or(DawProjectError::Xml("unbalanced tags".into()))?;
+                let node = stack
+                    .pop()
+                    .ok_or(DawProjectError::Xml("unbalanced tags".into()))?;
                 stack
                     .last_mut()
                     .ok_or(DawProjectError::Xml("unbalanced tags".into()))?
@@ -489,15 +565,6 @@ pub fn import(
     if root.name != "Project" {
         return Err(DawProjectError::Missing("Project element"));
     }
-    let title = archive.by_name("metadata.xml").ok().and_then(|mut f| {
-        let mut text = String::new();
-        f.read_to_string(&mut text).ok()?;
-        parse_xml(&text)
-            .ok()?
-            .child("Title")
-            .and_then(|t| t.children.first().map(|c| c.name.clone()))
-    });
-    let _ = title;
 
     let mut project = Project {
         name: path
@@ -526,18 +593,24 @@ pub fn import(
     if let Some(structure) = root.child("Structure") {
         walk(structure, &mut tracks);
     }
+    // Channel ids of the returns, and the sends to resolve once all are read.
+    let mut bus_by_channel: HashMap<String, TrackId> = HashMap::new();
+    let mut pending_sends: Vec<(TrackId, String, f32, bool)> = Vec::new();
+    // The channel each track plays into, to find its group.
+    let mut destinations: Vec<(TrackId, String)> = Vec::new();
     for node in tracks {
         let channel = node.child("Channel");
         let role = channel.and_then(|c| c.attr("role")).unwrap_or("regular");
         if role == "master" {
             if let Some(channel) = channel {
                 let mut master = TrackInfo::new("Master");
-                master.gain = value_of(channel.child("Volume"), 1.0) as f32;
+                master.gain = value_of(channel.child("Volume"), 1.0).clamp(0.0, 2.0) as f32;
+                master.pan = value_of(channel.child("Pan"), 0.5).clamp(0.0, 1.0) as f32;
                 project.master = Some(master);
             }
             continue;
         }
-        if role == "effect" || channel.is_none() {
+        if channel.is_none() {
             continue;
         }
         let mut track = TrackInfo::new(node.attr("name").unwrap_or("Track"));
@@ -559,6 +632,29 @@ pub fn import(
         if let Some(color) = node.attr("color") {
             track.color_index = parse_color(color);
         }
+        if let Some(channel) = channel {
+            for send in channel.child("Sends").iter().flat_map(|s| s.all("Send")) {
+                if let Some(destination) = send.attr("destination") {
+                    pending_sends.push((
+                        track.id,
+                        destination.to_string(),
+                        value_of(send.child("Volume"), 0.0).clamp(0.0, 1.0) as f32,
+                        send.attr("type") == Some("pre"),
+                    ));
+                }
+            }
+        }
+        if let Some(destination) = channel.and_then(|c| c.attr("destination")) {
+            destinations.push((track.id, destination.to_string()));
+        }
+        if role == "effect" || role == "submix" {
+            track.is_group = role == "submix";
+            if let Some(id) = channel.and_then(|c| c.attr("id")) {
+                bus_by_channel.insert(id.to_string(), track.id);
+            }
+            project.buses.push(track);
+            continue;
+        }
         if let Some(id) = node.attr("id") {
             by_id.insert(id.to_string(), track.id);
         }
@@ -567,34 +663,97 @@ pub fn import(
     if project.tracks.is_empty() {
         return Err(DawProjectError::Missing("tracks"));
     }
+    for (member, destination) in destinations {
+        let Some(&group) = bus_by_channel.get(&destination) else {
+            continue;
+        };
+        if !project
+            .buses
+            .iter()
+            .any(|bus| bus.id == group && bus.is_group)
+        {
+            continue;
+        }
+        if let Some(channel) = project
+            .tracks
+            .iter_mut()
+            .chain(project.buses.iter_mut().filter(|bus| bus.is_group))
+            .find(|channel| channel.id == member && channel.id != group)
+        {
+            channel.output = Some(group);
+        }
+    }
+    for (from, destination, amount, pre_fader) in pending_sends {
+        let Some(&bus) = bus_by_channel.get(&destination) else {
+            continue;
+        };
+        // A file whose returns feed each other in a circle loses the send
+        // that would close it.
+        let mut pending = vec![bus];
+        let mut seen = Vec::new();
+        let mut loops = false;
+        while let Some(id) = pending.pop() {
+            loops |= id == from;
+            if !loops && !seen.contains(&id) {
+                seen.push(id);
+                if let Some(next) = project.buses.iter().find(|b| b.id == id) {
+                    pending.extend(next.sends.iter().map(|(target, _)| *target));
+                }
+            }
+        }
+        if loops {
+            continue;
+        }
+        if let Some(channel) = project
+            .tracks
+            .iter_mut()
+            .chain(project.buses.iter_mut())
+            .find(|channel| channel.id == from)
+        {
+            channel.sends.push((bus, amount));
+            if pre_fader {
+                channel.pre_fader_sends.push(bus);
+            }
+        }
+    }
 
     let seconds_to_samples = |s: f64| (s.max(0.0) * f64::from(sample_rate)).round() as u64;
     let beats_to_samples = |b: f64| seconds_to_samples(b * 60.0 / project.bpm);
     let mut missing = Vec::new();
     let mut staged: HashMap<String, Option<MediaSourceRef>> = HashMap::new();
 
-    fn lanes<'a>(node: &'a XmlNode, out: &mut Vec<&'a XmlNode>) {
+    // Each track's lane with whether its times are in seconds, a unit lanes
+    // inherit from the ones around them.
+    fn lanes<'a>(node: &'a XmlNode, seconds: bool, out: &mut Vec<(&'a XmlNode, bool)>) {
         for lane in node.all("Lanes") {
+            let seconds = lane
+                .attr("timeUnit")
+                .map_or(seconds, |unit| unit == "seconds");
             if lane.attr("track").is_some() {
-                out.push(lane);
+                out.push((lane, seconds));
             }
-            lanes(lane, out);
+            lanes(lane, seconds, out);
         }
     }
     let mut track_lanes = Vec::new();
     if let Some(arrangement) = root.child("Arrangement") {
-        lanes(arrangement, &mut track_lanes);
+        lanes(arrangement, false, &mut track_lanes);
     }
-    for lane in track_lanes {
+    let beats_per_second = project.bpm / 60.0;
+    for (lane, lane_seconds) in track_lanes {
         let Some(&track_id) = lane.attr("track").and_then(|id| by_id.get(id)) else {
             continue;
         };
         let Some(clips) = lane.child("Clips") else {
             continue;
         };
+        let in_seconds = clips
+            .attr("timeUnit")
+            .map_or(lane_seconds, |unit| unit == "seconds");
+        let to_beats = if in_seconds { beats_per_second } else { 1.0 };
         for clip in clips.all("Clip") {
-            let time = clip.num("time").unwrap_or(0.0);
-            let duration = clip.num("duration").unwrap_or(0.0);
+            let time = clip.num("time").unwrap_or(0.0) * to_beats;
+            let duration = clip.num("duration").unwrap_or(0.0) * to_beats;
             let name = clip.attr("name").unwrap_or("Clip").to_string();
             if let Some(notes) = clip.child("Notes") {
                 let notes: Vec<MidiNote> = notes
@@ -622,16 +781,27 @@ pub fn import(
                     loop_start_beats: clip.num("loopStart").unwrap_or(0.0),
                     loop_end_beats: clip.num("loopEnd").unwrap_or(0.0),
                     groove_grid: Default::default(),
+                    scale: None,
                     color_index: None,
                 });
                 continue;
             }
             // Audio: directly in the clip or in a nested clip.
-            let audio = clip.child("Audio").or_else(|| {
-                clip.child("Clips")
-                    .and_then(|c| c.all("Clip").find_map(|inner| inner.child("Audio")))
-            });
-            let Some(file) = audio.and_then(|a| a.child("File")).and_then(|f| f.attr("path"))
+            // `window` is the clip that holds the audio, whose content unit
+            // its `playStart` is written in.
+            let (window, audio) = match clip.child("Audio") {
+                Some(audio) => (clip, Some(audio)),
+                None => clip
+                    .child("Clips")
+                    .and_then(|c| {
+                        c.all("Clip")
+                            .find_map(|inner| Some((inner, Some(inner.child("Audio")?))))
+                    })
+                    .unwrap_or((clip, None)),
+            };
+            let Some(file) = audio
+                .and_then(|a| a.child("File"))
+                .and_then(|f| f.attr("path"))
             else {
                 continue;
             };
@@ -652,13 +822,49 @@ pub fn import(
                 missing.push(name);
                 continue;
             };
-            let play_start = clip.num("playStart").unwrap_or(0.0);
+            let offset_of = |node: &XmlNode| {
+                let start = node.num("playStart")?;
+                // Audio content counts in seconds unless it says beats.
+                let beats = node.attr("contentTimeUnit") == Some("beats");
+                Some(if beats {
+                    start / beats_per_second
+                } else {
+                    start
+                })
+            };
+            let play_start = offset_of(window).or_else(|| offset_of(clip)).unwrap_or(0.0);
+            let in_beats = window.attr("contentTimeUnit") == Some("beats");
+            let content_seconds = |key: &str| {
+                let value = window.num(key)?;
+                Some(if in_beats {
+                    value / beats_per_second
+                } else {
+                    value
+                })
+            };
+            let region = content_seconds("loopStart").unwrap_or(0.0).max(0.0);
+            let looped = content_seconds("loopEnd").filter(|end| *end > region);
+            let start = seconds_to_samples(play_start);
+            let (loop_start, loop_end) = looped.map_or((0, 0), |end| {
+                (seconds_to_samples(region), seconds_to_samples(end))
+            });
+            // A looped clip's window opens at its loop or its start,
+            // whichever comes first.
+            let source_offset = if looped.is_some() {
+                start.min(loop_start)
+            } else {
+                start
+            };
             let value = serde_json::json!({
                 "id": ClipId::new(),
                 "track_id": track_id,
                 "name": name,
                 "position": beats_to_samples(time),
-                "source_offset": seconds_to_samples(play_start),
+                "source_offset": source_offset,
+                "start_marker": (start != source_offset).then_some(start),
+                "loop_enabled": looped.is_some(),
+                "loop_start": loop_start,
+                "loop_end": loop_end,
                 "duration": beats_to_samples(duration),
                 "source": source,
             });
@@ -748,6 +954,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: Default::default(),
+            scale: None,
             color_index: None,
         });
         let clip = serde_json::from_value::<ClipInfo>(serde_json::json!({
@@ -770,7 +977,9 @@ mod tests {
         let imported = import(&out, 48_000, |name, bytes| {
             assert!(name.starts_with("audio/"));
             assert_eq!(wav_format(bytes), Some((48_000, 2, 48_000)));
-            Some(MediaSourceRef::LocalFile { path: sample.clone() })
+            Some(MediaSourceRef::LocalFile {
+                path: sample.clone(),
+            })
         })
         .unwrap();
         let back = imported.project;
@@ -789,6 +998,148 @@ mod tests {
         // The position and length survive the trip through beats.
         assert_eq!(back.arrange.clips[0].position, 96_000);
         assert_eq!(back.arrange.clips[0].duration, 48_000);
+    }
+
+    #[test]
+    fn a_trimmed_audio_clip_keeps_its_source_offset() {
+        let dir = tempfile::tempdir().unwrap();
+        let sample = dir.path().join("loop.wav");
+        std::fs::write(&sample, wav(48_000)).unwrap();
+        let track = TrackInfo::new("Loop");
+        let mut project = Project {
+            bpm: 100.0,
+            sample_rate: 48_000,
+            ..Project::default()
+        };
+        let clip = serde_json::from_value::<ClipInfo>(serde_json::json!({
+            "id": ClipId::new(),
+            "track_id": track.id,
+            "name": "Tail",
+            "position": 0,
+            "source_offset": 12_000,
+            "duration": 24_000,
+            "source": MediaSourceRef::LocalFile { path: sample.clone() },
+        }))
+        .unwrap();
+        project.arrange.clips.push(clip);
+        project.tracks = vec![track];
+        let out = dir.path().join("trim.dawproject");
+        export(&project, None, &out).unwrap();
+
+        let mut xml = String::new();
+        zip::ZipArchive::new(std::fs::File::open(&out).unwrap())
+            .unwrap()
+            .by_name("project.xml")
+            .unwrap()
+            .read_to_string(&mut xml)
+            .unwrap();
+        // The offset, 0.25 s, sits on the clip whose content is in seconds.
+        assert!(
+            xml.contains("contentTimeUnit=\"seconds\" playStart=\"0.25\""),
+            "{xml}"
+        );
+
+        let back = import(&out, 48_000, |_, _| {
+            Some(MediaSourceRef::LocalFile {
+                path: sample.clone(),
+            })
+        })
+        .unwrap()
+        .project;
+        assert_eq!(back.arrange.clips[0].source_offset, 12_000);
+        assert_eq!(back.arrange.clips[0].duration, 24_000);
+    }
+
+    #[test]
+    fn returns_sends_master_pan_and_audio_loops_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let sample = dir.path().join("loop.wav");
+        std::fs::write(&sample, wav(48_000)).unwrap();
+        let first = TrackInfo::new("A Return");
+        let mut second = TrackInfo::new("B Return");
+        second.gain = 0.5;
+        let mut track = TrackInfo::new("Loop");
+        track.sends = vec![(first.id, 0.25)];
+        track.pre_fader_sends = vec![first.id];
+        let mut first = first;
+        first.sends = vec![(second.id, 0.75)];
+        let mut master = TrackInfo::new("Master");
+        master.pan = 0.25;
+        let mut project = Project {
+            bpm: 120.0,
+            sample_rate: 48_000,
+            ..Project::default()
+        };
+        let clip = serde_json::from_value::<ClipInfo>(serde_json::json!({
+            "id": ClipId::new(),
+            "track_id": track.id,
+            "name": "Beat",
+            "position": 0,
+            "source_offset": 0,
+            "start_marker": 12_000,
+            "duration": 96_000,
+            "loop_enabled": true,
+            "loop_start": 6_000,
+            "loop_end": 36_000,
+            "source": MediaSourceRef::LocalFile { path: sample.clone() },
+        }))
+        .unwrap();
+        project.arrange.clips.push(clip);
+        project.tracks = vec![track];
+        project.buses = vec![first, second];
+        project.master = Some(master);
+        let out = dir.path().join("mix.dawproject");
+        export(&project, None, &out).unwrap();
+        let back = import(&out, 48_000, |_, _| {
+            Some(MediaSourceRef::LocalFile {
+                path: sample.clone(),
+            })
+        })
+        .unwrap()
+        .project;
+
+        assert_eq!(back.tracks.len(), 1);
+        assert_eq!(back.buses.len(), 2);
+        let (first, second) = (&back.buses[0], &back.buses[1]);
+        assert_eq!(first.name, "A Return");
+        assert!((second.gain - 0.5).abs() < 1e-6);
+        assert_eq!(back.tracks[0].sends, [(first.id, 0.25)]);
+        assert_eq!(back.tracks[0].pre_fader_sends, [first.id]);
+        assert_eq!(first.sends, [(second.id, 0.75)]);
+        assert!(first.pre_fader_sends.is_empty());
+        assert!((back.master.as_ref().unwrap().pan - 0.25).abs() < 1e-6);
+        let clip = &back.arrange.clips[0];
+        assert!(clip.loop_enabled);
+        assert_eq!((clip.loop_start, clip.loop_end), (6_000, 36_000));
+        assert_eq!(clip.source_offset, 6_000);
+        assert_eq!(clip.start_marker, Some(12_000));
+    }
+
+    #[test]
+    fn groups_keep_their_members() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut group = TrackInfo::new("Drums");
+        group.is_group = true;
+        let mut inner = TrackInfo::new("Kit");
+        inner.is_group = true;
+        inner.output = Some(group.id);
+        let ret = TrackInfo::new("A Return");
+        let mut member = TrackInfo::new("Kick");
+        member.output = Some(group.id);
+        let outside = TrackInfo::new("Bass");
+        let project = Project {
+            tracks: vec![member, outside],
+            buses: vec![group, ret, inner],
+            ..Project::default()
+        };
+        let out = dir.path().join("groups.dawproject");
+        export(&project, None, &out).unwrap();
+        let back = import(&out, 48_000, |_, _| None).unwrap().project;
+        let groups: Vec<_> = back.buses.iter().map(|bus| bus.is_group).collect();
+        assert_eq!(groups, [true, false, true]);
+        assert_eq!(back.buses[2].output, Some(back.buses[0].id));
+        assert_eq!(back.tracks[0].output, Some(back.buses[0].id));
+        assert_eq!(back.tracks[1].output, None);
     }
 
     #[test]

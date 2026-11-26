@@ -128,7 +128,12 @@ mod linux {
     }
 
     fn stmt(code: u16, k: u32) -> libc::sock_filter {
-        libc::sock_filter { code, jt: 0, jf: 0, k }
+        libc::sock_filter {
+            code,
+            jt: 0,
+            jf: 0,
+            k,
+        }
     }
 
     fn jump(code: u16, k: u32, jt: u8, jf: u8) -> libc::sock_filter {

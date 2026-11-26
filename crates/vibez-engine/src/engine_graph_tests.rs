@@ -11,6 +11,7 @@ fn channel(id: TrackId) -> RoutingChannel {
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        output: None,
         midi_from: None,
     }
 }
@@ -736,6 +737,7 @@ fn clip_mute_points_follow_nonzero_clip_position_inside_a_render_block() {
     });
     let source = PreparedPlaybackSource::new(
         vec![EngineClip {
+            audition: false,
             id: clip_id,
             audio: Arc::new(DecodedAudio {
                 channels: vec![vec![1.0; 256]],

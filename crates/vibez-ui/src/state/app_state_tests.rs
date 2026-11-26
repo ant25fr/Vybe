@@ -113,6 +113,7 @@ fn rename_note_clip() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     });
     if let Some(t) = Arc::make_mut(&mut state.arrangement.timeline).get_mut(tid) {
@@ -302,6 +303,7 @@ fn the_clip_count_covers_listed_tracks_only() {
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
         groove_grid: Default::default(),
+        scale: None,
         color_index: None,
     };
     let (drums, bass, removed) = (TrackId::new(), TrackId::new(), TrackId::new());
@@ -314,4 +316,33 @@ fn the_clip_count_covers_listed_tracks_only() {
     content.ensure(removed).note_clips.push(note_clip());
 
     assert_eq!(content.clip_count([drums, bass]), 3);
+}
+
+#[test]
+fn groups_move_as_one_block() {
+    let mut state = make_state_with(make_two_tracks());
+    let mut group = ProjectTrack::new(TrackId::new(), "Group 1".into(), 0);
+    group.is_group = true;
+    let group_id = group.id;
+    let project = Arc::make_mut(&mut state.project_tracks);
+    project
+        .tracks
+        .push(ProjectTrack::new(TrackId::new(), "Track 3".into(), 0));
+    project.buses.push(group);
+    let ids: Vec<_> = project.tracks.iter().map(|t| t.id).collect();
+    project.tracks[0].output = Some(group_id);
+    project.tracks[1].output = Some(group_id);
+    let order =
+        |p: &crate::state::ProjectTracksState| p.tracks.iter().map(|t| t.id).collect::<Vec<_>>();
+
+    // The lone track passes the whole group.
+    assert!(project.move_among_siblings(ids[2], true));
+    assert_eq!(order(project), [ids[2], ids[0], ids[1]]);
+    // A member stays inside its group.
+    assert!(!project.move_among_siblings(ids[0], true));
+    assert!(project.move_among_siblings(ids[0], false));
+    assert_eq!(order(project), [ids[2], ids[1], ids[0]]);
+    // The group moves with its tracks.
+    assert!(project.move_among_siblings(group_id, true));
+    assert_eq!(order(project), [ids[1], ids[0], ids[2]]);
 }

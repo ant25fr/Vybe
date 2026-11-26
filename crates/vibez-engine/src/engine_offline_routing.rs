@@ -34,11 +34,14 @@ impl AudioEngine {
         engine
     }
 
+    /// Render `output` from timeline `position`. `slice` gives the positions
+    /// covered and the tempo when the tempo is automated.
     pub(crate) fn render_offline_routing_segment(
         &mut self,
         position: u64,
         output: &mut [f32],
         selected_output: Option<(TrackId, &mut [f32])>,
+        slice: Option<(usize, f64)>,
     ) {
         output.fill(0.0);
         self.validate_compensation();
@@ -52,6 +55,8 @@ impl AudioEngine {
         if !self.compensation_plan.applied_plan_is_valid() {
             return;
         }
+        self.tempo_slice =
+            slice.map(|(grid_frames, bpm)| super::tempo::TempoSlice { grid_frames, bpm });
         self.render_routing_graph(
             output,
             render_paths::MultitrackRenderBlock {
@@ -66,6 +71,33 @@ impl AudioEngine {
             false,
             false,
         );
+        self.tempo_slice = None;
+    }
+
+    /// Collect the post-fader signal of `channels` from the segments
+    /// rendered next, with room for `frames` of stereo each.
+    pub(crate) fn collect_offline_stems(&mut self, channels: &[TrackId], frames: usize) {
+        self.offline_stems = channels
+            .iter()
+            .map(|id| (*id, Vec::with_capacity(frames * 2)))
+            .collect();
+    }
+
+    /// Each collected stem with how late it runs behind the timeline.
+    pub(crate) fn take_offline_stems(&mut self) -> Vec<(TrackId, u32, Vec<f32>)> {
+        std::mem::take(&mut self.offline_stems)
+            .into_iter()
+            .map(|(id, samples)| {
+                let latency = self
+                    .routing
+                    .graph
+                    .index(id, vibez_core::routing::NodeStage::AfterFader)
+                    .map_or(0, |node| {
+                        self.routing.compensation.node_output_latency[node]
+                    });
+                (id, latency, samples)
+            })
+            .collect()
     }
 
     pub(crate) fn offline_compensation_failure(&self) -> Option<String> {

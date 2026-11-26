@@ -45,6 +45,7 @@ pub mod midi_audition;
 pub mod midi_file_import;
 pub mod midi_file_landing;
 pub mod midi_from;
+pub mod modulation;
 pub mod multiband_dynamics;
 pub mod param_entry;
 pub mod perform;

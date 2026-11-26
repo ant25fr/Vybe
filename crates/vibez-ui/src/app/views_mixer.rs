@@ -171,6 +171,13 @@ impl App {
                     self.channel_selected(id)
                 },
                 click: self.channel_click(id),
+                menu: (role != StripRole::Master).then_some(Message::View(
+                    crate::domains::view::ViewMsg::ShowContextMenu {
+                        x: self.state.view.cursor_x,
+                        y: self.state.view.cursor_y,
+                        target: crate::state::ContextMenuTarget::TrackHeader { track_id: id },
+                    },
+                )),
                 number,
                 editing_name: role != StripRole::Master
                     && self.state.view.editing_track_name == Some(id),
@@ -194,13 +201,52 @@ impl App {
         let height = self.mix_strip_height();
         let strip = |track, role, number| self.view_desk_strip(track, role, number, height);
         let mut channels = row![].spacing(STRIP_GAP);
-        for (index, track) in self.state.project_tracks.tracks.iter().enumerate() {
-            channels = channels.push(strip(track, StripRole::Track, format!("{:02}", index + 1)));
+        // Groups are numbered G1, G2…; their members say which they are in.
+        let group_number = |id| {
+            buses
+                .iter()
+                .filter(|bus| bus.is_group)
+                .position(|bus| bus.id == id)
+                .map(|index| index + 1)
+        };
+        let project = &self.state.project_tracks;
+        // A group's strip leads its tracks.
+        let mut led = Vec::new();
+        for (index, track) in project.tracks.iter().enumerate() {
+            for id in project.ancestors(track.id).into_iter().rev() {
+                let Some(bus) = buses.iter().find(|bus| bus.id == id && bus.is_group) else {
+                    continue;
+                };
+                if led.contains(&id) || project.is_folded_away(id) {
+                    continue;
+                }
+                led.push(id);
+                let number = group_number(id).map_or_else(String::new, |n| format!("G{n}"));
+                channels = channels.push(strip(bus, StripRole::Bus, number));
+            }
+            if project.is_folded_away(track.id) {
+                continue;
+            }
+            let number = match track.output.and_then(group_number) {
+                Some(group) => format!("{:02} G{group}", index + 1),
+                None => format!("{:02}", index + 1),
+            };
+            channels = channels.push(strip(track, StripRole::Track, number));
         }
         // Returns follow the tracks, and new buses appear where the "+ Bus"
         // pillar sits, growing toward the master.
-        for (index, bus) in buses.iter().enumerate() {
-            channels = channels.push(strip(bus, StripRole::Bus, format!("R{}", index + 1)));
+        let mut returns = 0;
+        for bus in buses {
+            let number = match group_number(bus.id) {
+                Some(group) => format!("G{group}"),
+                None => {
+                    returns += 1;
+                    format!("R{returns}")
+                }
+            };
+            if !led.contains(&bus.id) && !project.is_folded_away(bus.id) {
+                channels = channels.push(strip(bus, StripRole::Bus, number));
+            }
         }
         let add_bus_btn = button(
             column![icons::icon(icons::PLUS).size(12), text("Bus").size(9)]
@@ -210,7 +256,20 @@ impl App {
         .on_press(Message::add_bus())
         .padding([12, 6])
         .style(control_style::style(None));
-        channels = channels.push(container(add_bus_btn).center_y(Length::Fixed(height)));
+        let group_btn = button(text("Group").size(9))
+            .on_press(Message::Arrangement(
+                crate::domains::arrangement::ArrangementMsg::GroupSelectedTracks,
+            ))
+            .padding([8, 4])
+            .style(control_style::style(None));
+        channels = channels.push(
+            container(
+                column![add_bus_btn, group_btn]
+                    .spacing(6)
+                    .align_x(iced::Alignment::Center),
+            )
+            .center_y(Length::Fixed(height)),
+        );
 
         // The plain wheel scrolls the desk up and down; Shift turns it
         // sideways over the channels.

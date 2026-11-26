@@ -1,13 +1,28 @@
-//! Audio Clip fade-handle hit testing and reciprocal drag geometry.
+//! Audio Clip fade and gain handles: hit testing and reciprocal drag
+//! geometry.
 
 use iced::Point;
 
 use crate::state::{AudioClipFadeEdge, UndoGestureId};
 use vibez_core::id::ClipId;
-use vibez_core::track::FadeCurve;
+use vibez_core::track::{ClipGainDb, FadeCurve};
 
 use super::clips::TrackClipCanvas;
 use super::{TimelineClip, CLIP_TITLE_HEIGHT, CLIP_Y, FADE_HANDLE_HIT_RADIUS, FADE_HANDLE_Y};
+
+/// The gain handle sits just under the title.
+const GAIN_HANDLE_Y: f32 = CLIP_Y + CLIP_TITLE_HEIGHT + 3.0;
+const GAIN_HANDLE_HIT_HEIGHT: f32 = 4.0;
+/// How near a fade handle's height the pointer must be on an unselected Clip.
+const HOVER_HANDLE_HIT_HEIGHT: f32 = 3.5;
+/// Half the width of the gain handle.
+pub(super) const GAIN_HANDLE_HALF_WIDTH: f32 = 8.0;
+/// A narrower Clip has no room for a gain handle between its fade handles.
+const GAIN_HANDLE_MIN_CLIP_PX: f32 = 48.0;
+/// A narrower unselected Clip has no fade handles under the pointer.
+pub(super) const HOVER_HANDLES_MIN_CLIP_PX: f32 = 28.0;
+const GAIN_DB_PER_PIXEL: f32 = 0.25;
+const GAIN_FINE_DIVISOR: f32 = 5.0;
 
 #[derive(Debug, Clone)]
 pub struct FadeClipDrag {
@@ -37,7 +52,51 @@ pub struct FadeCurveDrag {
     handle: Point,
 }
 
+/// A drag of the gain handle: up is louder, and Shift moves finely.
+#[derive(Debug, Clone)]
+pub struct GainDrag {
+    pub undo_gesture: UndoGestureId,
+    pub clip_id: ClipId,
+    /// The gain under the pointer, before rounding.
+    db: f32,
+    /// The last gain sent, so a still pointer sends nothing.
+    sent: f32,
+    last_y: f32,
+    handle: Point,
+}
+
+impl GainDrag {
+    /// The gain to send for the pointer at `y`, when it changed.
+    pub(super) fn drag_to(&mut self, y: f32, fine: bool) -> Option<f32> {
+        let step = if fine {
+            GAIN_DB_PER_PIXEL / GAIN_FINE_DIVISOR
+        } else {
+            GAIN_DB_PER_PIXEL
+        };
+        self.db = (self.db + (self.last_y - y) * step).clamp(ClipGainDb::MIN, ClipGainDb::MAX);
+        self.last_y = y;
+        // Tenths, as the readout shows.
+        let rounded = (self.db * 10.0).round() / 10.0;
+        (rounded != self.sent).then(|| {
+            self.sent = rounded;
+            rounded
+        })
+    }
+
+    /// The gain the Clip had when pressed, or was last sent.
+    pub(super) fn current(&self) -> f32 {
+        self.sent
+    }
+}
+
+/// Where the gain handle sits: the top middle of the Clip's body.
+pub(super) fn gain_handle(clip_x: f32, clip_width: f32) -> Option<Point> {
+    (clip_width >= GAIN_HANDLE_MIN_CLIP_PX)
+        .then(|| Point::new(clip_x + clip_width / 2.0, GAIN_HANDLE_Y))
+}
+
 pub(super) enum FadeControlDrag {
+    Gain(GainDrag),
     Length(FadeClipDrag),
     Curve(FadeCurveDrag),
     CrossfadeCurve(CrossfadeCurveDrag),
@@ -46,6 +105,9 @@ pub(super) enum FadeControlDrag {
 impl FadeControlDrag {
     fn distance_squared(&self, point: Point) -> f32 {
         match self {
+            Self::Gain(drag) => {
+                (point.x - drag.handle.x).powi(2) + (point.y - drag.handle.y).powi(2)
+            }
             Self::Length(drag) => drag.distance_squared(point),
             Self::Curve(drag) => drag.distance_squared(point),
             Self::CrossfadeCurve(drag) => drag.distance_squared(point),
@@ -325,12 +387,21 @@ impl TrackClipCanvas {
         }
         let spb = self.spb();
         for clip in &self.clips {
-            if !self.selected_clips.contains(&clip.clip_id) {
-                continue;
-            }
             let start_beat = clip.position as f64 / spb;
             let clip_x = self.beat_to_x(start_beat);
             let clip_width = self.geometry().width_for_beats(clip.duration as f64 / spb);
+            // An unselected Clip shows its handles under the pointer, when
+            // wide enough to keep its resize and move zones.
+            if !self.selected_clips.contains(&clip.clip_id)
+                && clip_width < HOVER_HANDLES_MIN_CLIP_PX
+            {
+                continue;
+            }
+            if !self.selected_clips.contains(&clip.clip_id)
+                && (pos.y - FADE_HANDLE_Y).abs() > HOVER_HANDLE_HIT_HEIGHT
+            {
+                continue;
+            }
             if pos.x < clip_x || pos.x > clip_x + clip_width {
                 continue;
             }
@@ -366,6 +437,26 @@ impl TrackClipCanvas {
         None
     }
 
+    pub(super) fn gain_handle_hit(&self, pos: Point) -> Option<GainDrag> {
+        if (pos.y - GAIN_HANDLE_Y).abs() > GAIN_HANDLE_HIT_HEIGHT {
+            return None;
+        }
+        let spb = self.spb();
+        self.clips.iter().find_map(|clip| {
+            let clip_x = self.beat_to_x(clip.position as f64 / spb);
+            let clip_width = self.geometry().width_for_beats(clip.duration as f64 / spb);
+            let handle = gain_handle(clip_x, clip_width)?;
+            ((pos.x - handle.x).abs() <= GAIN_HANDLE_HALF_WIDTH + 2.0).then(|| GainDrag {
+                undo_gesture: UndoGestureId::new(),
+                clip_id: clip.clip_id,
+                db: clip.gain_db,
+                sent: clip.gain_db,
+                last_y: pos.y,
+                handle,
+            })
+        })
+    }
+
     /// Resolve overlapping fade controls by their drawn distance. The
     /// fade-length handle wins an exact tie so a short steep fade can always
     /// be made longer again.
@@ -380,6 +471,7 @@ impl TrackClipCanvas {
                 .map(FadeControlDrag::Curve),
             self.crossfade_curve_hit(pos, canvas_height)
                 .map(FadeControlDrag::CrossfadeCurve),
+            self.gain_handle_hit(pos).map(FadeControlDrag::Gain),
         ];
         candidates
             .into_iter()
@@ -401,6 +493,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_gain_drag_sends_tenths_up_to_the_clip_range() {
+        let mut drag = GainDrag {
+            undo_gesture: UndoGestureId::new(),
+            clip_id: ClipId::new(),
+            db: 0.0,
+            sent: 0.0,
+            last_y: 50.0,
+            handle: Point::ORIGIN,
+        };
+        assert_eq!(drag.drag_to(46.0, false), Some(1.0));
+        assert_eq!(drag.drag_to(46.0, false), None);
+        assert_eq!(drag.drag_to(41.0, true), Some(1.3));
+        assert_eq!(drag.drag_to(-1_000.0, false), Some(ClipGainDb::MAX));
+    }
+
+    #[test]
+    fn a_narrow_clip_has_no_gain_handle() {
+        assert_eq!(gain_handle(0.0, 40.0), None);
+        assert_eq!(
+            gain_handle(10.0, 100.0),
+            Some(Point::new(60.0, GAIN_HANDLE_Y))
+        );
+    }
+
+    #[test]
     fn drag_math_is_reciprocal_with_drawn_handle_positions() {
         let clip = TimelineClip {
             color: None,
@@ -413,6 +530,7 @@ mod tests {
             loop_enabled: false,
             loop_start: 0,
             loop_end: 48_000,
+            gain_db: 0.0,
             fade_in_frames: 12_345,
             fade_out_frames: 6_789,
             fade_in_curve: Default::default(),

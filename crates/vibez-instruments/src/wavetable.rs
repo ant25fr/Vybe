@@ -4,6 +4,7 @@
 //! send where they are wanted. Each note takes a free voice, or else the
 //! oldest.
 
+use crate::pitch_bend::PitchBend;
 use vibez_core::effect::ParamDescriptor;
 
 use crate::envelope::Times;
@@ -54,6 +55,7 @@ pub fn unison(unison: usize, cents: f32) -> ([f32; MAX_UNISON], [[f32; 2]; MAX_U
 }
 
 pub struct WavetableSynth {
+    bend: PitchBend,
     voices: [Voice; MAX_VOICES],
     sample_rate: f32,
     params: [f32; param::COUNT],
@@ -85,6 +87,7 @@ impl WavetableSynth {
         let params: [f32; param::COUNT] =
             std::array::from_fn(|index| WAVETABLE_PARAMS[index].default);
         let mut synth = Self {
+            bend: PitchBend::new(sample_rate),
             voices: [Voice::default(); MAX_VOICES],
             sample_rate,
             params,
@@ -211,7 +214,9 @@ impl WavetableSynth {
                 octave: p[param::of(o, osc::OCTAVE)].exp2(),
             }
         };
+        let bend = self.bend.tick();
         let frame = Frame {
+            bend,
             sample_rate: self.sample_rate,
             oscillators: [oscillator(0), oscillator(1)],
             filter_type: p[param::FILTER_TYPE] as usize,
@@ -286,6 +291,10 @@ impl crate::Instrument for WavetableSynth {
 
     fn note_off(&mut self, pitch: u8) {
         self.note_off(pitch);
+    }
+
+    fn set_pitch_bend(&mut self, semitones: f32) {
+        self.bend.set(semitones);
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {

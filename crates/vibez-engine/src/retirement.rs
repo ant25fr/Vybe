@@ -132,12 +132,13 @@ impl crate::engine::AudioEngine {
         let Some((bus, mut track_index)) = self.pending_bus_cleanup else {
             return;
         };
-        while track_index < self.tracks().len() {
+        while track_index < self.sender_count() {
             let Some(mut allowance) = self.pending_retirements.reserve(1) else {
                 break;
             };
-            let track = &mut self.tracks_mut_for_retirement()[track_index];
+            let track = self.sender_mut(track_index);
             track.sends.retain(|(id, _)| *id != bus);
+            track.pre_fader_sends.retain(|id| *id != bus);
             if let Some(index) = track.playback_source.automation.iter().position(|lane| {
                 lane.target == vibez_core::automation::AutomationTarget::Send { bus_id: bus }
             }) {
@@ -148,7 +149,7 @@ impl crate::engine::AudioEngine {
             }
         }
         self.pending_bus_cleanup =
-            (track_index < self.tracks().len()).then_some((bus, track_index));
+            (track_index < self.sender_count()).then_some((bus, track_index));
     }
 
     pub(super) fn retire_event(&mut self, event: EngineEvent, allowance: &mut RetirementAllowance) {

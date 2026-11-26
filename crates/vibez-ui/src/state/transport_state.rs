@@ -27,9 +27,19 @@ pub struct TransportState {
     pub sample_rate: u32,
     pub bpm: f64,
     pub bpm_text: String,
+    /// Arrange's time signatures.
+    pub meter: vibez_core::meter::MeterMap,
+    /// What is being typed in the signature field, until it is submitted.
+    pub signature_text: Option<String>,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,
     pub loop_end_beats: f64,
+    /// The metronome clicks while the transport plays.
+    pub metronome: bool,
+    /// Level of the click, 0 to 2 where 1 is normal.
+    pub metronome_volume: f32,
+    /// Recent presses of Tap, oldest first.
+    pub taps: Vec<std::time::Instant>,
 }
 
 impl Default for TransportState {
@@ -42,9 +52,14 @@ impl Default for TransportState {
             sample_rate: 44_100,
             bpm: 120.0,
             bpm_text: "120".to_string(),
+            meter: Default::default(),
+            signature_text: None,
             loop_enabled: false,
             loop_start_beats: 0.0,
             loop_end_beats: 4.0,
+            metronome: false,
+            metronome_volume: 1.0,
+            taps: Vec::new(),
         }
     }
 }

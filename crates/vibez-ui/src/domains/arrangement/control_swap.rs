@@ -25,6 +25,13 @@ pub fn swap_changed_controls(
         solo,
         swing_offset,
         sends,
+        pre_fader_sends,
+        output: _,
+        is_group: _,
+        folded: _,
+        frozen_clip,
+        midi_effects,
+        modulators,
         effects,
         instrument_params,
         drum_rack_pads,
@@ -72,6 +79,30 @@ pub fn swap_changed_controls(
                 amount,
             });
         }
+    }
+    if *frozen_clip != current.frozen_clip {
+        engine.send(EngineCommand::SetTrackFrozen(track_id, *frozen_clip));
+    }
+    if *midi_effects != current.midi_effects {
+        engine.send(EngineCommand::SetMidiEffects(track_id, *midi_effects));
+    }
+    crate::domains::modulation::sync_modulators(engine, track_id, &current.modulators, modulators);
+    // Every switch that differs, on whichever side it is on.
+    let turned_on = pre_fader_sends
+        .iter()
+        .filter(|bus| !current.pre_fader_sends.contains(bus))
+        .map(|bus| (*bus, true));
+    let turned_off = current
+        .pre_fader_sends
+        .iter()
+        .filter(|bus| !pre_fader_sends.contains(bus))
+        .map(|bus| (*bus, false));
+    for (bus_id, pre_fader) in turned_on.chain(turned_off) {
+        engine.send(EngineCommand::SetSendPreFader {
+            track_id,
+            bus_id,
+            pre_fader,
+        });
     }
     for (effect, current_effect) in effects.iter().zip(&current.effects) {
         let UiEffect {

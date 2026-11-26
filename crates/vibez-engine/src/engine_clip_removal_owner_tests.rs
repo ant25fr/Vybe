@@ -31,6 +31,7 @@ fn audio_clip(id: ClipId, value: Arc<DecodedAudio>) -> EngineClip {
     let mut markers = vibez_core::warp_marker::WarpMarkers::default();
     assert!(markers.add(32, 32, 0, 128, 128));
     EngineClip {
+        audition: false,
         id,
         audio: value,
         position: 0,

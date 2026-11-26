@@ -70,6 +70,9 @@ pub struct NoteClipInfo {
     /// theme's track palette; `None` draws the clip in its track's color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_index: Option<u8>,
+    /// Scale mode of this clip: the rows it lights and notes keep to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<crate::scale::Scale>,
 }
 
 impl NoteClipInfo {
@@ -212,6 +215,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Sixteenth,
+            scale: None,
             color_index: None,
             notes: vec![
                 MidiNote {
@@ -252,6 +256,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         let mut json = serde_json::to_value(clip).unwrap();
@@ -277,6 +282,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 8.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         assert_eq!(clip.resolved_start_marker_beats(), 6.0);
@@ -296,6 +302,7 @@ mod tests {
             loop_start_beats: 1.0,
             loop_end_beats: 4.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         assert_eq!(clip.resolved_start_marker_beats(), 3.99);

@@ -831,6 +831,27 @@ factory access and pairs it with `bundleExit` before unloading. CLAP scanning
 recognizes `.clap` directories as bundles and passes the bundle path to entry
 initialization, while loading the declared executable.
 
+### Tempo automation, signatures and modulators
+
+Timeline positions stay counted at the project tempo, so one beat is always the
+same number of positions and editing code needs no tempo map. A `Tempo` lane on
+the Master changes how fast Arrange playback and Bounce move through them: the
+callback is rendered in slices of about 64 output frames, each covering more or
+fewer positions. Notes are scheduled over the positions and placed back on
+output frames, and audio is resampled, so it re-pitches with the tempo. Perform
+ignores the lane. Audio recording, Freeze and track bounce are refused while it
+draws anything, since their audio could not be placed back on the timeline.
+
+A `MeterMap` of time signatures groups quarter-note beats into bars. It is
+fixed-size and `Copy`, so it reaches the metronome without allocating; Arrange
+rulers and grids read it, while Perform counts 4/4.
+
+Modulators belong to a Project Track and offset gain, pan and built-in device
+parameters around their set values. The engine keeps them in fixed storage, and
+a value written by anyone else becomes the new centre, so manual edits and
+automation need no separate path. Any active modulator also splits Arrange
+rendering into slices.
+
 ## Projects, undo, and warping
 
 - Projects are JSON (`vibez-project`): Project Tracks remain in the existing

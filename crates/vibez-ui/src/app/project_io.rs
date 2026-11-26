@@ -79,6 +79,7 @@ impl App {
         }
         Arc::make_mut(&mut self.state.project_tracks).buses.clear();
         self.state.track_heights = Default::default();
+        self.stop_take_audition();
         self.state.arrangement.timeline = Arc::new(crate::state::ArrangementTimeline::default());
         self.state
             .arrangement
@@ -142,6 +143,12 @@ impl App {
         for effect_id in effect_ids {
             self.send_command(EngineCommand::RemoveEffect(TrackId::MASTER, effect_id));
         }
+        crate::domains::modulation::sync_modulators(
+            &mut crate::domains::EngineTx(&mut self.cmd_tx),
+            TrackId::MASTER,
+            &self.state.project_tracks.master.modulators,
+            &[],
+        );
         Arc::make_mut(&mut self.state.project_tracks).master = crate::state::new_master_track();
         self.send_command(EngineCommand::SetTrackGain(TrackId::MASTER, 1.0));
     }
@@ -234,6 +241,34 @@ impl App {
         out
     }
 
+    /// Give each loaded channel its modulators, in the model and the engine.
+    fn load_saved_modulators(&mut self, project: &Project) {
+        for saved in project
+            .tracks
+            .iter()
+            .chain(project.master.as_ref())
+            .chain(&project.buses)
+        {
+            let mut modulators = saved.modulators.clone();
+            modulators.truncate(vibez_core::modulation::MAX_MODULATORS);
+            for modulator in &mut modulators {
+                modulator
+                    .links
+                    .truncate(vibez_core::modulation::MAX_MODULATION_LINKS);
+            }
+            let project_tracks = Arc::make_mut(&mut self.state.project_tracks);
+            if let Some(track) = project_tracks.find_mut(saved.id) {
+                crate::domains::modulation::sync_modulators(
+                    &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                    saved.id,
+                    &track.modulators,
+                    &modulators,
+                );
+                track.modulators = modulators;
+            }
+        }
+    }
+
     pub(super) fn reset_to_new_project(&mut self) {
         self.save_runtime.reset_document();
         self.clear_project_runtime();
@@ -243,6 +278,9 @@ impl App {
         self.ensure_master_eq();
         self.state.transport.bpm = vibez_core::constants::DEFAULT_BPM;
         self.state.transport.bpm_text = format!("{:.0}", self.state.transport.bpm);
+        self.state.transport.meter = Default::default();
+        self.state.transport.signature_text = None;
+        self.send_command(EngineCommand::SetMeterMap(Default::default()));
         self.state
             .perform
             .set_project_swing(vibez_core::perform::SwingAmount::default());
@@ -254,6 +292,9 @@ impl App {
         self.state.project.dirty = false;
         self.state.project.history.clear();
         Arc::make_mut(&mut self.state.project_tracks).reduced_latency_monitoring = false;
+        Arc::make_mut(&mut self.state.project_tracks)
+            .midi_mappings
+            .clear();
         self.state.status_text = "New project".to_string();
     }
 
@@ -285,9 +326,10 @@ impl App {
                 .iter()
                 .map(crate::state::browser_path_string)
                 .collect(),
-            browser_tags: self.state.browser.tags.clone(),
+            browser_tags: Some(self.state.browser.tags.clone()),
             browser_tag_tree: self.state.browser.tag_tree.clone(),
             browser_top_tag_ids: self.state.browser.top_tag_ids.clone(),
+            browser_retired_tag_id: self.state.browser.retired_tag_id,
             browser_item_tags: self
                 .state
                 .browser
@@ -311,7 +353,8 @@ impl App {
             audition_gain: self.state.browser.audition_gain,
             auto_warp_on_import: self.state.auto_warp_on_import,
             warp_confidence_threshold: self.state.warp_confidence_threshold,
-            preferred_midi_input: self.midi_input.as_ref().map(|h| h.port_name.clone()),
+            preferred_midi_input: None,
+            midi_inputs: Some(self.midi_ports.wanted.clone()),
             // Legacy read-only migration fields. New saves use the per-backend
             // map below and deliberately omit these values from JSON.
             preferred_audio_input: None,
@@ -323,6 +366,7 @@ impl App {
             theme: Some(self.state.current_theme_name.clone()),
             confirm_project_track_deletion: self.state.confirm_project_track_deletion,
             auto_save_enabled: self.state.auto_save_enabled,
+            metronome_volume: self.state.transport.metronome_volume,
             interface_scale: self.interface_scale,
             colour_strength: crate::theme::colour_strength(),
             check_for_updates: self.state.update_check.enabled,
@@ -386,12 +430,14 @@ impl App {
 
         Project {
             reduced_latency_monitoring: self.state.project_tracks.reduced_latency_monitoring,
+            midi_mappings: self.state.project_tracks.midi_mappings.clone(),
             name: super::window_policy::project_display_name(
                 self.state.project.current_path.as_deref(),
             ),
             bpm: self.state.transport.bpm,
             groove_profile: vibez_core::perform::GrooveProfile::default(),
             swing: self.state.perform.project_swing(),
+            time_signatures: self.state.transport.meter,
             sample_rate: self.state.transport.sample_rate,
             tracks,
             perform_layout: self.state.perform.layout,
@@ -400,6 +446,13 @@ impl App {
                     .project_tracks
                     .tracks
                     .iter()
+                    .chain(
+                        self.state
+                            .project_tracks
+                            .buses
+                            .iter()
+                            .filter(|b| b.is_group),
+                    )
                     .map(|track| track.id),
             ),
             track_heights: self.state.track_heights.saved(
@@ -534,8 +587,13 @@ impl App {
         self.state.project.history.clear();
         Arc::make_mut(&mut self.state.project_tracks).reduced_latency_monitoring =
             loaded.project.reduced_latency_monitoring;
+        Arc::make_mut(&mut self.state.project_tracks).midi_mappings =
+            loaded.project.midi_mappings.clone();
         self.state.transport.bpm = loaded.project.bpm;
         self.state.transport.bpm_text = format!("{:.0}", loaded.project.bpm);
+        self.state.transport.meter = loaded.project.time_signatures;
+        self.state.transport.signature_text = None;
+        self.send_command(EngineCommand::SetMeterMap(loaded.project.time_signatures));
         self.state.perform.set_project_swing(loaded.project.swing);
         self.send_command(EngineCommand::SetBpm(loaded.project.bpm));
         self.send_command(EngineCommand::SetProjectSwing(loaded.project.swing));
@@ -639,6 +697,23 @@ impl App {
             }
 
             track.sends = track_info.sends.clone();
+            track.pre_fader_sends = track_info.pre_fader_sends.clone();
+            track.output = track_info.output;
+            track.frozen_clip = track_info.frozen_clip;
+            track.midi_effects = track_info.midi_effects;
+            if !track.midi_effects.is_neutral() {
+                self.send_command(EngineCommand::SetMidiEffects(track.id, track.midi_effects));
+            }
+            if track.frozen_clip.is_some() {
+                self.send_command(EngineCommand::SetTrackFrozen(track.id, track.frozen_clip));
+            }
+            for bus_id in &track_info.pre_fader_sends {
+                self.send_command(EngineCommand::SetSendPreFader {
+                    track_id: track.id,
+                    bus_id: *bus_id,
+                    pre_fader: true,
+                });
+            }
             for (bus_id, amount) in &track_info.sends {
                 self.send_command(EngineCommand::SetSend {
                     track_id: track_info.id,
@@ -744,6 +819,11 @@ impl App {
         // was a real channel. clear_project_runtime left it bare.
         if let Some(master_info) = &loaded.project.master {
             Arc::make_mut(&mut self.state.project_tracks).master.gain = master_info.gain;
+            Arc::make_mut(&mut self.state.project_tracks).master.pan = master_info.pan;
+            self.send_command(EngineCommand::SetTrackPan(
+                vibez_core::id::TrackId::MASTER,
+                master_info.pan,
+            ));
             self.send_command(EngineCommand::SetTrackGain(
                 TrackId::MASTER,
                 master_info.gain,
@@ -780,6 +860,25 @@ impl App {
             bus.pan = bus_info.pan;
             bus.mute = bus_info.mute;
             bus.solo = bus_info.solo;
+            bus.sends = bus_info.sends.clone();
+            bus.is_group = bus_info.is_group;
+            bus.folded = bus_info.folded;
+            bus.output = bus_info.output;
+            bus.pre_fader_sends = bus_info.pre_fader_sends.clone();
+            for bus_id in &bus_info.pre_fader_sends {
+                self.send_command(EngineCommand::SetSendPreFader {
+                    track_id: bus_info.id,
+                    bus_id: *bus_id,
+                    pre_fader: true,
+                });
+            }
+            for (bus_id, amount) in &bus_info.sends {
+                self.send_command(EngineCommand::SetSend {
+                    track_id: bus_info.id,
+                    bus_id: *bus_id,
+                    amount: *amount,
+                });
+            }
             self.send_command(EngineCommand::SetTrackGain(bus_info.id, bus_info.gain));
             self.send_command(EngineCommand::SetTrackPan(bus_info.id, bus_info.pan));
             self.send_command(EngineCommand::SetTrackMute(bus_info.id, bus_info.mute));
@@ -809,7 +908,7 @@ impl App {
         for loaded_clip in loaded.clips {
             let location = loaded_clip.location;
             let clip = loaded_clip.clip;
-            if location == TimelineLocation::Arrange {
+            if location == TimelineLocation::Arrange && clip.info.take_lane.is_none() {
                 let start_marker = clip
                     .info
                     .resolved_start_marker(clip.audio.num_frames() as u64);
@@ -840,6 +939,11 @@ impl App {
             }
         }
 
+        super::project_sections::apply_take_lane_names(
+            Arc::make_mut(&mut self.state.arrangement.timeline),
+            &loaded.project.arrange,
+        );
+
         for note_clip in &loaded.project.arrange.note_clips {
             let clip = UiNoteClip {
                 id: note_clip.id,
@@ -853,6 +957,7 @@ impl App {
                 loop_start_beats: note_clip.loop_start_beats,
                 loop_end_beats: note_clip.loop_end_beats,
                 groove_grid: note_clip.groove_grid,
+                scale: note_clip.scale,
                 color_index: note_clip.color_index,
             };
             self.send_command(clip.add_command(note_clip.track_id));
@@ -897,6 +1002,8 @@ impl App {
                 sample_name: pad.name,
             });
         }
+
+        self.load_saved_modulators(&loaded.project);
 
         self.state.arrangement.selected_track = self
             .state

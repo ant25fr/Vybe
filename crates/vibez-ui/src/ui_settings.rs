@@ -26,12 +26,15 @@ pub struct UiSettings {
     pub browser_recent: Vec<String>,
     /// Browser colour tags.
     #[serde(default)]
-    pub browser_tags: Vec<crate::state::TagDef>,
+    pub browser_tags: Option<Vec<crate::state::TagDef>>,
     /// Browser tag folder tree (top level) and the top-level tag ids.
     #[serde(default)]
     pub browser_tag_tree: Vec<crate::state::TagFolderNode>,
     #[serde(default)]
     pub browser_top_tag_ids: Vec<u32>,
+    /// The highest tag or folder id ever removed.
+    #[serde(default)]
+    pub browser_retired_tag_id: u32,
     /// Per-item tagging of browser entries.
     #[serde(default)]
     pub browser_item_tags: Vec<crate::state::StoredItemTags>,
@@ -81,6 +84,10 @@ pub struct UiSettings {
     /// startup. `None` means auto-pick the first visible port.
     #[serde(default)]
     pub preferred_midi_input: Option<String>,
+    /// MIDI inputs the user enabled. `None` until first saved, when the
+    /// single `preferred_midi_input` of older settings still applies.
+    #[serde(default)]
+    pub midi_inputs: Option<Vec<String>>,
     /// `None` follows the platform's System Default Audio Input.
     #[serde(default, skip_serializing)]
     pub preferred_audio_input: Option<String>,
@@ -111,6 +118,9 @@ pub struct UiSettings {
     /// still wait for an explicit save so autosave never opens a file picker.
     #[serde(default = "default_auto_save_enabled")]
     pub auto_save_enabled: bool,
+    /// Level of the metronome click, 0 to 2 where 1 is normal.
+    #[serde(default = "default_metronome_volume")]
+    pub metronome_volume: f32,
     /// Multiplier applied to the whole logical coordinate space, so
     /// every panel, control and font grows or shrinks together. This is
     /// not timeline zoom: it changes how big the interface is drawn,
@@ -170,9 +180,10 @@ impl Default for UiSettings {
             sample_library_roots: Vec::new(),
             browser_pins: Vec::new(),
             browser_recent: Vec::new(),
-            browser_tags: Vec::new(),
+            browser_tags: None,
             browser_tag_tree: Vec::new(),
             browser_top_tag_ids: Vec::new(),
+            browser_retired_tag_id: 0,
             browser_item_tags: Vec::new(),
             sample_browser_open: default_sample_browser_open(),
             sample_browser_width: default_sample_browser_width(),
@@ -188,6 +199,7 @@ impl Default for UiSettings {
             auto_warp_on_import: false,
             warp_confidence_threshold: default_warp_confidence_threshold(),
             preferred_midi_input: None,
+            midi_inputs: None,
             preferred_audio_input: None,
             audio_backend: AudioBackend::default(),
             preferred_audio_output: None,
@@ -197,6 +209,7 @@ impl Default for UiSettings {
             theme: None,
             confirm_project_track_deletion: false,
             auto_save_enabled: default_auto_save_enabled(),
+            metronome_volume: default_metronome_volume(),
             interface_scale: default_interface_scale(),
             colour_strength: crate::theme::ColourStrength::default(),
             check_for_updates: default_check_for_updates(),
@@ -294,6 +307,10 @@ const fn default_fixed_computer_velocity() -> u8 {
 
 const fn default_audio_buffer_size() -> u32 {
     512
+}
+
+const fn default_metronome_volume() -> f32 {
+    1.0
 }
 
 const fn default_auto_save_enabled() -> bool {

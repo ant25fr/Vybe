@@ -59,6 +59,8 @@ impl AudioEngine {
         allowance: &mut RetirementAllowance,
     ) {
         if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
+            let mut instrument = instrument;
+            instrument.set_midi_effects(track.midi_effects);
             if let Some(old) = track.replace_instrument(instrument) {
                 self.dispose_instrument(old, allowance);
             }

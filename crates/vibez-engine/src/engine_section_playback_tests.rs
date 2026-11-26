@@ -113,6 +113,7 @@ fn resident_section_switches_immediately_and_returns_the_displaced_source() {
                     track_id,
                     PreparedPlaybackSource::new(
                         vec![EngineClip {
+                            audition: false,
                             id: ClipId::new(),
                             audio: constant_audio(16, 0.25),
                             position: 0,
@@ -174,6 +175,7 @@ fn refreshing_the_active_section_changes_content_without_restarting_its_playhead
                 track_id,
                 PreparedPlaybackSource::new(
                     vec![EngineClip {
+                        audition: false,
                         id: ClipId::new(),
                         audio: constant_audio(32, value),
                         position: 0,
@@ -247,6 +249,7 @@ fn section_wraps_at_its_shortened_boundary_inside_one_callback() {
                     track_id,
                     PreparedPlaybackSource::new(
                         vec![EngineClip {
+                            audition: false,
                             id: ClipId::new(),
                             audio,
                             position: 0,
@@ -330,6 +333,7 @@ fn non_looping_section_returns_to_arrangement_source_after_ending() {
     engine.process(&mut [], 1);
     *engine.tracks[0].playback_source = PreparedPlaybackSource::new(
         vec![EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: constant_audio(16, 0.75),
             position: 0,
@@ -357,6 +361,7 @@ fn non_looping_section_returns_to_arrangement_source_after_ending() {
                     track_id,
                     PreparedPlaybackSource::new(
                         vec![EngineClip {
+                            audition: false,
                             id: ClipId::new(),
                             audio: constant_audio(4, 0.25),
                             position: 0,
@@ -546,6 +551,7 @@ fn absent_track_stops_source_content_without_resetting_effect_tail() {
                     track_id,
                     PreparedPlaybackSource::new(
                         vec![EngineClip {
+                            audition: false,
                             id: ClipId::new(),
                             audio: constant_audio(1, 1.0),
                             position: 0,
@@ -611,6 +617,7 @@ fn section_refresh_source(
             track_id,
             PreparedPlaybackSource::new(
                 vec![EngineClip {
+                    audition: false,
                     id: ClipId::new(),
                     audio,
                     position: 0,
@@ -664,6 +671,7 @@ fn section_refresh_fixture(delay: u32) -> SectionRefreshFixture {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -671,6 +679,7 @@ fn section_refresh_fixture(delay: u32) -> SectionRefreshFixture {
             is_bus: true,
             effects: vec![],
             sends: vec![],
+            output: None,
             midi_from: None,
         },
     ];

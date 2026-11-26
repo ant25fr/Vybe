@@ -133,6 +133,13 @@ mod export_tests {
             }),
             automation: Vec::new(),
             sends: Vec::new(),
+            pre_fader_sends: Vec::new(),
+            output: None,
+            is_group: false,
+            folded: false,
+            frozen_clip: None,
+            midi_effects: Default::default(),
+            modulators: Vec::new(),
             midi_from: None,
         };
         let request = vibez_engine::render::BounceRequest {
@@ -201,6 +208,13 @@ mod export_tests {
             plugin_instrument: None,
             automation: vec![],
             sends: vec![],
+            pre_fader_sends: Vec::new(),
+            output: None,
+            is_group: false,
+            folded: false,
+            frozen_clip: None,
+            midi_effects: Default::default(),
+            modulators: Vec::new(),
             midi_from: None,
         };
         let mut receiver = channel(bass, "Bass");

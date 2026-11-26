@@ -11,6 +11,7 @@ use vibez_project::Project;
 
 fn looped_audio(track_id: TrackId, source: &Path) -> ClipInfo {
     ClipInfo {
+        take_lane: None,
         color_index: None,
         id: ClipId::new(),
         track_id,
@@ -51,6 +52,7 @@ fn looped_pattern(track_id: TrackId) -> NoteClipInfo {
         loop_start_beats: 0.0,
         loop_end_beats: 16.0,
         groove_grid: Default::default(),
+        scale: None,
         color_index: None,
     }
 }
@@ -145,6 +147,7 @@ fn undo_and_redo_of_a_shrink_keep_the_loop() {
             loop_start_beats: 0.0,
             loop_end_beats: 16.0,
             groove_grid: Default::default(),
+            scale: None,
             color_index: None,
         });
     Arc::make_mut(&mut app.state.project_tracks)

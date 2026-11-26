@@ -267,6 +267,7 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
                     tap: SourceTap::AfterEffects,
                 }],
             }],
+            output: None,
             midi_from: None,
         };
         let source_model = RoutingChannel {
@@ -274,6 +275,7 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
             is_bus: false,
             effects: vec![],
             sends: vec![],
+            output: None,
             midi_from: None,
         };
         let master = RoutingChannel {
@@ -281,6 +283,7 @@ fn independently_installed_instruments_feed_engine_sidechain_inputs() {
             is_bus: false,
             effects: vec![],
             sends: vec![],
+            output: None,
             midi_from: None,
         };
         commands

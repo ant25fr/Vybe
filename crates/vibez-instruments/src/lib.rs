@@ -6,6 +6,9 @@ pub mod fm;
 pub mod fm_params;
 mod fm_voice;
 mod media_owners;
+mod midi_fx;
+mod pitch_bend;
+pub use pitch_bend::PITCH_BEND_RANGE_SEMITONES;
 pub mod plucked;
 mod poly;
 mod prepared_pad_state;
@@ -91,6 +94,12 @@ pub trait Instrument: Send {
     fn get_param(&self, index: usize) -> f32;
     fn note_on(&mut self, pitch: u8, velocity: u8);
     fn note_off(&mut self, pitch: u8);
+    /// Bend every note by `semitones` from its own pitch, until set again.
+    /// Instruments without a pitch to bend ignore it.
+    fn set_pitch_bend(&mut self, _semitones: f32) {}
+    /// Put the track's MIDI effects ahead of the notes. Instruments hosted
+    /// from plugins take their notes as they are.
+    fn set_midi_effects(&mut self, _effects: vibez_core::midi_effects::MidiEffects) {}
     /// Schedule a note-on at a specific frame offset (for batch rendering).
     fn note_on_at(&mut self, pitch: u8, velocity: u8, _frame_offset: u32) {
         self.note_on(pitch, velocity);
@@ -172,11 +181,19 @@ pub trait Instrument: Send {
 /// Factory function to create an instrument by kind.
 pub fn create_instrument(kind: InstrumentKind, sample_rate: f32) -> Box<dyn Instrument> {
     match kind {
-        InstrumentKind::SubtractiveSynth => Box::new(SubtractiveSynth::new(sample_rate)),
-        InstrumentKind::WavetableSynth => Box::new(WavetableSynth::new(sample_rate)),
-        InstrumentKind::FmSynth => Box::new(FmSynth::new(sample_rate)),
-        InstrumentKind::PluckedString => Box::new(PluckedString::new(sample_rate)),
-        InstrumentKind::Sampler => Box::new(Sampler::new(sample_rate)),
-        InstrumentKind::DrumRack => Box::new(DrumRack::new(sample_rate)),
+        InstrumentKind::SubtractiveSynth => wrap(SubtractiveSynth::new(sample_rate)),
+        InstrumentKind::WavetableSynth => wrap(WavetableSynth::new(sample_rate)),
+        InstrumentKind::FmSynth => wrap(FmSynth::new(sample_rate)),
+        InstrumentKind::PluckedString => wrap(PluckedString::new(sample_rate)),
+        InstrumentKind::Sampler => wrap(Sampler::new(sample_rate)),
+        InstrumentKind::DrumRack => wrap(DrumRack::new(sample_rate)),
     }
 }
+
+fn wrap<T: Instrument + 'static>(instrument: T) -> Box<dyn Instrument> {
+    Box::new(midi_fx::MidiFxInstrument::new(instrument))
+}
+
+#[cfg(test)]
+#[path = "pitch_bend_tests.rs"]
+mod pitch_bend_tests;

@@ -179,6 +179,9 @@ pub struct ChannelNameStyle {
     pub color: iced::Color,
 }
 
+/// The field a channel name is typed into; one shows at a time.
+pub const CHANNEL_NAME_INPUT_ID: &str = "channel-name";
+
 /// Inline-editable channel name shared by arrangement headers and
 /// mixer strips. The caller decides which channel roles expose it.
 /// `editing` holds the text typed so far while the name is being edited.
@@ -190,6 +193,7 @@ pub fn view_editable_channel_name<'a>(
     let ChannelNameStyle { size, font, color } = style;
     if let Some(edit_text) = editing {
         text_input("Name", edit_text)
+            .id(iced::widget::text_input::Id::new(CHANNEL_NAME_INPUT_ID))
             .on_input(|value| Message::View(ViewMsg::EditNameText(value)))
             .on_submit(Message::View(ViewMsg::FinishEditing))
             .size(size)
@@ -216,6 +220,18 @@ pub fn view_editable_channel_name<'a>(
             ..Default::default()
         })
         .into()
+    }
+}
+
+/// What a click on a channel header does, as on a mixer strip.
+pub fn header_click(track_id: vibez_core::id::TrackId, held: iced::keyboard::Modifiers) -> Message {
+    use crate::domains::arrangement::ArrangementMsg;
+    if crate::shortcuts::command_held(held, cfg!(target_os = "macos")) {
+        Message::Arrangement(ArrangementMsg::ToggleChannelSelection(track_id))
+    } else if held.shift() {
+        Message::Arrangement(ArrangementMsg::SelectChannelRange(track_id))
+    } else {
+        Message::select_track(track_id)
     }
 }
 
@@ -461,13 +477,143 @@ pub fn view_track_header<'a>(
     // so this only fires on otherwise-dead header space.
     let track_id = track.id;
     mouse_area(card)
-        .on_press(Message::select_track(track_id))
+        .on_press(Message::HeaderPressed(track_id))
         .on_enter(Message::View(ViewMsg::TrackHeaderHovered {
             track_id,
             hovered: true,
         }))
         .on_exit(Message::View(ViewMsg::TrackHeaderHovered {
             track_id,
+            hovered: false,
+        }))
+        .into()
+}
+
+/// How an Arrange group header is shown.
+#[derive(Debug, Clone, Copy)]
+pub struct GroupHeaderView {
+    pub flags: TrackHeaderFlags,
+    pub peaks: (f32, f32),
+    /// How many groups hold this one.
+    pub depth: usize,
+}
+
+/// A group's header: laid out as a track's, with a fold switch beside the
+/// name and no input controls, since a group only sums its tracks.
+pub fn view_group_header<'a>(
+    group: &'a ProjectTrack,
+    view: GroupHeaderView,
+    edit_text: &'a str,
+) -> Element<'a, Message> {
+    use crate::domains::arrangement::ArrangementMsg;
+    let GroupHeaderView {
+        flags,
+        peaks,
+        depth,
+    } = view;
+    let color = th::track_color(group.color_index);
+    let group_id = group.id;
+
+    let fold = button(
+        icons::icon(if group.folded {
+            icons::CHEVRON_RIGHT
+        } else {
+            icons::CHEVRON_DOWN
+        })
+        .size(12)
+        .color(th::text()),
+    )
+    .on_press(Message::Arrangement(ArrangementMsg::ToggleGroupFold(
+        group_id,
+    )))
+    .padding([0, 2])
+    .style(quiet_action_style);
+    let name = view_editable_channel_name(
+        group,
+        flags.editing_name.then_some(edit_text),
+        ChannelNameStyle {
+            size: 13,
+            font: crate::typography::TRACK_TITLE,
+            color: if group.mute {
+                th::text_dim()
+            } else {
+                th::text()
+            },
+        },
+    );
+    let auto_color = if flags.automation_open {
+        th::accent()
+    } else if flags.shows_automation_toggle() {
+        th::text_dim()
+    } else {
+        iced::Color::TRANSPARENT
+    };
+    let automation = button(
+        icons::icon(icons::SLIDERS_VERTICAL)
+            .size(10)
+            .color(auto_color),
+    )
+    .on_press_maybe(
+        flags
+            .shows_automation_toggle()
+            .then_some(Message::Automation(AutomationMsg::ToggleTrackLanes(
+                group_id,
+            ))),
+    )
+    .padding([1, 4])
+    .style(quiet_action_style);
+    let name_row = row![
+        iced::widget::Space::with_width(depth as f32 * 8.0),
+        fold,
+        name,
+        text("Group").size(10).color(th::text_dim()),
+        horizontal_space(),
+        automation,
+    ]
+    .spacing(4)
+    .height(Length::Fixed(NAME_ROW_HEIGHT))
+    .align_y(iced::Alignment::Center);
+
+    let mute = button(text("M").size(11))
+        .on_press(Message::set_track_mute(group_id))
+        .padding([3, 8])
+        .style(control_style::style(group.mute.then(th::mute_active)));
+    let solo = button(text("S").size(11))
+        .on_press(Message::set_track_solo(group_id))
+        .padding([3, 8])
+        .style(control_style::style(group.solo.then(th::solo_active)));
+    let controls = container(row![mute, solo].spacing(4))
+        .height(Length::Fixed(CONTROLS_ROW_HEIGHT))
+        .align_y(iced::alignment::Vertical::Center);
+
+    let fader = canvas(HorizontalFaderWidget::new(group_id, group.gain, color))
+        .width(Length::Fill)
+        .height(Length::Fixed(FADER_HEIGHT));
+    let meter = canvas(HorizontalVuMeterWidget::new(peaks.0, peaks.1, color))
+        .width(Length::Fill)
+        .height(Length::Fixed(6.0));
+
+    let body = column![name_row, controls, fader, meter]
+        .spacing(ROW_SPACING)
+        .padding(HEADER_PADDING)
+        .width(Length::Fixed(TRACK_HEADER_WIDTH));
+    let (selected, hovered) = (flags.selected, flags.hovered);
+    let card = container(row![color_bar(color), body].height(Length::Fill))
+        .height(Length::Fill)
+        .clip(true)
+        .style(move |_theme: &Theme| container::Style {
+            background: Some(header_shade(selected, hovered).into()),
+            ..Default::default()
+        });
+
+    mouse_area(card)
+        .on_press(Message::HeaderPressed(group_id))
+        .on_enter(Message::View(ViewMsg::TrackHeaderHovered {
+            track_id: group_id,
+            hovered: true,
+        }))
+        .on_exit(Message::View(ViewMsg::TrackHeaderHovered {
+            track_id: group_id,
             hovered: false,
         }))
         .into()

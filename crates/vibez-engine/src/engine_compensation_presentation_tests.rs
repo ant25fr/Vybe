@@ -340,6 +340,7 @@ fn state_queued_after_completed_callback_waits_only_its_real_latency() {
             assignments: vec![],
             inactive_inputs: vec![],
         }],
+        output: None,
         midi_from: None,
     }];
     let reports = [(

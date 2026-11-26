@@ -90,7 +90,7 @@ fn sends_keep_existing_values_when_an_over_capacity_target_is_rejected() {
 }
 
 #[test]
-fn sends_accept_unknown_targets_with_room_and_ignore_non_track_sources() {
+fn sends_accept_unknown_targets_from_tracks_and_buses_but_not_the_master() {
     let (mut engine, mut commands, _events, track, buses) = fixture(0);
     let unknown = TrackId::new();
     for source in [track, buses[0], TrackId::MASTER, TrackId::new()] {
@@ -107,7 +107,8 @@ fn sends_accept_unknown_targets_with_room_and_ignore_non_track_sources() {
         (0, 0)
     );
     assert_eq!(engine.tracks()[0].sends, [(unknown, 0.5)]);
-    assert!(engine.buses.iter().all(|bus| bus.sends.is_empty()));
+    assert_eq!(engine.buses[0].sends, [(unknown, 0.5)]);
+    assert!(engine.buses.iter().skip(1).all(|bus| bus.sends.is_empty()));
     assert!(engine.master.sends.is_empty());
 }
 

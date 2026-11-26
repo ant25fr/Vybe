@@ -755,9 +755,9 @@ mod platform {
 
     use x11rb::connection::Connection;
     use x11rb::protocol::xproto::{self, ConnectionExt as _};
-    use x11rb::wrapper::ConnectionExt as _;
     use x11rb::protocol::Event;
     use x11rb::rust_connection::RustConnection;
+    use x11rb::wrapper::ConnectionExt as _;
 
     use crate::gui::GuiParent;
 

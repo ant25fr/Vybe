@@ -11,7 +11,7 @@ mod project_tracks;
 mod same_channels;
 mod sample_map;
 mod snapshot;
-pub use project_tracks::ProjectTracksState;
+pub use project_tracks::{send_would_loop, ProjectTracksState};
 mod transport_state;
 mod ui_types;
 pub use transport_state::{PlaybackPhase, TransportState};
@@ -515,6 +515,10 @@ pub enum PianoRollEditMode {
 pub struct PianoRollState {
     pub scroll_y: f32,
     pub edit_mode: PianoRollEditMode,
+    /// Drawn and moved notes keep to the clip's scale.
+    pub snap_to_scale: bool,
+    /// The chord each drawn note stands for.
+    pub chord: vibez_core::scale::ChordKind,
 }
 
 impl Default for PianoRollState {
@@ -522,6 +526,8 @@ impl Default for PianoRollState {
         Self {
             scroll_y: crate::widgets::piano_roll::default_scroll_y(200.0),
             edit_mode: PianoRollEditMode::default(),
+            snap_to_scale: true,
+            chord: Default::default(),
         }
     }
 }
@@ -631,8 +637,16 @@ impl TimelineContent {
 /// Backward-compatible name for the project's linear Arrange content.
 pub type ArrangementTimeline = TimelineContent;
 
+/// A take lane soloed for listening, and the Clips the engine holds for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TakeAudition {
+    pub track_id: TrackId,
+    pub lane: u32,
+    pub clips: Vec<ClipId>,
+}
+
 /// Editing state shared by every resolved musical timeline.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TimelineEditorState {
     pub timeline: Arc<TimelineContent>,
     pub selected_track: Option<TrackId>,
@@ -653,6 +667,10 @@ pub struct TimelineEditorState {
     /// The Clip drag in flight, present from its first step until it drops
     /// or is cancelled. Every lane draws its preview.
     pub clip_drag: Option<ClipDrag>,
+    /// Tracks showing their take lanes.
+    pub open_take_lanes: HashSet<TrackId>,
+    /// The take being listened to instead of its track.
+    pub auditioned_take: Option<TakeAudition>,
     /// The move, resize or trim drag in flight, which drives edge
     /// auto-scroll on ticks.
     pub edit_drag: EditDrag,
@@ -734,6 +752,8 @@ impl Default for TimelineEditorState {
             time_selection_track: None,
             marquee: None,
             clip_drag: None,
+            open_take_lanes: HashSet::new(),
+            auditioned_take: None,
             edit_drag: EditDrag::Idle,
             audio_clip_inspector_edits: HashMap::new(),
             audio_clip_transpose_debounce: HashMap::new(),
@@ -865,6 +885,7 @@ pub struct AppState {
     /// from `UiSettings::warp_confidence_threshold`.
     pub warp_confidence_threshold: f32,
     pub automation_ui: crate::domains::automation::AutomationState,
+    pub modulation_ui: crate::domains::modulation::ModulationState,
     /// Arrange lane heights, saved with the project but outside undo.
     pub track_heights: crate::domains::track_heights::TrackHeights,
 
@@ -887,6 +908,8 @@ impl Default for AppState {
             transport: TransportState {
                 bpm: DEFAULT_BPM,
                 bpm_text: format!("{DEFAULT_BPM:.0}"),
+                meter: Default::default(),
+                signature_text: None,
                 ..TransportState::default()
             },
             peak_l: 0.0,
@@ -918,6 +941,7 @@ impl Default for AppState {
             auto_warp_on_import: false,
             warp_confidence_threshold: 0.6,
             automation_ui: crate::domains::automation::AutomationState::default(),
+            modulation_ui: Default::default(),
             track_heights: Default::default(),
             browser: BrowserState::default(),
             current_theme_name: "Charcoal".to_string(),
@@ -939,6 +963,12 @@ pub fn default_drum_rack_pads() -> Vec<UiDrumPad> {
 impl AppState {
     /// Capture the complete canonical project state shared by Undo, Capture,
     /// engine-event commits, and project replay.
+    /// Arrange's tempo lane, when it draws anything.
+    pub fn tempo_lane(&self) -> Option<&vibez_core::automation::AutomationLane> {
+        self.arrange_content(vibez_core::id::TrackId::MASTER)
+            .and_then(|content| vibez_core::tempo::tempo_lane(&content.automation))
+    }
+
     pub fn project_snapshot(&self) -> ProjectSnapshot {
         ProjectSnapshot {
             project_tracks: Arc::clone(&self.project_tracks),
@@ -946,6 +976,7 @@ impl AppState {
             sections: Arc::clone(&self.perform.sections),
             launcher_clips: Arc::clone(&self.perform.clips),
             bpm: self.transport.bpm,
+            meter: self.transport.meter,
             project_swing: self.perform.project_swing(),
             loop_enabled: self.transport.loop_enabled,
             loop_start_beats: self.transport.loop_start_beats,

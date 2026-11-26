@@ -13,6 +13,7 @@ impl ProjectTracksState {
     pub fn same_channel_layout(&self, other: &Self) -> bool {
         let Self {
             reduced_latency_monitoring,
+            midi_mappings: _,
             tracks,
             master,
             buses,
@@ -46,6 +47,13 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
         peak_r: _,
         effects,
         sends,
+        pre_fader_sends: _,
+        output,
+        is_group,
+        folded: _,
+        frozen_clip: _,
+        midi_effects: _,
+        modulators: _,
         kind,
         color_index: _,
         has_instrument,
@@ -72,6 +80,8 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
             .zip(&other.sends)
             .all(|((bus, _), (other_bus, _))| bus == other_bus)
         && *kind == other.kind
+        && *output == other.output
+        && *is_group == other.is_group
         && *has_instrument == other.has_instrument
         && *instrument_kind == other.instrument_kind
         && *sample_name == other.sample_name

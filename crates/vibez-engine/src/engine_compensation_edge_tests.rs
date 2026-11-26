@@ -21,6 +21,7 @@ fn channel(id: TrackId, bus: bool, effects: &[EffectId]) -> RoutingChannel {
                 inactive_inputs: vec![],
             })
             .collect(),
+        output: None,
         midi_from: None,
     }
 }

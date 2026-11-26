@@ -24,6 +24,7 @@ pub(super) fn routing_channel(id: TrackId) -> RoutingChannel {
         is_bus: id.is_master(),
         effects: vec![],
         sends: vec![],
+        output: None,
         midi_from: None,
     }
 }
@@ -39,6 +40,7 @@ pub(super) fn routing_effect(id: EffectId) -> RoutingEffect {
 
 pub(super) fn constant_clip(frames: usize, value: f32) -> EngineClip {
     EngineClip {
+        audition: false,
         id: ClipId::new(),
         audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
             channels: vec![vec![value; frames]; 2],

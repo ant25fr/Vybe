@@ -67,6 +67,7 @@ fn shrinking_and_regrowing_a_looped_midi_clip_keeps_its_loop() {
         loop_start_beats: 0.0,
         loop_end_beats: 16.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     });
     let anchor = ArrangementSelection::NoteClip { track_id, clip_id };
@@ -121,6 +122,7 @@ fn looped_note_clip(
         loop_start_beats: loop_beats.0,
         loop_end_beats: loop_beats.1,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     });
     (track.id, clip_id)

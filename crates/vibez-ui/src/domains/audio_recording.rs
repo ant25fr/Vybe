@@ -103,6 +103,8 @@ pub struct AudioRecordingState {
     pub phase: AudioRecordingPhase,
     pub source: Option<AudioRecordingSource>,
     pub start_position_samples: u64,
+    /// The Arrange loop the take is recorded round, in samples.
+    pub loop_region: Option<(u64, u64)>,
     pub captured_frames: Vec<[f32; 2]>,
     preview_clip_id: Option<ClipId>,
     live_waveform: LiveWaveformPreview,
@@ -140,6 +142,7 @@ impl AudioRecordingState {
             return false;
         }
         self.captured_frames.clear();
+        self.loop_region = None;
         self.start_position_samples = position_samples;
         self.source = Some(source);
         self.preview_clip_id = Some(ClipId::new());

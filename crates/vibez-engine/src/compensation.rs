@@ -99,20 +99,21 @@ impl CompensationPlan {
     }
 
     pub fn direct_path_latency(&self, graph: &RoutingGraph, track: TrackId) -> u32 {
-        let omitted = graph
-            .edges
-            .iter()
-            .enumerate()
-            .find(|(_, edge)| {
-                edge.kind == EdgeKind::Mix
-                    && graph.nodes[edge.from].channel == track
-                    && graph.nodes[edge.to].channel.is_master()
-            })
-            .map_or(0, |(index, edge)| {
-                self.node_input_latency[edge.to]
-                    - self.node_output_latency[edge.from]
-                    - self.edge_delays[index]
-            });
+        // The waiting left out along the channel's way to the master,
+        // through its groups.
+        let mut omitted = 0;
+        let mut channel = track;
+        for _ in 0..graph.nodes.len() {
+            let Some((index, edge)) = graph.edges.iter().enumerate().find(|(_, edge)| {
+                edge.kind == EdgeKind::Mix && graph.nodes[edge.from].channel == channel
+            }) else {
+                break;
+            };
+            omitted += self.node_input_latency[edge.to]
+                - self.node_output_latency[edge.from]
+                - self.edge_delays[index];
+            channel = graph.nodes[edge.to].channel;
+        }
         self.output_latency.saturating_sub(omitted)
     }
 }
@@ -158,51 +159,123 @@ impl CompensationTiming {
             }
             edge_identities.push(identity);
         }
-        let mut input_latency = vec![0u32; graph.nodes.len()];
-        let mut output_latency = vec![0u32; graph.nodes.len()];
-        let mut edge_delays = vec![0u32; graph.edges.len()];
-        let mut retained_delays = vec![0u32; graph.edges.len()];
-        let mut visited = vec![false; graph.nodes.len()];
-        for &node in &graph.order {
-            if node >= visited.len() || visited[node] {
-                return Err(CompensationError::InvalidGraph);
+        // A group whose every member is monitored with reduced latency is
+        // monitored with it too.
+        let mut reduced: Vec<TrackId> = reduced_tracks.to_vec();
+        for _ in 0..graph.nodes.len() {
+            let grown = graph.edges.iter().find_map(|edge| {
+                let group = graph.nodes[edge.to].channel;
+                (edge.kind == EdgeKind::Mix && !group.is_master() && !reduced.contains(&group))
+                    .then_some(group)
+                    .filter(|&group| {
+                        graph
+                            .edges
+                            .iter()
+                            .filter(|into| graph.nodes[into.to].channel == group)
+                            .filter(|into| matches!(into.kind, EdgeKind::Mix | EdgeKind::Send))
+                            .all(|into| reduced.contains(&graph.nodes[into.from].channel))
+                    })
+            });
+            match grown {
+                Some(group) => reduced.push(group),
+                None => break,
             }
-            let report = device_latencies[node];
-            if report > MAX_DEVICE_LATENCY {
-                return Err(CompensationError::DeviceLatency {
-                    node,
-                    samples: report,
-                });
+        }
+        // A group holding both monitored and other channels would make the
+        // monitored ones wait at its output for the rest of the mix. That
+        // wait moves ahead of the group, onto its other inputs, by delaying
+        // the group's sum and passing the monitored inputs straight in.
+        let mut monitored = reduced.clone();
+        for _ in 0..graph.nodes.len() {
+            let grown = graph.edges.iter().find_map(|edge| {
+                let group = graph.nodes[edge.to].channel;
+                (edge.kind == EdgeKind::Mix
+                    && !group.is_master()
+                    && !monitored.contains(&group)
+                    && monitored.contains(&graph.nodes[edge.from].channel))
+                .then_some(group)
+            });
+            match grown {
+                Some(group) => monitored.push(group),
+                None => break,
             }
-            let mut arrival = 0;
-            for edge in graph.edges.iter().filter(|edge| edge.to == node) {
-                if !visited[edge.from] {
+        }
+        let mut extra = vec![0u32; graph.nodes.len()];
+        // Each pass settles one more level of nesting.
+        let mut passes = 0;
+        let (input_latency, output_latency, edge_delays, retained_delays) = loop {
+            let mut input_latency = vec![0u32; graph.nodes.len()];
+            let mut output_latency = vec![0u32; graph.nodes.len()];
+            let mut edge_delays = vec![0u32; graph.edges.len()];
+            let mut retained_delays = vec![0u32; graph.edges.len()];
+            let mut visited = vec![false; graph.nodes.len()];
+            for &node in &graph.order {
+                if node >= visited.len() || visited[node] {
                     return Err(CompensationError::InvalidGraph);
                 }
-                arrival = arrival.max(output_latency[edge.from]);
-            }
-            input_latency[node] = arrival;
-            output_latency[node] = arrival
-                .checked_add(report)
-                .filter(|&samples| samples <= MAX_PATH_LATENCY)
-                .ok_or(CompensationError::PathLatency { node })?;
-            for (index, edge) in graph.edges.iter().enumerate().filter(|(_, e)| e.to == node) {
-                let exempt = edge.kind == EdgeKind::Mix
-                    && graph.nodes[edge.to].channel.is_master()
-                    && reduced_tracks.contains(&graph.nodes[edge.from].channel)
-                    && !graph.edges.iter().any(|dependency| {
-                        matches!(dependency.kind, EdgeKind::External(_))
-                            && graph.nodes[dependency.to].channel.is_master()
+                let report = device_latencies[node];
+                if report > MAX_DEVICE_LATENCY {
+                    return Err(CompensationError::DeviceLatency {
+                        node,
+                        samples: report,
                     });
-                retained_delays[index] = arrival - output_latency[edge.from];
-                edge_delays[index] = if exempt {
-                    0
-                } else {
-                    arrival - output_latency[edge.from]
-                };
+                }
+                let mut arrival = 0;
+                for edge in graph.edges.iter().filter(|edge| edge.to == node) {
+                    if !visited[edge.from] {
+                        return Err(CompensationError::InvalidGraph);
+                    }
+                    arrival = arrival.max(output_latency[edge.from]);
+                }
+                let arrival = arrival
+                    .checked_add(extra[node])
+                    .filter(|&samples| samples <= MAX_PATH_LATENCY)
+                    .ok_or(CompensationError::PathLatency { node })?;
+                input_latency[node] = arrival;
+                output_latency[node] = arrival
+                    .checked_add(report)
+                    .filter(|&samples| samples <= MAX_PATH_LATENCY)
+                    .ok_or(CompensationError::PathLatency { node })?;
+                for (index, edge) in graph.edges.iter().enumerate().filter(|(_, e)| e.to == node) {
+                    let exempt = edge.kind == EdgeKind::Mix
+                        && reduced.contains(&graph.nodes[edge.from].channel)
+                        && !graph.edges.iter().any(|dependency| {
+                            matches!(dependency.kind, EdgeKind::External(_))
+                                && graph.nodes[dependency.to].channel
+                                    == graph.nodes[edge.to].channel
+                        });
+                    retained_delays[index] = arrival - output_latency[edge.from];
+                    edge_delays[index] = if exempt {
+                        0
+                    } else {
+                        arrival - output_latency[edge.from]
+                    };
+                }
+                visited[node] = true;
             }
-            visited[node] = true;
-        }
+            let mut moved = false;
+            for (index, edge) in graph.edges.iter().enumerate() {
+                let group = graph.nodes[edge.from].channel;
+                if edge.kind != EdgeKind::Mix
+                    || edge_delays[index] == 0
+                    || !monitored.contains(&group)
+                    || reduced.contains(&group)
+                {
+                    continue;
+                }
+                let sum = graph.nodes.iter().position(|node| {
+                    node.channel == group && node.stage == vibez_core::routing::NodeStage::Sum
+                });
+                if let Some(sum) = sum {
+                    extra[sum] = extra[sum].saturating_add(edge_delays[index]);
+                    moved = true;
+                }
+            }
+            passes += 1;
+            if !moved || passes > 8 {
+                break (input_latency, output_latency, edge_delays, retained_delays);
+            }
+        };
         let total_latency = output_latency.iter().copied().max().unwrap_or(0);
         Ok(Self {
             generation,

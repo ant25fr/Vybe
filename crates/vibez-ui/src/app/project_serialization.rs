@@ -120,7 +120,14 @@ impl App {
             plugin_instrument,
             automation: Vec::new(),
             sends: track.sends.clone(),
+            pre_fader_sends: track.pre_fader_sends.clone(),
+            output: track.output,
+            is_group: track.is_group,
+            folded: track.folded,
+            frozen_clip: track.frozen_clip,
+            midi_effects: track.midi_effects,
             midi_from: track.midi_from,
+            modulators: track.modulators.clone(),
         }
     }
 }

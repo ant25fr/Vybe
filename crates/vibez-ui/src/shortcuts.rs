@@ -211,6 +211,20 @@ pub enum ShortcutAction {
     QuickAdd,
     OverviewZoomIn,
     OverviewZoomOut,
+    ToggleMetronome,
+    MetronomeLouder,
+    MetronomeQuieter,
+    MidiLearn,
+    GroupTracks,
+    UngroupTracks,
+    FreezeTrack,
+    BounceInPlace,
+    RenameTrack,
+    ShowTakeLanes,
+    NextTake,
+    PreviousTake,
+    AddToGroup,
+    RemoveFromGroup,
 }
 
 impl ShortcutAction {
@@ -241,6 +255,20 @@ impl ShortcutAction {
         ShortcutAction::QuickAdd,
         ShortcutAction::OverviewZoomIn,
         ShortcutAction::OverviewZoomOut,
+        ShortcutAction::ToggleMetronome,
+        ShortcutAction::MetronomeLouder,
+        ShortcutAction::MetronomeQuieter,
+        ShortcutAction::MidiLearn,
+        ShortcutAction::GroupTracks,
+        ShortcutAction::UngroupTracks,
+        ShortcutAction::FreezeTrack,
+        ShortcutAction::BounceInPlace,
+        ShortcutAction::RenameTrack,
+        ShortcutAction::ShowTakeLanes,
+        ShortcutAction::NextTake,
+        ShortcutAction::PreviousTake,
+        ShortcutAction::AddToGroup,
+        ShortcutAction::RemoveFromGroup,
     ];
 
     pub fn id(&self) -> &'static str {
@@ -271,6 +299,20 @@ impl ShortcutAction {
             ShortcutAction::QuickAdd => "quick-add",
             ShortcutAction::OverviewZoomIn => "overview-zoom-in",
             ShortcutAction::OverviewZoomOut => "overview-zoom-out",
+            ShortcutAction::ToggleMetronome => "toggle-metronome",
+            ShortcutAction::MetronomeLouder => "metronome-louder",
+            ShortcutAction::MetronomeQuieter => "metronome-quieter",
+            ShortcutAction::MidiLearn => "midi-learn",
+            ShortcutAction::GroupTracks => "group-tracks",
+            ShortcutAction::UngroupTracks => "ungroup-tracks",
+            ShortcutAction::FreezeTrack => "freeze-track",
+            ShortcutAction::BounceInPlace => "bounce-in-place",
+            ShortcutAction::RenameTrack => "rename-track",
+            ShortcutAction::ShowTakeLanes => "show-take-lanes",
+            ShortcutAction::NextTake => "next-take",
+            ShortcutAction::PreviousTake => "previous-take",
+            ShortcutAction::AddToGroup => "add-to-group",
+            ShortcutAction::RemoveFromGroup => "remove-from-group",
         }
     }
 
@@ -302,6 +344,20 @@ impl ShortcutAction {
             ShortcutAction::QuickAdd => "Quick add palette",
             ShortcutAction::OverviewZoomIn => "Overview zoom in (wheel)",
             ShortcutAction::OverviewZoomOut => "Overview zoom out (wheel)",
+            ShortcutAction::ToggleMetronome => "Metronome on / off",
+            ShortcutAction::MetronomeLouder => "Metronome louder",
+            ShortcutAction::MetronomeQuieter => "Metronome quieter",
+            ShortcutAction::MidiLearn => "MIDI learn",
+            ShortcutAction::GroupTracks => "Group selected tracks",
+            ShortcutAction::UngroupTracks => "Ungroup",
+            ShortcutAction::FreezeTrack => "Freeze / unfreeze track",
+            ShortcutAction::BounceInPlace => "Bounce track in place",
+            ShortcutAction::RenameTrack => "Rename track or group",
+            ShortcutAction::ShowTakeLanes => "Show / hide take lanes",
+            ShortcutAction::NextTake => "Next take for the selected clip",
+            ShortcutAction::PreviousTake => "Previous take for the selected clip",
+            ShortcutAction::AddToGroup => "Move selection into selected group",
+            ShortcutAction::RemoveFromGroup => "Move selection out of its group",
         }
     }
 
@@ -333,6 +389,20 @@ impl ShortcutAction {
             | ShortcutAction::OverviewZoomIn
             | ShortcutAction::OverviewZoomOut => "View and transport",
             ShortcutAction::TogglePianoRollEditMode => "Piano roll",
+            ShortcutAction::ToggleMetronome
+            | ShortcutAction::MetronomeLouder
+            | ShortcutAction::MetronomeQuieter => "Metronome",
+            ShortcutAction::MidiLearn => "MIDI",
+            ShortcutAction::GroupTracks
+            | ShortcutAction::UngroupTracks
+            | ShortcutAction::AddToGroup
+            | ShortcutAction::RemoveFromGroup => "Groups",
+            ShortcutAction::FreezeTrack
+            | ShortcutAction::BounceInPlace
+            | ShortcutAction::RenameTrack => "Tracks",
+            ShortcutAction::ShowTakeLanes
+            | ShortcutAction::NextTake
+            | ShortcutAction::PreviousTake => "Takes",
         }
     }
 
@@ -382,6 +452,21 @@ impl ShortcutAction {
             ShortcutAction::QuickAdd => vec![c("p")],
             ShortcutAction::OverviewZoomIn => vec![KeyCombo::new(WHEEL_UP, true, false, false)],
             ShortcutAction::OverviewZoomOut => vec![KeyCombo::new(WHEEL_DOWN, true, false, false)],
+            ShortcutAction::ToggleMetronome => vec![c("k")],
+            ShortcutAction::MetronomeLouder => vec![cs("ArrowUp")],
+            ShortcutAction::MetronomeQuieter => vec![cs("ArrowDown")],
+            ShortcutAction::MidiLearn => vec![cs("k")],
+            ShortcutAction::GroupTracks => vec![c("g")],
+            ShortcutAction::UngroupTracks => vec![cs("g")],
+            ShortcutAction::FreezeTrack => vec![cs("f")],
+            // Ctrl+B stays free: bare B draws in the piano roll.
+            ShortcutAction::BounceInPlace => vec![KeyCombo::new("b", true, false, true)],
+            ShortcutAction::RenameTrack => vec![c("r")],
+            ShortcutAction::ShowTakeLanes => vec![KeyCombo::new("u", true, false, true)],
+            ShortcutAction::NextTake => vec![KeyCombo::new("ArrowDown", true, false, true)],
+            ShortcutAction::PreviousTake => vec![KeyCombo::new("ArrowUp", true, false, true)],
+            ShortcutAction::AddToGroup => vec![KeyCombo::new("g", true, false, true)],
+            ShortcutAction::RemoveFromGroup => vec![KeyCombo::new("g", true, true, true)],
         }
     }
 
@@ -429,6 +514,34 @@ impl ShortcutAction {
             // the arrangement around its centre.
             ShortcutAction::OverviewZoomIn => Message::View(ViewMsg::ZoomIn),
             ShortcutAction::OverviewZoomOut => Message::View(ViewMsg::ZoomOut),
+            ShortcutAction::ToggleMetronome => Message::Transport(TransportMsg::ToggleMetronome),
+            ShortcutAction::MetronomeLouder => {
+                Message::Transport(TransportMsg::NudgeMetronomeVolume(0.1))
+            }
+            ShortcutAction::MetronomeQuieter => {
+                Message::Transport(TransportMsg::NudgeMetronomeVolume(-0.1))
+            }
+            ShortcutAction::GroupTracks => {
+                Message::Arrangement(ArrangementMsg::GroupSelectedTracks)
+            }
+            ShortcutAction::UngroupTracks => Message::Arrangement(ArrangementMsg::UngroupSelected),
+            ShortcutAction::AddToGroup => Message::AddSelectionToSelectedGroup,
+            ShortcutAction::RemoveFromGroup => {
+                Message::Arrangement(ArrangementMsg::RemoveSelectionFromGroup)
+            }
+            ShortcutAction::FreezeTrack => Message::ToggleSelectedTrackFreeze,
+            ShortcutAction::BounceInPlace => Message::BounceSelectedTrackInPlace,
+            ShortcutAction::RenameTrack => Message::RenameSelectedTrack,
+            ShortcutAction::ShowTakeLanes => Message::ToggleSelectedTrackTakeLanes,
+            ShortcutAction::NextTake => {
+                Message::Arrangement(ArrangementMsg::CycleTake { forward: true })
+            }
+            ShortcutAction::PreviousTake => {
+                Message::Arrangement(ArrangementMsg::CycleTake { forward: false })
+            }
+            ShortcutAction::MidiLearn => {
+                Message::MidiMap(crate::app::midi_mapping::MidiMapMsg::ToggleLearn)
+            }
         }
     }
 }

@@ -124,6 +124,7 @@ impl TimelineEditorState {
             loop_start_beats: 0.0,
             loop_end_beats: duration_beats,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
 

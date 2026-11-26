@@ -5,10 +5,14 @@ use std::sync::Arc;
 
 use vibez_core::id::{ClipId, TrackId};
 use vibez_core::track::{ClipFades, ClipInfo, MediaSourceRef};
-use vibez_project::{SectionInfo, TimelineAutomationInfo, TimelineInfo, TimelineLocation};
+use vibez_project::{
+    SectionInfo, TakeLaneInfo, TimelineAutomationInfo, TimelineInfo, TimelineLocation,
+};
 
 use crate::domains::perform::{Section, SectionStore};
-use crate::state::{AppState, ArrangementTimeline, UiClip, UiNoteClip};
+use crate::state::{
+    AppState, ArrangementTimeline, TakeLane, TrackTimelineContent, UiClip, UiNoteClip,
+};
 
 pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineInfo {
     let mut track_ids: Vec<_> = timeline.by_track.keys().copied().collect();
@@ -16,33 +20,24 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
     let mut info = TimelineInfo::default();
     for track_id in track_ids {
         let content = &timeline.by_track[&track_id];
-        info.clips.extend(content.clips.iter().map(|clip| ClipInfo {
-            id: clip.id,
-            track_id,
-            name: clip.name.clone(),
-            position: clip.position,
-            source_offset: clip.source_offset,
-            start_marker: Some(clip.start_marker),
-            duration: clip.duration,
-            source: Some(clip.source.clone()),
-            file_path: match &clip.source {
-                MediaSourceRef::LocalFile { path } => Some(path.clone()),
-                _ => None,
-            },
-            loop_enabled: clip.loop_enabled,
-            loop_start: clip.loop_start,
-            loop_end: clip.loop_end,
-            gain_db: clip.gain_db,
-            fades: clip.fades,
-            playback_direction: clip.playback_direction,
-            transient_markers: clip.transient_markers.clone(),
-            warp_markers: clip.warp_markers.clone(),
-            transpose: clip.transpose,
-            original_bpm: clip.original_bpm,
-            warped: clip.warped,
-            warped_to_bpm: clip.warped_to_bpm,
-            color_index: clip.color_index,
-        }));
+        info.clips.extend(
+            content
+                .clips
+                .iter()
+                .map(|clip| clip_info_from_ui(track_id, clip, None)),
+        );
+        for lane in &content.take_lanes {
+            info.take_lanes.push(TakeLaneInfo {
+                track_id,
+                lane: lane.id,
+                name: lane.name.clone(),
+            });
+            info.clips.extend(
+                lane.clips
+                    .iter()
+                    .map(|clip| clip_info_from_ui(track_id, clip, Some(lane.id))),
+            );
+        }
         info.note_clips
             .extend(
                 content
@@ -60,6 +55,7 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
                         loop_start_beats: clip.loop_start_beats,
                         loop_end_beats: clip.loop_end_beats,
                         groove_grid: clip.groove_grid,
+                        scale: clip.scale,
                         color_index: clip.color_index,
                     }),
             );
@@ -71,6 +67,63 @@ pub(super) fn timeline_info_from_ui(timeline: &ArrangementTimeline) -> TimelineI
         }
     }
     info
+}
+
+fn clip_info_from_ui(track_id: TrackId, clip: &UiClip, take_lane: Option<u32>) -> ClipInfo {
+    ClipInfo {
+        id: clip.id,
+        track_id,
+        name: clip.name.clone(),
+        position: clip.position,
+        source_offset: clip.source_offset,
+        start_marker: Some(clip.start_marker),
+        duration: clip.duration,
+        source: Some(clip.source.clone()),
+        file_path: match &clip.source {
+            MediaSourceRef::LocalFile { path } => Some(path.clone()),
+            _ => None,
+        },
+        loop_enabled: clip.loop_enabled,
+        loop_start: clip.loop_start,
+        loop_end: clip.loop_end,
+        gain_db: clip.gain_db,
+        fades: clip.fades,
+        playback_direction: clip.playback_direction,
+        transient_markers: clip.transient_markers.clone(),
+        warp_markers: clip.warp_markers.clone(),
+        transpose: clip.transpose,
+        original_bpm: clip.original_bpm,
+        warped: clip.warped,
+        warped_to_bpm: clip.warped_to_bpm,
+        color_index: clip.color_index,
+        take_lane,
+    }
+}
+
+/// Names the take lanes as saved, adding those left empty.
+pub(super) fn apply_take_lane_names(timeline: &mut ArrangementTimeline, saved: &TimelineInfo) {
+    for info in &saved.take_lanes {
+        let lane = take_lane_mut(timeline.ensure(info.track_id), info.lane);
+        lane.name = info.name.clone();
+    }
+    for content in timeline.by_track.values_mut() {
+        content.take_lanes.sort_by_key(|lane| lane.id);
+    }
+}
+
+fn take_lane_mut(content: &mut TrackTimelineContent, id: u32) -> &mut TakeLane {
+    let at = match content.take_lanes.iter().position(|lane| lane.id == id) {
+        Some(at) => at,
+        None => {
+            content.take_lanes.push(TakeLane {
+                id,
+                name: format!("Take {id}"),
+                clips: Vec::new(),
+            });
+            content.take_lanes.len() - 1
+        }
+    };
+    &mut content.take_lanes[at]
 }
 
 pub(super) fn section_info_from_ui(section: &Section) -> SectionInfo {
@@ -119,6 +172,7 @@ pub(super) fn timeline_without_audio(info: &TimelineInfo) -> ArrangementTimeline
             loop_start_beats: clip.loop_start_beats,
             loop_end_beats: clip.loop_end_beats,
             groove_grid: clip.groove_grid,
+            scale: clip.scale,
             color_index: clip.color_index,
         });
     }
@@ -164,7 +218,12 @@ pub(super) fn install_loaded_clip(
     let source_end = warp_markers.source_end(identity_source_end);
     let mut transient_markers = loaded.info.transient_markers;
     transient_markers.retain_source_range(source_offset, source_end);
-    timeline.ensure(loaded.info.track_id).clips.push(UiClip {
+    let content = timeline.ensure(loaded.info.track_id);
+    let clips = match loaded.info.take_lane {
+        Some(lane) => &mut take_lane_mut(content, lane).clips,
+        None => &mut content.clips,
+    };
+    clips.push(UiClip {
         id: loaded.info.id,
         name: loaded.info.name,
         audio: loaded.audio,
@@ -269,6 +328,12 @@ pub(super) fn apply_timeline_sources(timeline: &mut ArrangementTimeline, saved: 
             content
                 .clips
                 .iter_mut()
+                .chain(
+                    content
+                        .take_lanes
+                        .iter_mut()
+                        .flat_map(|lane| &mut lane.clips),
+                )
                 .find(|clip| clip.id == saved_clip.id)
         }) {
             if let Some(source) = &saved_clip.source {
@@ -340,6 +405,7 @@ mod tests {
                     original_bpm: None,
                     warped: false,
                     warped_to_bpm: None,
+                    take_lane: None,
                     color_index: None,
                 },
                 audio: Arc::new(vibez_core::audio_buffer::DecodedAudio {
@@ -387,6 +453,41 @@ mod tests {
     }
 
     #[test]
+    fn take_lanes_round_trip_beside_the_comp() {
+        let track_id = TrackId::new();
+        let mut timeline = ArrangementTimeline::default();
+        let content = timeline.ensure(track_id);
+        content.clips.push(UiClip::test_clip(0, 64));
+        content.take_lanes.push(TakeLane {
+            id: 2,
+            name: "Chorus".into(),
+            clips: vec![UiClip::test_clip(0, 64)],
+        });
+
+        let info = timeline_info_from_ui(&timeline);
+        assert_eq!(info.clips.len(), 2);
+        let mut restored = ArrangementTimeline::default();
+        for clip in info.clips.iter().cloned() {
+            install_loaded_clip(
+                &mut restored,
+                crate::message::LoadedClipData {
+                    source: UiClip::test_source(),
+                    audio: Arc::clone(&timeline.by_track[&track_id].clips[0].audio),
+                    original_audio: None,
+                    info: clip,
+                },
+            );
+        }
+        apply_take_lane_names(&mut restored, &info);
+
+        let content = restored.get(track_id).unwrap();
+        assert_eq!(content.clips.len(), 1);
+        assert_eq!(content.take_lanes.len(), 1);
+        assert_eq!(content.take_lanes[0].name, "Chorus");
+        assert_eq!(content.take_lanes[0].clips.len(), 1);
+    }
+
+    #[test]
     fn authored_section_midi_projects_to_document_and_back() {
         let track_id = TrackId::new();
         let mut section = Section::new(2);
@@ -410,6 +511,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 4.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+                scale: None,
                 color_index: None,
             });
 

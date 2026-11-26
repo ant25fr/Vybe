@@ -216,6 +216,7 @@ fn perform_gesture_uses_the_active_section_lane_not_arrange_automation() {
                     track_id,
                     PreparedPlaybackSource::new(
                         vec![EngineClip {
+                            audition: false,
                             id: ClipId::new(),
                             audio: constant_audio(512),
                             position: 0,

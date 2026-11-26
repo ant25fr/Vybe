@@ -128,6 +128,13 @@ impl App {
             self.state.status_text = crate::domains::arrangement::PROJECT_TRACKS_FULL.into();
             return;
         }
+        if matches!(landing, MidiLanding::Arrange { .. })
+            && plan.iter().any(|planned| {
+                matches!(planned.track, MidiClipTrack::Existing(id) if self.refuse_frozen_track(id))
+            })
+        {
+            return;
+        }
         self.push_undo_snapshot(None);
         self.mark_project_dirty();
         let landed: Vec<_> = plan

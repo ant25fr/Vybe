@@ -437,6 +437,8 @@ impl TimelineEditorState {
             loop_start_beats: 0.0,
             loop_end_beats: total_duration,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            // The first clip's scale carries over.
+            scale: clip_data[0].scale,
             color_index: None,
         };
         engine.send(joined.add_command(track_id));

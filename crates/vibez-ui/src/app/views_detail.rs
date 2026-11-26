@@ -23,6 +23,9 @@ use super::*;
 const DETAIL_CARD_PADDING: f32 = 10.0;
 const AUDIO_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 260.0;
 const MIDI_DETAIL_PANEL_PREFERRED_HEIGHT: f32 = 360.0;
+/// The shortest the panel gets over the audio Clip editor: its tabs and the
+/// whole inspector, down to the Gain and Pitch knobs.
+const AUDIO_CLIP_PANEL_MIN_HEIGHT: f32 = 430.0;
 // The chrome row above the work column, the status bar below it and the
 // frame gaps around them, which a dragged detail panel always leaves alone.
 const APP_CHROME_AND_GAPS_HEIGHT: f32 = super::views_control_bar_style::BAR_HEIGHT
@@ -95,6 +98,12 @@ fn effective_detail_panel_height(
                 detail_panel_resting_maximum_height(window_height, workspace_min),
             ),
     }
+}
+
+/// `height` lifted to an editor's `floor`, as far as the window's `maximum`
+/// allows: the floor never raises the maximum.
+fn raised_to_floor(height: f32, floor: f32, maximum: f32) -> f32 {
+    height.max(floor.min(maximum))
 }
 
 fn visible_note_clip_for_track(editor: &TimelineEditorState, track_id: TrackId) -> Option<ClipId> {
@@ -296,6 +305,21 @@ impl App {
         }
     }
 
+    /// The shortest the panel gets over what it shows now.
+    fn detail_floor_height(&self) -> f32 {
+        let editor = self.state.active_timeline_editor();
+        let audio_editor_shown = self.state.view.detail_panel_tab == DetailPanelTab::Clip
+            && !self.midi_clip_editor_visible()
+            && editor.selected_track.is_some_and(|track_id| {
+                single_selected_audio_clip_for_track(editor, track_id).is_some()
+            });
+        if audio_editor_shown {
+            AUDIO_CLIP_PANEL_MIN_HEIGHT
+        } else {
+            DETAIL_PANEL_MIN_HEIGHT
+        }
+    }
+
     pub(super) fn view_detail_panel(&self) -> Element<'_, Message> {
         let detail_content: Element<'_, Message> = if let Some(track) = self
             .state
@@ -418,11 +442,18 @@ impl App {
     }
 
     pub(super) fn effective_detail_height(&self) -> f32 {
-        effective_detail_panel_height(
+        let window_height = self.state.view.window_height;
+        let workspace_min = self.workspace_card_min_height();
+        let height = effective_detail_panel_height(
             self.state.view.detail_panel_height,
-            self.state.view.window_height,
-            self.workspace_card_min_height(),
+            window_height,
+            workspace_min,
             self.detail_editor_preferred_height(),
+        );
+        raised_to_floor(
+            height,
+            self.detail_floor_height(),
+            detail_panel_maximum_height(window_height, workspace_min),
         )
     }
 
@@ -432,13 +463,13 @@ impl App {
     /// roll can be enlarged until the workspace is at its minimum — one
     /// visible track in Arrange — and shrunk below the editor's preference.
     pub(super) fn detail_panel_drag_height(&self, cursor_y: f32) -> f32 {
-        crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height).clamp(
-            DETAIL_PANEL_MIN_HEIGHT,
-            detail_panel_maximum_height(
-                self.state.view.window_height,
-                self.workspace_card_min_height(),
-            ),
-        )
+        let maximum = detail_panel_maximum_height(
+            self.state.view.window_height,
+            self.workspace_card_min_height(),
+        );
+        let height = crate::shell_layout::detail_height_at(cursor_y, self.state.view.window_height)
+            .clamp(DETAIL_PANEL_MIN_HEIGHT, maximum);
+        raised_to_floor(height, self.detail_floor_height(), maximum)
     }
 
     pub(super) fn view_clip_placeholder(&self) -> Element<'_, Message> {
@@ -538,6 +569,7 @@ impl App {
         let clip_view = visible_clip.and_then(|clip| self.state.view.clip_editor_view(clip.id));
         piano_widget.view = clip_view;
         piano_widget.pad_labels = self.drum_pad_labels(track_id);
+        piano_widget.scale = self.edited_note_clip().and_then(|(_, _, scale)| scale);
         piano_widget.wheel_zoom = self.wheel_zoom();
         velocity_widget.view = clip_view;
         piano_widget.reserve_arrow_keys = self.state.view.workspace
@@ -740,6 +772,7 @@ impl App {
         let header_row = row![
             label,
             mode_row,
+            self.piano_roll_scale_controls(),
             horizontal_space(),
             self.clip_grid_snap_list()
         ]
@@ -770,7 +803,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{
-        effective_detail_panel_height, focused_note_clip_for_track,
+        effective_detail_panel_height, focused_note_clip_for_track, raised_to_floor,
         resolved_detail_playhead_samples, single_selected_audio_clip_for_track,
         visible_note_clip_for_track,
     };
@@ -899,6 +932,14 @@ mod tests {
             effective_detail_panel_height(Some(320.0), 900.0, 440.0, 260.0),
             320.0
         );
+    }
+
+    #[test]
+    fn an_editor_s_floor_lifts_the_panel_but_never_past_the_maximum() {
+        assert_eq!(raised_to_floor(280.0, 430.0, 628.0), 430.0);
+        assert_eq!(raised_to_floor(500.0, 430.0, 628.0), 500.0);
+        assert_eq!(raised_to_floor(280.0, 430.0, 366.0), 366.0);
+        assert_eq!(raised_to_floor(200.0, 180.0, 628.0), 200.0);
     }
 
     #[test]
@@ -1035,5 +1076,102 @@ mod clip_editor_zoom_tests {
         app.state.arrangement.selected_note_clip = Some((track_id, clip_id));
 
         assert_eq!(app.clip_editor_grid(), SnapGrid::EIGHTH);
+    }
+}
+
+/// A root of the scale menu; `None` turns scale mode off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RootChoice(Option<u8>);
+
+impl std::fmt::Display for RootChoice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.map_or("Scale off", |root| {
+            vibez_core::scale::ROOT_NAMES[usize::from(root % 12)]
+        }))
+    }
+}
+
+impl App {
+    /// The note clip open in the piano roll, with its scale.
+    fn edited_note_clip(
+        &self,
+    ) -> Option<(
+        vibez_core::id::TrackId,
+        vibez_core::id::ClipId,
+        Option<vibez_core::scale::Scale>,
+    )> {
+        let editor = self.state.active_timeline_editor();
+        let (track_id, clip_id) = editor.selected_clips.iter().find_map(|clip| match clip {
+            crate::state::ArrangementSelection::NoteClip { track_id, clip_id } => {
+                Some((*track_id, *clip_id))
+            }
+            _ => None,
+        })?;
+        let clip = editor
+            .timeline
+            .get(track_id)?
+            .note_clips
+            .iter()
+            .find(|clip| clip.id == clip_id)?;
+        Some((track_id, clip_id, clip.scale))
+    }
+
+    /// Scale root and kind, snapping, and the chord drawn notes make.
+    fn piano_roll_scale_controls(&self) -> Element<'_, Message> {
+        use vibez_core::scale::{ChordKind, Scale, ScaleKind};
+        let state = &self.state.piano_roll;
+        let edited = self.edited_note_clip();
+        let scale = edited.and_then(|(_, _, scale)| scale);
+        let kind = scale.map(|scale| scale.kind).unwrap_or_default();
+        let roots: Vec<RootChoice> = std::iter::once(RootChoice(None))
+            .chain((0..12).map(|root| RootChoice(Some(root))))
+            .collect();
+        let mut controls = row![pick_list(
+            roots,
+            Some(RootChoice(scale.map(|scale| scale.root))),
+            move |choice: RootChoice| match edited {
+                Some((track, clip, _)) => Message::PianoRoll(PianoRollMsg::SetScale(
+                    track,
+                    clip,
+                    choice.0.map(|root| Scale { root, kind }),
+                )),
+                // No clip to give a scale to: the choice changes nothing.
+                None => Message::PianoRoll(PianoRollMsg::SetChord(state.chord)),
+            },
+        )
+        .text_size(10)
+        .padding([2, 6])]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+        if let (Some((track, clip, _)), Some(scale)) = (edited, scale) {
+            controls = controls.push(
+                pick_list(ScaleKind::ALL, Some(scale.kind), move |kind| {
+                    Message::PianoRoll(PianoRollMsg::SetScale(
+                        track,
+                        clip,
+                        Some(Scale { kind, ..scale }),
+                    ))
+                })
+                .text_size(10)
+                .padding([2, 6]),
+            );
+            controls = controls.push(
+                button(text("In scale").size(10))
+                    .on_press(Message::PianoRoll(PianoRollMsg::ToggleScaleSnap))
+                    .padding([2, 6])
+                    .style(crate::widgets::control_style::style(
+                        state.snap_to_scale.then(th::accent),
+                    )),
+            );
+        }
+        controls
+            .push(
+                pick_list(ChordKind::ALL, Some(state.chord), |chord| {
+                    Message::PianoRoll(PianoRollMsg::SetChord(chord))
+                })
+                .text_size(10)
+                .padding([2, 6]),
+            )
+            .into()
     }
 }

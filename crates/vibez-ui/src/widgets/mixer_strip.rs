@@ -55,6 +55,8 @@ pub struct MixerStripView<'a> {
     pub selected: bool,
     /// Sent when the strip's chrome is clicked.
     pub click: Message,
+    /// Sent on a right-click, to open the channel's menu.
+    pub menu: Option<Message>,
     /// The strip's number on the desk: 01 for the first track, R1 for the
     /// first return.
     pub number: String,
@@ -71,6 +73,8 @@ pub struct MixerStripView<'a> {
 /// One row of send knobs.
 const SEND_ROW_H: f32 = 22.0;
 const SEND_KNOB: f32 = 22.0;
+/// Width of a send's pre/post-fader switch.
+const PRE_W: f32 = 28.0;
 /// The sends section: its legend and a full bank of rows. Returns and the
 /// master leave the same room so every strip is the same height.
 const SENDS_H: f32 = TITLE_H + SENDS_PER_BANK as f32 * SEND_ROW_H;
@@ -140,7 +144,10 @@ pub fn view_mixer_strip<'a>(
     .spacing(GAP)
     .width(EQ_W);
     match role {
-        StripRole::Track if !buses.is_empty() => {
+        // A return sends to the other returns, never to a group.
+        StripRole::Track | StripRole::Bus
+            if buses.iter().any(|bus| !bus.is_group && bus.id != track.id) =>
+        {
             left = left.push(view_sends(
                 track,
                 buses,
@@ -150,10 +157,10 @@ pub fn view_mixer_strip<'a>(
             ));
         }
         StripRole::Bus | StripRole::Master if !buses.is_empty() => {
-            let label = if role == StripRole::Bus {
-                "RETURN"
-            } else {
-                "OUTPUT"
+            let label = match role {
+                StripRole::Bus if track.is_group => "GROUP",
+                StripRole::Bus => "RETURN",
+                _ => "OUTPUT",
             };
             left = left.push(container(legend(label)).height(SENDS_H));
         }
@@ -189,6 +196,25 @@ pub fn view_mixer_strip<'a>(
                 Message::Arrangement(
                     crate::domains::arrangement::ArrangementMsg::ToggleChannelSelection(track.id),
                 ),
+            ));
+        }
+        if role == StripRole::Bus && track.is_group {
+            // Folding hides the group's strips here and its lanes in Arrange.
+            buttons = buttons.push(chip(
+                if track.folded { "+" } else { "-" },
+                26.0,
+                track.folded.then(th::accent),
+                Message::Arrangement(
+                    crate::domains::arrangement::ArrangementMsg::ToggleGroupFold(track.id),
+                ),
+            ));
+        }
+        if role == StripRole::Track {
+            buttons = buttons.push(chip(
+                "FRZ",
+                26.0,
+                track.frozen_clip.is_some().then(th::accent),
+                Message::ToggleTrackFreeze(track.id),
             ));
         }
         buttons = buttons
@@ -279,7 +305,11 @@ pub fn view_mixer_strip<'a>(
     // the detail panel follows the mixer like it follows the
     // arrangement headers. Knobs, faders, and buttons still win
     // their own clicks.
-    iced::widget::mouse_area(body).on_press(view.click).into()
+    let strip = iced::widget::mouse_area(body).on_press(view.click);
+    match view.menu {
+        Some(menu) => strip.on_right_press(menu).into(),
+        None => strip.into(),
+    }
 }
 
 /// The line across a selected strip's top, in its track colour; inset
@@ -418,6 +448,10 @@ fn view_sends<'a>(
     };
     let mut rows = column![container(self::legend(legend)).height(TITLE_H)];
     for bus in bank_buses(buses, bank) {
+        // Its own row and the ones that would loop back stay empty.
+        let bus = bus
+            .filter(|bus| !bus.is_group)
+            .filter(|bus| !crate::state::send_would_loop(buses, track.id, bus.id));
         let send: Element<'a, Message> = match bus {
             Some(bus) => {
                 let colour = th::track_color(bus.color_index);
@@ -426,7 +460,7 @@ fn view_sends<'a>(
                     dot(colour),
                     text(crate::typography::fit(
                         &bus.name,
-                        EQ_W - SEND_KNOB - 22.0,
+                        EQ_W - SEND_KNOB - PRE_W - 27.0,
                         10.0,
                         iced::Font::DEFAULT
                     ))
@@ -435,6 +469,7 @@ fn view_sends<'a>(
                     .color(th::text_dim())
                     .wrapping(text::Wrapping::None)
                     .width(Length::Fill),
+                    pre_fader_switch(track, bus.id, colour),
                     canvas(EffectKnobWidget::for_send(track.id, bus.id, amount, colour))
                         .width(SEND_KNOB)
                         .height(SEND_KNOB),
@@ -456,6 +491,30 @@ fn view_sends<'a>(
         rows = rows.push(send);
     }
     container(rows).height(SENDS_H).into()
+}
+
+/// Lit "PRE" when the send leaves before the fader, "POST" when after.
+fn pre_fader_switch<'a>(
+    track: &ProjectTrack,
+    bus_id: vibez_core::id::TrackId,
+    colour: Color,
+) -> Element<'a, Message> {
+    let pre = track.pre_fader_sends.contains(&bus_id);
+    button(
+        text(if pre { "PRE" } else { "POST" })
+            .size(8)
+            .wrapping(text::Wrapping::None),
+    )
+    .on_press(Message::Arrangement(
+        crate::domains::arrangement::ArrangementMsg::ToggleSendPreFader {
+            track_id: track.id,
+            bus_id,
+        },
+    ))
+    .padding([1, 2])
+    .width(PRE_W)
+    .style(crate::widgets::control_style::style(pre.then_some(colour)))
+    .into()
 }
 
 fn effective_send_amount(

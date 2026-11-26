@@ -14,8 +14,8 @@ use crate::domains::transport::TransportMsg;
 use crate::domains::view::ViewMsg;
 use crate::message::Message;
 use crate::state::{
-    ArrangementMarqueeRect, ArrangementSelection, ClipDragPreview, ClipSpan, ContextMenuTarget,
-    GridConfig, ProjectTrack, TrackTimelineContent, UndoGestureId,
+    ArrangementMarqueeRect, ArrangementSelection, AudioClipRotaryField, ClipDragPreview, ClipSpan,
+    ContextMenuTarget, GridConfig, ProjectTrack, TrackTimelineContent, UndoGestureId,
 };
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::{SnapContext, SnapTargets};
@@ -100,6 +100,8 @@ pub struct TrackClipCanvas {
     pub total_beats: f64,
     pub sample_rate: u32,
     pub bpm: f64,
+    /// The time signatures the grid follows.
+    pub meter: vibez_core::meter::MeterMap,
     pub selected: bool,
     pub track_color: Color,
     pub muted: bool,
@@ -190,6 +192,7 @@ impl TrackClipCanvas {
                 loop_enabled: c.loop_enabled,
                 loop_start: c.loop_start,
                 loop_end: c.loop_end,
+                gain_db: c.gain_db.db(),
                 fade_in_frames: c.fades.fade_in_frames(),
                 fade_out_frames: c.fades.fade_out_frames(),
                 fade_in_curve: c.fades.fade_in_curve(),
@@ -271,6 +274,7 @@ impl TrackClipCanvas {
             total_beats,
             sample_rate,
             bpm,
+            meter: Default::default(),
             selected,
             track_color,
             muted: track.mute,
@@ -399,6 +403,17 @@ impl TrackClipCanvas {
     }
 }
 
+impl TrackClipCanvas {
+    fn clip_gain_message(&self, clip_id: ClipId, db: f32) -> Message {
+        Message::Arrangement(ArrangementMsg::SetAudioClipRotaryValue {
+            track_id: self.track_id,
+            clip_id,
+            field: AudioClipRotaryField::Gain,
+            value: db,
+        })
+    }
+}
+
 impl canvas::Program<Message> for TrackClipCanvas {
     type State = ClipInteractionState;
 
@@ -426,7 +441,9 @@ impl canvas::Program<Message> for TrackClipCanvas {
                 ClipDragAction::MoveClip { .. } => mouse::Interaction::Grabbing,
                 ClipDragAction::ResizeClip { .. } => mouse::Interaction::ResizingHorizontally,
                 ClipDragAction::FadeClip(_) => mouse::Interaction::ResizingHorizontally,
-                ClipDragAction::FadeCurve(_) => mouse::Interaction::ResizingVertically,
+                ClipDragAction::FadeCurve(_) | ClipDragAction::ClipGain(_) => {
+                    mouse::Interaction::ResizingVertically
+                }
                 ClipDragAction::CrossfadeCurve(_) => mouse::Interaction::ResizingVertically,
                 ClipDragAction::RegionSelect { .. } => mouse::Interaction::Crosshair,
                 ClipDragAction::PendingSeek { .. } => mouse::Interaction::Text,
@@ -440,7 +457,8 @@ impl canvas::Program<Message> for TrackClipCanvas {
                     fade_drag::FadeControlDrag::Length(_) => {
                         mouse::Interaction::ResizingHorizontally
                     }
-                    fade_drag::FadeControlDrag::Curve(_)
+                    fade_drag::FadeControlDrag::Gain(_)
+                    | fade_drag::FadeControlDrag::Curve(_)
                     | fade_drag::FadeControlDrag::CrossfadeCurve(_) => {
                         mouse::Interaction::ResizingVertically
                     }
@@ -494,7 +512,29 @@ impl canvas::Program<Message> for TrackClipCanvas {
             canvas::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)) => {
                 if let Some(pos) = cursor.position_in(bounds) {
                     if let Some(control) = self.fade_control_hit(pos, bounds.height) {
+                        // A double-click on the gain handle returns to 0 dB.
+                        if let fade_drag::FadeControlDrag::Gain(drag) = &control {
+                            if state.double_click.press(
+                                Instant::now(),
+                                pos,
+                                DOUBLE_CLICK_WINDOW,
+                                Some(CLICK_SLOP_PX),
+                            ) {
+                                state.double_click.clear();
+                                state.drag = None;
+                                let reset = (drag.current() != 0.0).then(|| {
+                                    self.clip_gain_message(drag.clip_id, 0.0)
+                                        .in_undo_gesture(drag.undo_gesture)
+                                });
+                                return (canvas::event::Status::Captured, reset);
+                            }
+                        } else {
+                            state.double_click.clear();
+                        }
                         state.drag = Some(match control {
+                            fade_drag::FadeControlDrag::Gain(drag) => {
+                                ClipDragAction::ClipGain(drag)
+                            }
                             fade_drag::FadeControlDrag::Length(drag) => {
                                 ClipDragAction::FadeClip(drag)
                             }
@@ -744,6 +784,13 @@ impl canvas::Program<Message> for TrackClipCanvas {
                                     self.edge_step(state, local),
                                 );
                             }
+                            ClipDragAction::ClipGain(drag) => {
+                                let edit = drag.drag_to(local.y, state.shift_held).map(|db| {
+                                    self.clip_gain_message(drag.clip_id, db)
+                                        .in_undo_gesture(drag.undo_gesture)
+                                });
+                                return (canvas::event::Status::Captured, edit);
+                            }
                             ClipDragAction::FadeClip(drag) => {
                                 let handle = self
                                     .snap_targets
@@ -956,6 +1003,7 @@ impl canvas::Program<Message> for TrackClipCanvas {
                         ClipDragAction::MoveClip { undo_gesture, .. }
                         | ClipDragAction::ResizeClip { undo_gesture, .. },
                     ) => undo_gesture,
+                    Some(ClipDragAction::ClipGain(drag)) => drag.undo_gesture,
                     Some(ClipDragAction::FadeClip(drag)) => drag.undo_gesture,
                     Some(ClipDragAction::FadeCurve(drag)) => drag.undo_gesture,
                     Some(ClipDragAction::CrossfadeCurve(drag)) => drag.undo_gesture,

@@ -48,6 +48,7 @@ fn arrange_with_open_clip() -> (App, TrackId, ClipId) {
             loop_start_beats: 0.0,
             loop_end_beats: 16.0,
             groove_grid: GrooveGrid::Off,
+            scale: None,
             color_index: None,
         });
     app.state.arrangement.selected_track = Some(id);

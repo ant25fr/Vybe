@@ -120,19 +120,9 @@ impl ProjectTracksState {
     }
 
     fn move_track(&mut self, track_id: TrackId, up: bool, engine: &mut impl EngineHandle) {
-        if let Some(idx) = self.tracks.iter().position(|t| t.id == track_id) {
-            let target = if up {
-                idx.checked_sub(1)
-            } else if idx + 1 < self.tracks.len() {
-                Some(idx + 1)
-            } else {
-                None
-            };
-            if let Some(target) = target {
-                self.tracks.swap(idx, target);
-                let order: Vec<TrackId> = self.tracks.iter().map(|t| t.id).collect();
-                engine.send(EngineCommand::ReorderTracks(order));
-            }
+        if self.move_among_siblings(track_id, up) {
+            let order: Vec<TrackId> = self.tracks.iter().map(|t| t.id).collect();
+            engine.send(EngineCommand::ReorderTracks(order));
         }
     }
 }
@@ -169,6 +159,8 @@ impl TimelineEditorState {
 }
 
 mod project_tracks;
+mod takes;
+pub(crate) use takes::recording_passes;
 
 impl TimelineEditorState {
     pub fn update(
@@ -423,6 +415,35 @@ impl TimelineEditorState {
                     });
                 }
             }
+            ArrangementMsg::ToggleTakeLanes(track_id) => {
+                return self.toggle_take_lanes(engine, track_id);
+            }
+            ArrangementMsg::CompFromTake {
+                track_id,
+                lane,
+                start,
+                end,
+            } => return self.op_comp_from_take(engine, ctx, track_id, lane, start, end),
+            ArrangementMsg::CycleTake { forward } => {
+                return self.op_cycle_take(engine, ctx, forward);
+            }
+            ArrangementMsg::DeleteTakeLane(track_id, lane) => {
+                return self.op_delete_take_lane(engine, track_id, lane);
+            }
+            ArrangementMsg::AuditionTake(track_id, lane) => {
+                let frozen = project_tracks
+                    .tracks
+                    .iter()
+                    .any(|track| track.id == track_id && track.frozen_clip.is_some());
+                if frozen {
+                    action.status = Some("Unfreeze the track to listen to its takes".into());
+                    return action;
+                }
+                return self.op_audition_take(engine, track_id, lane);
+            }
+            ArrangementMsg::SelectionToTakeLane(track_id) => {
+                return self.op_selection_to_take_lane(track_id);
+            }
             ArrangementMsg::DuplicateSelectedClip => {
                 return self.op_duplicate_selection(project_tracks, engine, ctx);
             }
@@ -571,6 +592,7 @@ impl TimelineEditorState {
                             loop_start_beats: clip.loop_start_beats,
                             loop_end_beats: clip.loop_end_beats,
                             groove_grid: clip.groove_grid,
+                            scale: clip.scale,
                             color_index: clip.color_index,
                         });
                     }

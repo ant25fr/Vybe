@@ -68,6 +68,8 @@ pub struct PianoRollWidget {
     /// for any other instrument. Pad rows are labelled and highlighted, the
     /// rest of the keyboard is dimmed, as in Ableton Live's drum-rack roll.
     pub pad_labels: Vec<String>,
+    /// The scale whose rows are lit, in scale mode.
+    pub scale: Option<vibez_core::scale::Scale>,
 }
 
 /// Owned data for drawing a note clip in the piano roll.
@@ -115,6 +117,7 @@ impl PianoRollWidget {
             view: None,
             wheel_zoom: Default::default(),
             pad_labels: Vec::new(),
+            scale: None,
         }
     }
 
@@ -132,6 +135,7 @@ impl PianoRollWidget {
             view: None,
             wheel_zoom: Default::default(),
             pad_labels: Vec::new(),
+            scale: None,
         }
     }
 

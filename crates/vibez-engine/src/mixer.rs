@@ -14,6 +14,8 @@ mod clip_loop_tests;
 mod effect_slot;
 mod groove;
 mod live_hold;
+mod modulation;
+pub(crate) use modulation::{ModulationClock, ModulationState};
 #[cfg(test)]
 mod live_hold_tests;
 mod note_repeat;
@@ -165,16 +167,26 @@ pub struct EngineTrack {
     /// notes it would already be holding.
     pickup_launch_notes: bool,
     pub solo: bool,
+    /// The rendered clip that stands for the track while it is frozen.
+    pub frozen: Option<ClipId>,
+    /// The channel's modulators and the values they move.
+    pub(crate) modulation: ModulationState,
+    /// Peaks held over render slices until a meter event is due.
+    pub(crate) held_peaks: (f32, f32),
+    /// Handed to each instrument the track gets.
+    pub midi_effects: vibez_core::midi_effects::MidiEffects,
     pub swing_offset: Option<SwingOffset>,
     /// Block-evaluated automation override; manual FOLLOW/offset remains intact.
     automation_swing_offset: Option<SwingOffset>,
     /// Pre-allocated per-track mix buffer (interleaved stereo).
     pub mix_buffer: Vec<f32>,
     pub effects: Vec<EffectSlot>,
-    /// Post-fader send amounts into bus channels: `(bus id, 0..1)`.
-    /// Only regular tracks send; buses and the master never do, so
-    /// the routing graph stays acyclic by construction.
+    /// Send amounts into bus channels: `(bus id, 0..1)`, post-fader unless
+    /// listed in `pre_fader_sends`. Tracks and buses send, the master never
+    /// does; the routing graph rejects sends that would form a loop.
     pub sends: Vec<(TrackId, f32)>,
+    /// Buses this channel sends to before its fader and pan (after mute).
+    pub pre_fader_sends: Vec<TrackId>,
     pub instrument: Option<Box<dyn Instrument>>,
     /// Reused block-scheduler scratch.
     timed_note_ons: Vec<groove::TimedNoteOn>,
@@ -221,6 +233,7 @@ impl EngineTrack {
             pos,
             repeat_pos,
             frames,
+            positions,
             channels,
             tempo_map,
             project_swing,
@@ -246,6 +259,7 @@ impl EngineTrack {
             pos,
             repeat_pos,
             frames,
+            positions,
             channels,
             samples_per_beat: spb,
             bpm: tempo_map.bpm,
@@ -273,6 +287,7 @@ impl EngineTrack {
             pos,
             repeat_pos,
             frames,
+            positions,
             channels,
             samples_per_beat: spb,
             bpm,
@@ -288,7 +303,8 @@ impl EngineTrack {
 
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        self.collect_source_note_events(pos, frames, spb, swing);
+        self.collect_source_note_events(pos, positions, spb, swing);
+        self.place_notes_in_frames(positions, frames);
 
         // Note Repeat is generated from live held notes rather than resident
         // clip events, so retain its frame walk while the clip scheduler is
@@ -362,6 +378,7 @@ impl EngineTrack {
             pos,
             repeat_pos,
             frames,
+            positions,
             channels,
             samples_per_beat: spb,
             bpm,
@@ -376,7 +393,8 @@ impl EngineTrack {
             .is_some_and(|instrument| instrument.instrument_kind() == InstrumentKind::DrumRack);
         self.timed_note_ons.clear();
         self.timed_note_offs.clear();
-        self.collect_source_note_events(pos, frames, spb, swing);
+        self.collect_source_note_events(pos, positions, spb, swing);
+        self.place_notes_in_frames(positions, frames);
         let mut note_on_index = 0;
         let mut note_off_index = 0;
         let mut routed = 0;
@@ -433,6 +451,21 @@ impl EngineTrack {
         }
 
         rendered
+    }
+
+    /// Scheduled notes are counted in timeline positions; under an automated
+    /// tempo, move them to the output frame that plays each.
+    fn place_notes_in_frames(&mut self, positions: usize, frames: usize) {
+        if positions == frames || positions == 0 {
+            return;
+        }
+        let place = |position: u32| (u64::from(position) * frames as u64 / positions as u64) as u32;
+        for event in &mut self.timed_note_ons {
+            event.0 = place(event.0);
+        }
+        for event in &mut self.timed_note_offs {
+            event.0 = place(event.0);
+        }
     }
 
     fn collect_source_note_events(
@@ -606,6 +639,7 @@ mod tests {
         let audio = make_test_audio(64, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 0,
@@ -642,6 +676,7 @@ mod tests {
 
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -688,6 +723,7 @@ mod tests {
     fn clip_not_active_before_position() {
         let audio = make_test_audio(100, 0.5);
         let clip = EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 100,
@@ -710,6 +746,7 @@ mod tests {
     fn clip_active_when_overlapping() {
         let audio = make_test_audio(100, 0.5);
         let clip = EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 40,
@@ -733,6 +770,7 @@ mod tests {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 0,
@@ -774,6 +812,7 @@ mod tests {
 
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -823,6 +862,7 @@ mod tests {
 
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: audio.clone(),
             position: 0,
@@ -872,6 +912,7 @@ mod tests {
         });
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -901,6 +942,7 @@ mod tests {
         });
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 0,
@@ -926,6 +968,7 @@ mod tests {
         let audio = make_test_audio(100, 0.5);
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 0,
@@ -972,6 +1015,7 @@ mod tests {
         });
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -1031,6 +1075,7 @@ mod tests {
         });
         let mut track = EngineTrack::new(TrackId::new());
         track.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 0,

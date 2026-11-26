@@ -99,6 +99,27 @@ impl ArrangementState {
         }
 
         let mut action = ArrangementAction::default();
+        // Ungrouping is removing the group bus.
+        let msg = match msg {
+            ArrangementMsg::UngroupSelected => {
+                let group = self.selected_track.and_then(|id| {
+                    let selected = project_tracks.sender(id)?;
+                    if selected.is_group {
+                        Some(id)
+                    } else {
+                        selected.output
+                    }
+                });
+                match group {
+                    Some(group) => ArrangementMsg::RemoveBus(group),
+                    None => {
+                        action.status = Some("Select a group or one of its tracks".to_string());
+                        return action;
+                    }
+                }
+            }
+            other => other,
+        };
         match msg {
             ArrangementMsg::AddTrack => {
                 let Some(id) = project_tracks.add_numbered_track("Track", TrackKind::Audio, engine)
@@ -256,6 +277,129 @@ impl ArrangementState {
                     }
                 }
             }
+            ArrangementMsg::GroupSelectedTracks => {
+                let selected: Vec<TrackId> = if self.selected_channels.is_empty() {
+                    self.selected_track.into_iter().collect()
+                } else {
+                    self.selected_channels.clone()
+                };
+                // Tracks and groups can be grouped; returns and the master
+                // cannot. A channel inside a selected group goes with it.
+                let members = movable(project_tracks, &selected);
+                if members.is_empty() {
+                    action.status = Some("Select the tracks to group".to_string());
+                    return action;
+                }
+                // Grouping inside a group nests the new one there.
+                let mut parents = members
+                    .iter()
+                    .map(|&id| project_tracks.sender(id).and_then(|c| c.output));
+                let first = parents.next().flatten();
+                let parent = parents
+                    .all(|other| other == first)
+                    .then_some(first)
+                    .flatten();
+                if project_tracks.buses.len() >= vibez_engine::mixer::CHANNEL_CAPACITY {
+                    action.status = Some(super::PROJECT_BUSES_FULL.to_string());
+                    return action;
+                }
+                let number = 1 + project_tracks.buses.iter().filter(|b| b.is_group).count();
+                let id = TrackId::new();
+                let name = format!("Group {number}");
+                engine.send(EngineCommand::add_bus(id));
+                let color_index = ((project_tracks.buses.len() + 2) % 8) as u8;
+                let mut group = ProjectTrack::new(id, name.clone(), color_index);
+                group.is_group = true;
+                group.output = parent;
+                attach_channel_eq(engine, &mut group);
+                project_tracks.buses.push(group);
+                for &member in &members {
+                    if let Some(channel) = project_tracks.sender_mut(member) {
+                        channel.output = Some(id);
+                    }
+                }
+                gather(project_tracks, engine);
+                Arc::make_mut(&mut self.timeline).ensure(id);
+                self.selected_track = Some(id);
+                self.selected_channels = vec![id];
+                action.status = Some(format!("Grouped {} channel(s) into {name}", members.len()));
+            }
+            ArrangementMsg::SetMidiEffects(track_id, effects) => {
+                if let Some(track) = project_tracks
+                    .tracks
+                    .iter_mut()
+                    .find(|track| track.id == track_id)
+                {
+                    track.midi_effects = effects;
+                    engine.send(EngineCommand::SetMidiEffects(track_id, effects));
+                }
+            }
+            ArrangementMsg::AddSelectionToGroup(group) => {
+                if !project_tracks
+                    .buses
+                    .iter()
+                    .any(|bus| bus.id == group && bus.is_group)
+                {
+                    return action;
+                }
+                // The group itself and the groups around it cannot move in.
+                let around = project_tracks.ancestors(group);
+                let moving: Vec<TrackId> = movable(project_tracks, &self.selected_channels)
+                    .into_iter()
+                    .filter(|id| *id != group && !around.contains(id))
+                    .collect();
+                if moving.is_empty() {
+                    action.status = Some("Select the tracks to move into the group".to_string());
+                    return action;
+                }
+                for &id in &moving {
+                    if let Some(channel) = project_tracks.sender_mut(id) {
+                        channel.output = Some(group);
+                    }
+                }
+                gather(project_tracks, engine);
+                action.status = Some(format!("Moved {} channel(s) into the group", moving.len()));
+            }
+            ArrangementMsg::RemoveSelectionFromGroup => {
+                let selected: Vec<TrackId> = if self.selected_channels.is_empty() {
+                    self.selected_track.into_iter().collect()
+                } else {
+                    self.selected_channels.clone()
+                };
+                let moves: Vec<(TrackId, Option<TrackId>)> = movable(project_tracks, &selected)
+                    .into_iter()
+                    .filter_map(|id| {
+                        let group = project_tracks.sender(id)?.output?;
+                        let up = project_tracks.sender(group).and_then(|g| g.output);
+                        Some((id, up))
+                    })
+                    .collect();
+                if moves.is_empty() {
+                    action.status = Some("Select tracks that are in a group".to_string());
+                    return action;
+                }
+                for (id, up) in &moves {
+                    if let Some(channel) = project_tracks.sender_mut(*id) {
+                        channel.output = *up;
+                    }
+                }
+                gather(project_tracks, engine);
+                action.status = Some(format!("Moved {} channel(s) out", moves.len()));
+            }
+            ArrangementMsg::MoveSelectionToTopLevel => {
+                let moving = movable(project_tracks, &self.selected_channels);
+                for id in moving {
+                    if let Some(channel) = project_tracks.sender_mut(id) {
+                        channel.output = None;
+                    }
+                }
+                gather(project_tracks, engine);
+            }
+            ArrangementMsg::ToggleGroupFold(group) => {
+                if let Some(bus) = project_tracks.buses.iter_mut().find(|bus| bus.id == group) {
+                    bus.folded = !bus.folded;
+                }
+            }
             ArrangementMsg::AddBus => {
                 if project_tracks.buses.len() >= vibez_engine::mixer::CHANNEL_CAPACITY {
                     action.status = Some(super::PROJECT_BUSES_FULL.to_string());
@@ -275,10 +419,29 @@ impl ArrangementState {
             }
             ArrangementMsg::RemoveBus(bus_id) => {
                 engine.send(EngineCommand::RemoveBus(bus_id));
+                let parent = project_tracks
+                    .buses
+                    .iter()
+                    .find(|bus| bus.id == bus_id)
+                    .and_then(|bus| bus.output);
                 project_tracks.buses.retain(|bus| bus.id != bus_id);
                 Arc::make_mut(&mut self.timeline).remove(bus_id);
                 for track in &mut project_tracks.tracks {
                     track.sends.retain(|(id, _)| *id != bus_id);
+                    track.pre_fader_sends.retain(|id| *id != bus_id);
+                }
+                for channel in project_tracks
+                    .tracks
+                    .iter_mut()
+                    .chain(project_tracks.buses.iter_mut())
+                {
+                    if channel.output == Some(bus_id) {
+                        channel.output = parent;
+                    }
+                }
+                for bus in &mut project_tracks.buses {
+                    bus.sends.retain(|(id, _)| *id != bus_id);
+                    bus.pre_fader_sends.retain(|id| *id != bus_id);
                 }
                 for content in Arc::make_mut(&mut self.timeline).by_track.values_mut() {
                     content.automation.retain(|lane| {
@@ -292,6 +455,29 @@ impl ArrangementState {
                 action.close_track_guis = Some(bus_id);
                 action.remove_track_from_sections = Some(bus_id);
                 action.status = Some("Removed bus".to_string());
+            }
+            ArrangementMsg::ToggleSendPreFader { track_id, bus_id } => {
+                let Some(pre_fader) = project_tracks
+                    .sender(track_id)
+                    .map(|track| !track.pre_fader_sends.contains(&bus_id))
+                else {
+                    return action;
+                };
+                // Selected tracks follow, like the send levels.
+                for id in self.channel_group(track_id) {
+                    let Some(track) = project_tracks.sender_mut(id) else {
+                        continue;
+                    };
+                    track.pre_fader_sends.retain(|bus| *bus != bus_id);
+                    if pre_fader {
+                        track.pre_fader_sends.push(bus_id);
+                    }
+                    engine.send(EngineCommand::SetSendPreFader {
+                        track_id: id,
+                        bus_id,
+                        pre_fader,
+                    });
+                }
             }
             ArrangementMsg::SetSend {
                 track_id,
@@ -307,13 +493,20 @@ impl ArrangementState {
                         .map_or(0.0, |(_, amount)| *amount)
                 };
                 let shift = project_tracks
-                    .tracks
-                    .iter()
-                    .find(|t| t.id == track_id)
+                    .sender(track_id)
                     .map_or(0.0, |track| amount - send_of(track));
                 for id in self.channel_group(track_id) {
-                    // Only tracks send to buses.
-                    let Some(track) = project_tracks.tracks.iter_mut().find(|t| t.id == id) else {
+                    // Selected channels follow, unless that would loop.
+                    // Groups take their members, not sends.
+                    if project_tracks.send_would_loop(id, bus_id)
+                        || project_tracks
+                            .buses
+                            .iter()
+                            .any(|bus| bus.id == bus_id && bus.is_group)
+                    {
+                        continue;
+                    }
+                    let Some(track) = project_tracks.sender_mut(id) else {
                         continue;
                     };
                     let level = if id == track_id {
@@ -345,5 +538,36 @@ impl ArrangementState {
             _ => unreachable!("editor messages are delegated before Arrange track handling"),
         }
         action
+    }
+}
+
+/// The tracks and groups among `selected`, leaving out those already inside
+/// another selected group.
+fn movable(project_tracks: &ProjectTracksState, selected: &[TrackId]) -> Vec<TrackId> {
+    let groupable = |id: TrackId| {
+        project_tracks.tracks.iter().any(|track| track.id == id)
+            || project_tracks
+                .buses
+                .iter()
+                .any(|bus| bus.id == id && bus.is_group)
+    };
+    selected
+        .iter()
+        .copied()
+        .filter(|&id| groupable(id))
+        .filter(|&id| {
+            !project_tracks
+                .ancestors(id)
+                .iter()
+                .any(|group| selected.contains(group))
+        })
+        .collect()
+}
+
+/// Keeps group members together, telling the engine the new order.
+fn gather(project_tracks: &mut ProjectTracksState, engine: &mut impl EngineHandle) {
+    if project_tracks.gather_groups() {
+        let order = project_tracks.tracks.iter().map(|t| t.id).collect();
+        engine.send(EngineCommand::ReorderTracks(order));
     }
 }

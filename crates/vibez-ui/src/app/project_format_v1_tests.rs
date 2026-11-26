@@ -120,7 +120,9 @@ async fn supported_format_matrix_catalogs_auditions_imports_and_reopens() {
             sample_rate,
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
+                take_lanes: Vec::new(),
                 clips: vec![ClipInfo {
+                    take_lane: None,
                     color_index: None,
                     id: ClipId::new(),
                     track_id: track.id,
@@ -257,7 +259,9 @@ async fn warp_arrangement_import_reopens_from_project_media_without_local_source
         reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: ClipId::new(),
                 track_id: track.id,
@@ -370,7 +374,9 @@ async fn v1_reopen_decodes_embedded_audio_after_source_removal() {
         reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: ClipId::new(),
                 track_id: track.id,
@@ -429,6 +435,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
     let track_id = track.id;
     let section_id = vibez_core::id::SectionId::new();
     let clip = |id, position| ClipInfo {
+        take_lane: None,
         color_index: None,
         id,
         track_id,
@@ -467,6 +474,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
         reduced_latency_monitoring: false,
         tracks: vec![track],
         arrange: vibez_project::TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![clip(ClipId::new(), 0)],
             ..vibez_project::TimelineInfo::default()
         },
@@ -478,6 +486,7 @@ async fn shortened_section_audio_and_automation_survive_reopen() {
             launch_quantization: vibez_project::SectionLaunchQuantization::EndOfSection,
             looping: false,
             timeline: vibez_project::TimelineInfo {
+                take_lanes: Vec::new(),
                 clips: vec![clip(ClipId::new(), beyond_boundary_position)],
                 automation: vec![vibez_project::TimelineAutomationInfo {
                     track_id,
@@ -561,7 +570,9 @@ async fn unavailable_media_clip_is_kept_for_relink_on_reopen() {
         reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: clip_id,
                 track_id: track.id,
@@ -625,7 +636,9 @@ async fn sourceless_audio_clip_survives_reopen_and_re_save() {
         reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: vibez_project::TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: clip_id,
                 track_id: track.id,

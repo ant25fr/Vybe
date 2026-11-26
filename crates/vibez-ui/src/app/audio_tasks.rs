@@ -31,16 +31,6 @@ pub(crate) struct QuantizeInput {
     pub(crate) new_clip_id: ClipId,
 }
 
-pub(crate) fn auto_open_midi_input(
-    preferred: Option<&str>,
-) -> Option<vibez_audio_io::midi_input::MidiInputHandle> {
-    let ports = vibez_audio_io::midi_input::list_midi_input_ports().ok()?;
-    let target = preferred
-        .and_then(|name| ports.iter().find(|p| p.as_str() == name).cloned())
-        .or_else(|| ports.into_iter().next())?;
-    vibez_audio_io::midi_input::open_midi_input(&target).ok()
-}
-
 pub(crate) fn compute_audio_quantize(
     input: QuantizeInput,
 ) -> Result<crate::message::AudioQuantizeSuccess, String> {

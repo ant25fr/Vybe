@@ -23,6 +23,7 @@ fn clip(
         start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id,
                 audio: Arc::new(DecodedAudio {
                     channels: vec![samples.to_vec()],

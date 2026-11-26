@@ -25,6 +25,8 @@ const DOUBLE_CLICK_WINDOW: Duration = Duration::from_millis(300);
 
 /// Canvas widget that draws a beat-based ruler with bar.beat labels.
 pub struct RulerWidget {
+    /// The time signatures bars are numbered by.
+    pub meter: vibez_core::meter::MeterMap,
     pub playhead_beats: f64,
     /// Arrange's play-start marker; Section rulers have none.
     pub play_start_beats: Option<f64>,

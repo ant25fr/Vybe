@@ -83,6 +83,13 @@ impl App {
             .project_tracks
             .tracks
             .iter()
+            .chain(
+                self.state
+                    .project_tracks
+                    .buses
+                    .iter()
+                    .filter(|b| b.is_group),
+            )
             .map(|track| track.id)
             .collect();
         let ctx = TrackHeightCtx {
@@ -237,18 +244,25 @@ impl App {
         } else {
             self.state.arrangement.resolve_timeline().editor
         };
-        let focus_name = self.state.view.workspace == Workspace::Perform
-            && self.state.perform.layout == vibez_project::PerformLayout::Clips
-            && matches!(
-                msg,
-                ViewMsg::StartEditingClipName(..) | ViewMsg::StartEditingTrackName { .. }
-            );
+        // A rename starts with the name selected, ready to be typed over.
+        let launcher = self.state.view.workspace == Workspace::Perform
+            && self.state.perform.layout == vibez_project::PerformLayout::Clips;
+        let focus_name = match msg {
+            ViewMsg::StartEditingClipName(..) if launcher => {
+                Some(super::views_clip_launcher::LAUNCHER_NAME_INPUT_ID)
+            }
+            ViewMsg::StartEditingTrackName { .. } if launcher => {
+                Some(super::views_clip_launcher::LAUNCHER_NAME_INPUT_ID)
+            }
+            ViewMsg::StartEditingTrackName { .. } => {
+                Some(crate::widgets::track_header::CHANNEL_NAME_INPUT_ID)
+            }
+            _ => None,
+        };
         let action = self.state.view.update(msg, editor, ctx);
         let task = self.apply_view_action(action);
-        if focus_name {
-            let id = iced::widget::text_input::Id::new(
-                super::views_clip_launcher::LAUNCHER_NAME_INPUT_ID,
-            );
+        if let Some(input) = focus_name {
+            let id = iced::widget::text_input::Id::new(input);
             Task::batch([
                 task,
                 iced::widget::text_input::focus(id.clone()),

@@ -25,6 +25,10 @@ pub enum AutomationMsg {
         track_id: TrackId,
         target: AutomationTarget,
     },
+    /// The Master's tempo lane, starting at the project tempo.
+    AddTempoLane {
+        bpm: f64,
+    },
     RemoveLane {
         track_id: TrackId,
         lane_id: LaneId,
@@ -245,7 +249,8 @@ pub fn normalized_target_value(target: &AutomationTarget, track: &ProjectTrack) 
                 Some(((v - d.min) / (d.max - d.min).max(f32::EPSILON)).clamp(0.0, 1.0))
             }
         }
-        AutomationTarget::PluginParam { .. } => None,
+        // The project tempo belongs to the transport: see `AddTempoLane`.
+        AutomationTarget::PluginParam { .. } | AutomationTarget::Tempo => None,
         AutomationTarget::Send { bus_id } => Some(
             track
                 .sends
@@ -277,6 +282,15 @@ pub static TRACK_SWING_OFFSET_DESCRIPTOR: vibez_core::effect::ParamDescriptor =
         unit: "%",
     };
 
+pub static TEMPO_DESCRIPTOR: vibez_core::effect::ParamDescriptor =
+    vibez_core::effect::ParamDescriptor {
+        name: "Tempo",
+        min: vibez_core::tempo::MIN_AUTOMATED_BPM as f32,
+        max: vibez_core::tempo::MAX_AUTOMATED_BPM as f32,
+        default: vibez_core::constants::DEFAULT_BPM as f32,
+        unit: "BPM",
+    };
+
 /// The static descriptor behind a target, when one exists (effect
 /// and instrument params). Gain/pan have implicit ranges.
 pub fn target_descriptor(
@@ -302,6 +316,7 @@ pub fn target_descriptor(
         }
         AutomationTarget::Send { .. } => Some(&SEND_DESCRIPTOR),
         AutomationTarget::TrackSwingOffset => Some(&TRACK_SWING_OFFSET_DESCRIPTOR),
+        AutomationTarget::Tempo => Some(&TEMPO_DESCRIPTOR),
         _ => None,
     }
 }
@@ -354,6 +369,7 @@ pub fn target_label(target: &AutomationTarget, track: &ProjectTrack) -> String {
         // The bus name isn't reachable from the owning track; the
         // caller-facing label fn below adds it when buses are known.
         AutomationTarget::Send { .. } => "Send".to_string(),
+        AutomationTarget::Tempo => "Tempo".to_string(),
     }
 }
 
@@ -428,6 +444,29 @@ impl AutomationState {
                 self.expanded.insert(track_id);
                 self.picker = None;
                 action.status = Some(format!("Added automation lane: {label}"));
+            }
+            AutomationMsg::AddTempoLane { bpm } => {
+                let track_id = TrackId::MASTER;
+                let content = timeline.ensure(track_id);
+                if content
+                    .automation
+                    .iter()
+                    .any(|lane| lane.target == AutomationTarget::Tempo)
+                {
+                    action.status = Some("That parameter already has a lane".to_string());
+                    return action;
+                }
+                let mut lane = AutomationLane::new(AutomationTarget::Tempo);
+                lane.insert_point(AutomationPoint {
+                    beat: 0.0,
+                    value: vibez_core::tempo::normalized_from_bpm(bpm),
+                    curve: 0.0,
+                });
+                sync_lane(engine, track_id, &lane);
+                content.automation.push(lane);
+                self.expanded.insert(track_id);
+                self.picker = None;
+                action.status = Some("Added automation lane: Tempo".to_string());
             }
             AutomationMsg::RemoveLane { track_id, lane_id } => {
                 let removed_target = timeline.get(track_id).and_then(|content| {

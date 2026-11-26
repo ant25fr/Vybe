@@ -291,6 +291,7 @@ impl TimelineEditorState {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            scale: None,
             color_index: None,
         });
         engine.send(EngineCommand::AddNoteClip {
@@ -345,6 +346,7 @@ impl TimelineEditorState {
             loop_start_beats: 0.0,
             loop_end_beats: duration_beats,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            scale: None,
             color_index: None,
         });
         engine.send(EngineCommand::AddNoteClip {

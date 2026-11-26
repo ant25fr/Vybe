@@ -48,6 +48,7 @@ fn source_with_looping(
             track_id,
             PreparedPlaybackSource::new(
                 vec![EngineClip {
+                    audition: false,
                     id: ClipId::new(),
                     audio: constant_audio(128, value),
                     position: 0,

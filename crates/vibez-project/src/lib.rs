@@ -42,6 +42,16 @@ pub struct TimelineInfo {
     pub note_clips: Vec<NoteClipInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation: Vec<TimelineAutomationInfo>,
+    /// The names of the take lanes; their Clips are among `clips`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub take_lanes: Vec<TakeLaneInfo>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TakeLaneInfo {
+    pub track_id: TrackId,
+    pub lane: u32,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,8 +71,17 @@ pub struct SectionInfo {
 pub struct Project {
     #[serde(default)]
     pub reduced_latency_monitoring: bool,
+    /// Hardware controllers bound to parameters.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub midi_mappings: Vec<vibez_core::midi_map::MidiMapping>,
     pub name: String,
     pub bpm: f64,
+    /// Arrange's time signatures; older projects are 4/4 throughout.
+    #[serde(
+        default,
+        skip_serializing_if = "vibez_core::meter::MeterMap::is_default"
+    )]
+    pub time_signatures: vibez_core::meter::MeterMap,
     /// Immutable timing-model identity used to interpret Project Swing.
     #[serde(default)]
     pub groove_profile: GrooveProfile,
@@ -99,8 +118,10 @@ impl Default for Project {
     fn default() -> Self {
         Self {
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             name: "Untitled".to_string(),
             bpm: vibez_core::constants::DEFAULT_BPM,
+            time_signatures: Default::default(),
             groove_profile: GrooveProfile::default(),
             swing: SwingAmount::default(),
             sample_rate: vibez_core::constants::DEFAULT_SAMPLE_RATE,
@@ -327,6 +348,7 @@ mod tests {
 
     fn audio_clip_at(position: u64) -> ClipInfo {
         ClipInfo {
+            take_lane: None,
             color_index: None,
             id: ClipId::new(),
             track_id: TrackId::new(),
@@ -355,6 +377,7 @@ mod tests {
     #[test]
     fn every_timeline_s_audio_clips_convert_to_another_sample_rate() {
         let timeline_at = |position| TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![audio_clip_at(position)],
             ..TimelineInfo::default()
         };
@@ -452,6 +475,7 @@ mod tests {
         std::fs::write(&path, "existing project").unwrap();
         let project = Project {
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             perform_layout: PerformLayout::Clips,
             ..Default::default()
         };
@@ -465,6 +489,7 @@ mod tests {
     fn mpc2000xl_profile_and_swing_roundtrip_and_old_documents_default() {
         let mut project = Project {
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             groove_profile: GrooveProfile::Mpc2000XlV1,
             swing: SwingAmount::new(0.56),
             ..Project::default()
@@ -602,7 +627,9 @@ mod tests {
         let crossfade_peer = ClipId::new();
 
         let project = Project {
+            time_signatures: Default::default(),
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             master: None,
             buses: Vec::new(),
             name: "Test Project".into(),
@@ -612,7 +639,9 @@ mod tests {
             sample_rate: 48_000,
             tracks: vec![TrackInfo::new("Synth"), TrackInfo::new("Bass")],
             arrange: TimelineInfo {
+                take_lanes: Vec::new(),
                 clips: vec![ClipInfo {
+                    take_lane: None,
                     color_index: None,
                     id: ClipId::new(),
                     track_id: TrackId::new(),
@@ -685,7 +714,9 @@ mod tests {
     fn existing_project_document_roundtrips_semantically_unchanged() {
         let track = TrackInfo::new("Legacy Track");
         let project = Project {
+            time_signatures: Default::default(),
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             name: "Legacy Layout".into(),
             bpm: 123.0,
             groove_profile: GrooveProfile::default(),
@@ -693,7 +724,9 @@ mod tests {
             sample_rate: 44_100,
             tracks: vec![track.clone()],
             arrange: TimelineInfo {
+                take_lanes: Vec::new(),
                 clips: vec![ClipInfo {
+                    take_lane: None,
                     color_index: None,
                     id: ClipId::new(),
                     track_id: track.id,
@@ -794,7 +827,9 @@ mod tests {
 
         let tid = TrackId::new();
         let project = Project {
+            time_signatures: Default::default(),
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             master: None,
             buses: Vec::new(),
             name: "Note Test".into(),
@@ -815,6 +850,7 @@ mod tests {
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
                     groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+                    scale: None,
                     color_index: None,
                     notes: vec![
                         MidiNote {
@@ -877,7 +913,9 @@ mod tests {
         });
 
         let project = Project {
+            time_signatures: Default::default(),
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             master: None,
             buses: Vec::new(),
             name: "FX Test".into(),
@@ -932,6 +970,7 @@ mod automation_persistence_tests {
 
         let project = Project {
             reduced_latency_monitoring: false,
+            midi_mappings: Vec::new(),
             master: None,
             buses: Vec::new(),
             name: "roundtrip".to_string(),
@@ -964,3 +1003,7 @@ mod automation_persistence_tests {
 mod compensation_project_tests;
 #[cfg(test)]
 mod midi_from_project_tests;
+
+#[cfg(test)]
+#[path = "tempo_modulation_project_tests.rs"]
+mod tempo_modulation_project_tests;

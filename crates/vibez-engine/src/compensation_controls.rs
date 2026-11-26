@@ -195,6 +195,7 @@ pub fn automation_stage(target: AutomationTarget) -> vibez_core::routing::NodeSt
         AutomationTarget::TrackGain
         | AutomationTarget::TrackPan
         | AutomationTarget::TrackMute
-        | AutomationTarget::Send { .. } => NodeStage::AfterFader,
+        | AutomationTarget::Send { .. }
+        | AutomationTarget::Tempo => NodeStage::AfterFader,
     }
 }

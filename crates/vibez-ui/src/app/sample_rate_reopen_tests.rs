@@ -11,6 +11,7 @@ const DEVICE_RATE: u32 = 48_000;
 
 fn percs_at_two_seconds(track_id: vibez_core::id::TrackId, source: &Path) -> ClipInfo {
     ClipInfo {
+        take_lane: None,
         color_index: None,
         id: ClipId::new(),
         track_id,

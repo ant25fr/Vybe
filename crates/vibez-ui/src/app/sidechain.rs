@@ -109,7 +109,7 @@ impl App {
     }
 
     pub(super) fn sync_sidechain_routing(&mut self) {
-        self.sync_sidechain_routing_for_input(self.midi_input.is_some());
+        self.sync_sidechain_routing_for_input(!self.midi_ports.open.is_empty());
     }
 
     pub(super) fn sync_sidechain_routing_for_input(&mut self, midi_connected: bool) {

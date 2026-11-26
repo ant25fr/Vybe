@@ -20,6 +20,7 @@ fn routing_channel(id: TrackId) -> RoutingChannel {
         is_bus: id.is_master(),
         effects: Vec::new(),
         sends: Vec::new(),
+        output: None,
         midi_from: None,
     }
 }
@@ -357,7 +358,8 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
             crate::retirement::tests::allocations(|| engine.render_offline_routing_segment(
                 0,
                 &mut output,
-                Some((track, &mut selected))
+                Some((track, &mut selected)),
+                None
             )),
             (0, 0)
         );
@@ -383,7 +385,8 @@ fn isolated_offline_segments_sample_validation_entry_and_post_process_at_distinc
                 crate::retirement::tests::allocations(|| engine.render_offline_routing_segment(
                     8,
                     &mut second,
-                    Some((track, &mut second_selected))
+                    Some((track, &mut second_selected)),
+                    None
                 )),
                 (0, 0)
             );
@@ -445,6 +448,7 @@ fn request() -> (BounceRequest, EffectId) {
             }),
         );
         clips.push(ClipInfo {
+            take_lane: None,
             color_index: None,
             id,
             track_id: track.id,

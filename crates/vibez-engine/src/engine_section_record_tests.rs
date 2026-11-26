@@ -65,6 +65,7 @@ fn source(
             track_id,
             PreparedPlaybackSource::new(
                 vec![EngineClip {
+                    audition: false,
                     id: ClipId::new(),
                     audio,
                     position: 0,

@@ -283,6 +283,15 @@ impl App {
 
         for (track_id, content) in &mut Arc::make_mut(&mut self.state.arrangement.timeline).by_track
         {
+            for take in content
+                .take_lanes
+                .iter_mut()
+                .flat_map(|lane| &mut lane.clips)
+            {
+                if take.warped {
+                    take.position = (take.position as f64 * position_ratio).round() as u64;
+                }
+            }
             for clip in &mut content.clips {
                 if !clip.warped {
                     continue;
@@ -528,6 +537,9 @@ impl App {
         name: String,
         source: MediaSourceRef,
     ) -> Task<Message> {
+        if self.refuse_frozen_track(track_id) {
+            return Task::none();
+        }
         let existing_end = self
             .state
             .arrange_content(track_id)

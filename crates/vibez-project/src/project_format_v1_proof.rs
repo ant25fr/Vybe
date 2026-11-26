@@ -44,7 +44,9 @@ pub fn representative_document() -> ProjectDocumentV1 {
 
     let track_id = track.id;
     let project = Project {
+        time_signatures: Default::default(),
         reduced_latency_monitoring: false,
+        midi_mappings: Vec::new(),
         name: "Project Format V1 proof".into(),
         bpm: 126.0,
         groove_profile: vibez_core::perform::GrooveProfile::default(),
@@ -77,6 +79,7 @@ pub fn representative_document() -> ProjectDocumentV1 {
                 loop_start_beats: 0.0,
                 loop_end_beats: 4.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                scale: None,
                 color_index: None,
             }],
             ..crate::TimelineInfo::default()

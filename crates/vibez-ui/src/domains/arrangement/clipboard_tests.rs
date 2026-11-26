@@ -16,6 +16,7 @@ use crate::state::{
 fn project_tracks(kinds: &[TrackKind]) -> ProjectTracksState {
     ProjectTracksState {
         reduced_latency_monitoring: false,
+        midi_mappings: Vec::new(),
         tracks: kinds
             .iter()
             .enumerate()
@@ -87,6 +88,7 @@ fn note_clip(position_beats: f64) -> UiNoteClip {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     }
 }

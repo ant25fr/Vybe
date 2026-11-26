@@ -7,6 +7,9 @@ pub(crate) struct InstrumentRenderContext<'a> {
     pub pos: u64,
     pub repeat_pos: u64,
     pub frames: usize,
+    /// Timeline positions the block covers: `frames` unless the tempo is
+    /// automated.
+    pub positions: usize,
     pub channels: usize,
     pub tempo_map: &'a TempoMap,
     pub project_swing: SwingAmount,
@@ -17,6 +20,7 @@ pub(super) struct InstrumentRenderBlock {
     pub pos: u64,
     pub repeat_pos: u64,
     pub frames: usize,
+    pub positions: usize,
     pub channels: usize,
     pub samples_per_beat: f64,
     pub bpm: f64,

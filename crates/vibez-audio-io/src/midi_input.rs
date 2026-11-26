@@ -11,8 +11,8 @@
 //!
 //! The parser handles the handful of status bytes the DAW cares about
 //! right now: Note On / Note Off (treating velocity-0 Note On as Note
-//! Off, as most hardware does) and Control Change. Aftertouch, pitch
-//! bend, and SysEx are currently ignored.
+//! Off, as most hardware does), Control Change and pitch bend.
+//! Aftertouch and SysEx are currently ignored.
 //!
 //! Consumers (the UI layer) drain the receiver on every frame tick and
 //! forward the events to the engine as `EngineCommand::ExternalNoteOn` /
@@ -38,6 +38,10 @@ pub enum MidiEvent {
     ControlChange {
         cc: u8,
         value: u8,
+    },
+    /// The pitch wheel, -8192..=8191 with 0 at rest.
+    PitchBend {
+        value: i16,
     },
 }
 
@@ -138,6 +142,14 @@ fn parse_midi_message(message: &[u8]) -> Option<MidiEvent> {
             let value = *message.get(2)?;
             Some(MidiEvent::ControlChange { cc, value })
         }
+        0xE0 => {
+            // 14 bits, least significant seven first.
+            let low = i16::from(*message.get(1)? & 0x7F);
+            let high = i16::from(*message.get(2)? & 0x7F);
+            Some(MidiEvent::PitchBend {
+                value: (high << 7 | low) - 8192,
+            })
+        }
         _ => None,
     }
 }
@@ -177,6 +189,21 @@ mod tests {
             ev,
             Some(MidiEvent::ControlChange { cc: 7, value: 127 })
         ));
+    }
+
+    #[test]
+    fn parses_pitch_bend_around_its_centre() {
+        for (bytes, expected) in [
+            ([0xE0, 0x00, 0x40], 0),
+            ([0xE2, 0x00, 0x00], -8192),
+            ([0xE0, 0x7F, 0x7F], 8191),
+        ] {
+            assert!(matches!(
+                parse_midi_message(&bytes),
+                Some(MidiEvent::PitchBend { value }) if value == expected
+            ));
+        }
+        assert!(parse_midi_message(&[0xE0, 0x00]).is_none());
     }
 
     #[test]

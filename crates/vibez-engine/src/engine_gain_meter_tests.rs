@@ -51,6 +51,7 @@ fn monitored_gain_chain_reports_each_inserts_stereo_input_and_output() {
                     })
                     .collect(),
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -58,6 +59,7 @@ fn monitored_gain_chain_reports_each_inserts_stereo_input_and_output() {
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
         ],
@@ -170,6 +172,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                     is_bus: false,
                     effects: vec![],
                     sends: vec![return_id],
+                    output: None,
                     midi_from: None,
                 },
                 RoutingChannel {
@@ -182,6 +185,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                         inactive_inputs: vec![],
                     }],
                     sends: vec![],
+                    output: None,
                     midi_from: None,
                 },
                 RoutingChannel {
@@ -194,6 +198,7 @@ fn return_and_master_gain_meters_observe_insert_levels_in_both_render_paths() {
                         inactive_inputs: vec![],
                     }],
                     sends: vec![],
+                    output: None,
                     midi_from: None,
                 },
             ],
@@ -515,6 +520,7 @@ fn gain_meter_fixture() -> (
                             inactive_inputs: vec![],
                         }],
                         sends: vec![],
+                        output: None,
                         midi_from: None,
                     },
                     RoutingChannel {
@@ -522,6 +528,7 @@ fn gain_meter_fixture() -> (
                         is_bus: true,
                         effects: vec![],
                         sends: vec![],
+                        output: None,
                         midi_from: None,
                     },
                 ],

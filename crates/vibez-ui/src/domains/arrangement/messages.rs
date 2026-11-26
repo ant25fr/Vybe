@@ -85,9 +85,27 @@ pub enum ArrangementMsg {
     SetTrackSolo(TrackId),
     /// Add a return bus (mixer-only channel).
     AddBus,
+    /// Put the selected tracks into a new group.
+    GroupSelectedTracks,
+    /// Move the other selected tracks and groups into this group.
+    AddSelectionToGroup(TrackId),
+    /// Move the selected tracks and groups out of their group, one level up.
+    RemoveSelectionFromGroup,
+    /// Move the selected tracks and groups out of every group.
+    MoveSelectionToTopLevel,
+    ToggleGroupFold(TrackId),
+    /// The MIDI effects ahead of a track's instrument.
+    SetMidiEffects(TrackId, vibez_core::midi_effects::MidiEffects),
+    /// Dissolve the selected group, or the selected track's group.
+    UngroupSelected,
     /// Remove a bus and every send pointing at it.
     RemoveBus(TrackId),
     /// Set a track's post-fader send amount into a bus.
+    /// Take a track's send to a bus before or after its fader.
+    ToggleSendPreFader {
+        track_id: TrackId,
+        bus_id: TrackId,
+    },
     SetSend {
         track_id: TrackId,
         bus_id: TrackId,
@@ -213,6 +231,24 @@ pub enum ArrangementMsg {
     SetSelectionAsLoop,
     DeleteSelectedClip,
     DuplicateSelectedClip,
+    /// Show or hide the takes under a track.
+    ToggleTakeLanes(TrackId),
+    /// Put what a take holds between two sample positions into the comp.
+    CompFromTake {
+        track_id: TrackId,
+        lane: u32,
+        start: u64,
+        end: u64,
+    },
+    /// Swap each selected Clip for the next or previous take's.
+    CycleTake {
+        forward: bool,
+    },
+    DeleteTakeLane(TrackId, u32),
+    /// Listen to one take in place of its track, or stop listening.
+    AuditionTake(TrackId, u32),
+    /// Keep a track's selected Clips as a new take.
+    SelectionToTakeLane(TrackId),
     CopySelectedClips,
     CutSelectedClips,
     PasteClips,
@@ -416,6 +452,12 @@ impl ArrangementMsg {
                 | Self::SetSelectionAsLoop
                 | Self::DeleteSelectedClip
                 | Self::DuplicateSelectedClip
+                | Self::ToggleTakeLanes(_)
+                | Self::CompFromTake { .. }
+                | Self::CycleTake { .. }
+                | Self::DeleteTakeLane(..)
+                | Self::AuditionTake(..)
+                | Self::SelectionToTakeLane(_)
                 | Self::CopySelectedClips
                 | Self::CutSelectedClips
                 | Self::PasteClips
@@ -462,6 +504,8 @@ impl ArrangementMsg {
                 | ArrangementMsg::SelectArrangementClip { .. }
                 | ArrangementMsg::SetTimeSelection { .. }
                 | ArrangementMsg::SelectAllClips
+                | ArrangementMsg::ToggleTakeLanes(_)
+                | ArrangementMsg::AuditionTake(..)
                 | ArrangementMsg::SetTimeSelectionActive(_)
                 | ArrangementMsg::MarqueeSelect { .. }
                 | ArrangementMsg::EndMarqueeSelect
@@ -494,6 +538,10 @@ impl ArrangementMsg {
             || matches!(
                 self,
                 Self::DuplicateSelectedClip
+                    | Self::CompFromTake { .. }
+                    | Self::CycleTake { .. }
+                    | Self::DeleteTakeLane(..)
+                    | Self::SelectionToTakeLane(_)
                     | Self::MoveSelectedClips { .. }
                     | Self::DragClips { .. }
                     | Self::DropClips { .. }

@@ -151,68 +151,81 @@ impl App {
         let base_layout: Element<'_, Message> = mouse_area(layout_container)
             .on_release(Message::Browser(BrowserMsg::EndDragSample))
             .into();
-        let base_layout: Element<'_, Message> = if let Some(title) = self
+        let ghost: Option<Element<'_, Message>> = self
             .state
             .browser
             .drag_detail(self.state.transport.bpm)
             // The pointer belongs to the other app until the drop, so a
             // badge left at its last position here would mislead.
             .filter(|_| !self.state.browser.drags_from_desktop())
-        {
-            let valid = self.state.browser.drag_accepted();
-            let ghost = canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
-                cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
-                title,
-                valid,
-            })
-            .width(Length::Fill)
-            .height(Length::Fill);
-            stack![base_layout, ghost].into()
-        } else {
-            base_layout
-        };
+            .map(|title| {
+                let valid = self.state.browser.drag_accepted();
+                canvas(crate::widgets::browser_drag_ghost::BrowserDragGhost {
+                    cursor: iced::Point::new(self.state.view.cursor_x, self.state.view.cursor_y),
+                    title,
+                    valid,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+            });
 
+        // The layout stays the first layer of the same stack whether or not
+        // anything is drawn over it: a different root widget would reset every
+        // scroll position and editor state below.
+        let none = || Element::from(Space::new(Length::Shrink, Length::Shrink));
+        stack![
+            base_layout,
+            ghost.unwrap_or_else(none),
+            self.view_overlay().unwrap_or_else(none)
+        ]
+        .into()
+    }
+
+    /// The dialog or menu drawn over the layout, if any is open.
+    fn view_overlay(&self) -> Option<Element<'_, Message>> {
         // Quitting outranks every other overlay: whatever menu was open, the
         // answer to "are you about to lose work" has to be the visible one.
-        if self.state.project.close_confirm_open {
-            stack![base_layout, self.view_close_confirm_overlay()].into()
+        let overlay: Element<'_, Message> = if self.state.project.close_confirm_open {
+            self.view_close_confirm_overlay()
         } else if self.state.project.new_project_layout.is_some() {
-            stack![base_layout, self.view_new_project_overlay()].into()
+            self.view_new_project_overlay()
         } else if self
             .state
             .arrangement
             .pending_project_track_deletion
             .is_some()
         {
-            stack![base_layout, self.view_track_deletion_overlay()].into()
+            self.view_track_deletion_overlay()
         } else if self.state.view.transient_analysis_dialog.is_some() {
-            stack![base_layout, self.view_transient_analysis_overlay()].into()
+            self.view_transient_analysis_overlay()
         } else if self.state.view.drum_rack_slice_dialog.is_some() {
-            stack![base_layout, self.view_drum_rack_slice_overlay()].into()
+            self.view_drum_rack_slice_overlay()
         } else if let Some(choice) = &self.state.view.midi_file_layout_choice {
-            stack![base_layout, self.view_midi_file_layout_overlay(choice)].into()
+            self.view_midi_file_layout_overlay(choice)
         } else if self.state.settings_open {
-            stack![base_layout, self.view_settings_modal()].into()
+            self.view_settings_modal()
         } else if self.state.about_open {
-            stack![base_layout, self.view_about_modal()].into()
+            self.view_about_modal()
         } else if self.state.project.file_menu_open {
-            stack![base_layout, self.view_file_menu_overlay()].into()
+            self.view_file_menu_overlay()
         } else if self.state.view.edit_menu_open {
-            stack![base_layout, self.view_edit_menu_overlay()].into()
+            self.view_edit_menu_overlay()
         } else if self.state.view.quick_add.is_some() {
-            stack![base_layout, self.view_quick_add_overlay()].into()
+            self.view_quick_add_overlay()
         } else if self.state.view.context_menu.is_some() {
-            stack![base_layout, self.view_context_menu_overlay()].into()
+            self.view_context_menu_overlay()
         } else if self.state.view.editing_clip_name.is_some()
             && !(self.state.view.workspace == Workspace::Perform
                 && self.state.perform.layout == vibez_project::PerformLayout::Clips)
         {
-            stack![base_layout, self.view_rename_overlay()].into()
+            self.view_rename_overlay()
         } else if self.state.devices.context_menu.is_some() {
-            stack![base_layout, self.view_device_context_menu_overlay()].into()
+            self.view_device_context_menu_overlay()
         } else {
-            base_layout
-        }
+            return None;
+        };
+        Some(overlay)
     }
 
     /// The release notice: a chip in the status bar rather than a
@@ -352,5 +365,31 @@ impl App {
             .padding([0, 16])
             .align_y(iced::alignment::Vertical::Center)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use iced::advanced::widget::Tree;
+    use vibez_core::id::TrackId;
+
+    use crate::domains::devices::DevicesMsg;
+    use crate::message::Message;
+
+    #[test]
+    fn opening_the_device_menu_keeps_the_layout_and_its_scroll_positions() {
+        let mut app = super::super::test_support::app();
+        let before = Tree::new(app.view().as_widget());
+        let _ = app.update(Message::Devices(DevicesMsg::ShowContextMenu {
+            x: 400.0,
+            y: 600.0,
+            track_id: TrackId::MASTER,
+        }));
+        assert!(app.state.devices.context_menu.is_some());
+        let after = Tree::new(app.view().as_widget());
+        // iced keeps a subtree's state while its widget type stays in place.
+        assert!(before.tag == after.tag);
+        assert!(before.children[0].tag == after.children[0].tag);
+        assert_eq!(before.children.len(), after.children.len());
     }
 }

@@ -212,7 +212,9 @@ mod tests {
             sample_rate: 48_000,
             tracks: vec![track.clone()],
             arrange: vibez_project::TimelineInfo {
+                take_lanes: Vec::new(),
                 clips: vec![vibez_core::track::ClipInfo {
+                    take_lane: None,
                     color_index: None,
                     id: ClipId::new(),
                     track_id: track.id,

@@ -426,6 +426,11 @@ pub enum AudioClipFadeEdge {
 pub enum AudioClipRotaryField {
     Gain,
     Transpose,
+    /// A fade's length, as a knob position: see [`fade_frames_at`].
+    ///
+    /// [`fade_frames_at`]: Self::fade_frames_at
+    FadeIn,
+    FadeOut,
 }
 
 impl AudioClipRotaryField {
@@ -433,7 +438,23 @@ impl AudioClipRotaryField {
         match self {
             Self::Gain => AudioClipInspectorField::Gain,
             Self::Transpose => AudioClipInspectorField::Transpose,
+            Self::FadeIn => AudioClipInspectorField::FadeIn,
+            Self::FadeOut => AudioClipInspectorField::FadeOut,
         }
+    }
+
+    /// The fade length at a knob position, 0..1, of a Clip of `duration`
+    /// frames. Cubed, so short fades have most of the travel.
+    pub fn fade_frames_at(position: f32, duration: u64) -> u64 {
+        (f64::from(position.clamp(0.0, 1.0)).powi(3) * duration as f64).round() as u64
+    }
+
+    /// The knob position showing a fade of `frames`.
+    pub fn fade_position(frames: u64, duration: u64) -> f32 {
+        if duration == 0 {
+            return 0.0;
+        }
+        (frames as f64 / duration as f64).clamp(0.0, 1.0).cbrt() as f32
     }
 }
 
@@ -589,6 +610,8 @@ pub struct UiNoteClip {
     pub groove_grid: vibez_core::perform::GrooveGrid,
     /// A color of its own in the timeline; `None` uses the track's color.
     pub color_index: Option<u8>,
+    /// Scale mode of this clip.
+    pub scale: Option<vibez_core::scale::Scale>,
 }
 
 impl UiNoteClip {
@@ -754,6 +777,7 @@ impl UiNoteClip {
             loop_end_beats: duration_beats,
             groove_grid: Default::default(),
             color_index: None,
+            scale: None,
         }
     }
 }
@@ -802,6 +826,20 @@ pub struct ProjectTrack {
     pub effects: Vec<UiEffect>,
     /// Post-fader send amounts into buses: `(bus id, 0..1)`.
     pub sends: Vec<(TrackId, f32)>,
+    /// Buses this track sends to before its fader and pan.
+    pub pre_fader_sends: Vec<TrackId>,
+    /// The group this track mixes into instead of the master.
+    pub output: Option<TrackId>,
+    /// This bus is a group of tracks rather than a return.
+    pub is_group: bool,
+    /// A group shown folded: its members are hidden in Arrange.
+    pub folded: bool,
+    /// The audio clip standing for this track while it is frozen.
+    pub frozen_clip: Option<ClipId>,
+    /// The MIDI effects ahead of the instrument.
+    pub midi_effects: vibez_core::midi_effects::MidiEffects,
+    /// The channel's modulators and what they move.
+    pub modulators: Vec<vibez_core::modulation::Modulator>,
     pub kind: TrackKind,
     pub color_index: u8,
     pub has_instrument: bool,
@@ -855,6 +893,13 @@ impl ProjectTrack {
             peak_r: 0.0,
             effects: Vec::new(),
             sends: Vec::new(),
+            pre_fader_sends: Vec::new(),
+            output: None,
+            is_group: false,
+            folded: false,
+            frozen_clip: None,
+            midi_effects: Default::default(),
+            modulators: Vec::new(),
             kind: TrackKind::Audio,
             color_index,
             has_instrument: false,
@@ -893,6 +938,13 @@ impl ProjectTrack {
             peak_r: 0.0,
             effects: Vec::new(),
             sends: Vec::new(),
+            pre_fader_sends: Vec::new(),
+            output: None,
+            is_group: false,
+            folded: false,
+            frozen_clip: None,
+            midi_effects: Default::default(),
+            modulators: Vec::new(),
             kind,
             color_index,
             has_instrument,
@@ -922,6 +974,16 @@ pub struct TrackTimelineContent {
     pub clips: Vec<UiClip>,
     pub note_clips: Vec<UiNoteClip>,
     pub automation: Vec<vibez_core::automation::AutomationLane>,
+    /// Takes kept under the track; `clips` is the comp that plays.
+    pub take_lanes: Vec<TakeLane>,
+}
+
+/// One take lane of a track.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TakeLane {
+    pub id: u32,
+    pub name: String,
+    pub clips: Vec<UiClip>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

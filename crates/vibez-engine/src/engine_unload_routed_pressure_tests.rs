@@ -64,6 +64,7 @@ fn unique_clip_request(
         start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: clip_id,
                 audio: sample,
                 position: 0,
@@ -110,6 +111,7 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
     let resident = stereo_ramp(512, 0.5, -0.25, 8);
     let resident_owner = Arc::downgrade(&resident);
     let resident_clip = EngineClip {
+        audition: false,
         id: arrange_id,
         audio: resident,
         position: 0,
@@ -170,6 +172,7 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
                 } else {
                     vec![]
                 },
+                output: None,
                 midi_from: None,
             })
             .collect();
@@ -178,6 +181,7 @@ fn assert_combined_routed_unload_pressure(delayed_minimum_credits: bool) {
             is_bus: true,
             effects: vec![],
             sends: vec![],
+            output: None,
             midi_from: None,
         });
         let reports = [(
@@ -568,6 +572,7 @@ fn routed_unload_needs_two_free_credits_without_retiring_the_arrange_buffer() {
         let original = make_audio();
         let mut owners = vec![Arc::downgrade(&original)];
         let clip = EngineClip {
+            audition: false,
             id: clip_id,
             audio: original,
             position: 0,
@@ -725,6 +730,7 @@ fn routed_audio_retired_resident_and_unconsumed_owners_teardown_in_either_order(
             Arc::downgrade(&queued),
         ];
         let clip = EngineClip {
+            audition: false,
             id: clip_id,
             audio: retired,
             position: 0,

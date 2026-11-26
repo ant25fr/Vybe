@@ -26,6 +26,13 @@ fn offline_channel_note_values_cross_full_notes_and_cache_at_seven_boundaries() 
             plugin_instrument: None,
             automation: Vec::new(),
             sends: Vec::new(),
+            pre_fader_sends: Vec::new(),
+            output: None,
+            is_group: false,
+            folded: false,
+            frozen_clip: None,
+            midi_effects: Default::default(),
+            modulators: Vec::new(),
             midi_from: None,
         };
         let track_id = track.id;
@@ -52,6 +59,7 @@ fn offline_channel_note_values_cross_full_notes_and_cache_at_seven_boundaries() 
                 loop_start_beats: clip.loop_start_beats,
                 loop_end_beats: clip.loop_end_beats,
                 groove_grid: clip.groove_grid,
+                scale: None,
                 color_index: None,
             })
             .collect();

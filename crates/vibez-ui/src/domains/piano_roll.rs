@@ -39,6 +39,9 @@ pub enum PianoRollMsg {
         start_marker_beats: f64,
     },
     AddNoteClipToTrack(TrackId),
+    SetScale(TrackId, ClipId, Option<vibez_core::scale::Scale>),
+    ToggleScaleSnap,
+    SetChord(vibez_core::scale::ChordKind),
     SelectNoteClip(TrackId, ClipId),
     AddNote {
         track_id: TrackId,
@@ -132,6 +135,8 @@ impl PianoRollMsg {
                 | PianoRollMsg::SelectNotesInRegion { .. }
                 | PianoRollMsg::ScrollY(_)
                 | PianoRollMsg::ToggleEditMode
+                | PianoRollMsg::ToggleScaleSnap
+                | PianoRollMsg::SetChord(_)
         )
     }
 }
@@ -321,6 +326,7 @@ impl PianoRollState {
                     loop_start_beats: 0.0,
                     loop_end_beats: duration_beats,
                     groove_grid: vibez_core::perform::GrooveGrid::Off,
+                    scale: None,
                     color_index: None,
                 });
                 engine.send(EngineCommand::AddNoteClip {
@@ -351,23 +357,52 @@ impl PianoRollState {
                 start_beat,
                 duration_beats,
             } => {
-                let note = MidiNote {
-                    pitch,
-                    velocity: 100,
-                    start_beat,
-                    duration_beats,
+                let scale = find_track(tracks, track_id)
+                    .and_then(|track| track.note_clips.iter().find(|c| c.id == clip_id))
+                    .and_then(|clip| clip.scale);
+                let pitch = match scale {
+                    Some(scale) if self.snap_to_scale => scale.snap(pitch),
+                    _ => pitch,
                 };
-                if let Some(track) = find_track_mut(tracks, track_id) {
-                    if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
-                        clip.notes.push(note);
+                // The drawn note comes first: the draw gesture goes on to
+                // size the first note added.
+                let (pitches, count) = self.chord.notes(pitch, scale);
+                for (index, &pitch) in pitches[..count].iter().enumerate() {
+                    let note = MidiNote {
+                        pitch,
+                        velocity: 100,
+                        start_beat,
+                        duration_beats,
+                    };
+                    if let Some(track) = find_track_mut(tracks, track_id) {
+                        if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                            // A chord note already there is not doubled.
+                            let there = clip
+                                .notes
+                                .iter()
+                                .any(|n| n.pitch == pitch && n.start_beat == start_beat);
+                            if index > 0 && there {
+                                continue;
+                            }
+                            clip.notes.push(note);
+                        }
                     }
+                    engine.send(EngineCommand::AddNote {
+                        track_id,
+                        clip_id,
+                        insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(note),
+                    });
                 }
-                engine.send(EngineCommand::AddNote {
-                    track_id,
-                    clip_id,
-                    insertion: vibez_engine::clip_insertion::PreparedNoteInsertion::new(note),
-                });
             }
+            PianoRollMsg::SetScale(track_id, clip_id, scale) => {
+                if let Some(clip) = find_track_mut(tracks, track_id)
+                    .and_then(|track| track.note_clips.iter_mut().find(|c| c.id == clip_id))
+                {
+                    clip.scale = scale;
+                }
+            }
+            PianoRollMsg::ToggleScaleSnap => self.snap_to_scale = !self.snap_to_scale,
+            PianoRollMsg::SetChord(chord) => self.chord = chord,
             PianoRollMsg::RemoveNote(track_id, clip_id, note_index) => {
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
@@ -389,7 +424,19 @@ impl PianoRollState {
                     note_index,
                 });
             }
-            PianoRollMsg::EditNote(track_id, clip_id, note_index, new_note) => {
+            PianoRollMsg::EditNote(track_id, clip_id, note_index, mut new_note) => {
+                // A note moved to another pitch lands on the scale.
+                if let Some(clip) = find_track(tracks, track_id)
+                    .and_then(|track| track.note_clips.iter().find(|c| c.id == clip_id))
+                {
+                    let moved = clip
+                        .notes
+                        .get(note_index)
+                        .is_some_and(|note| note.pitch != new_note.pitch);
+                    if let Some(scale) = clip.scale.filter(|_| self.snap_to_scale && moved) {
+                        new_note.pitch = scale.snap(new_note.pitch);
+                    }
+                }
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
                         if note_index < clip.notes.len() {
@@ -544,11 +591,20 @@ impl PianoRollState {
                             .copied()
                             .filter(|&i| i < clip.notes.len())
                             .collect();
+                        // In scale mode the arrows step through the scale's
+                        // degrees; octaves stay octaves.
+                        let scale = clip.scale.filter(|_| {
+                            self.snap_to_scale && delta_semitones.unsigned_abs() % 12 != 0
+                        });
                         for &idx in &indices {
                             let note = &mut clip.notes[idx];
                             note.start_beat = (note.start_beat + delta_beats).max(0.0);
-                            note.pitch =
-                                (note.pitch as i16 + delta_semitones as i16).clamp(0, 127) as u8;
+                            note.pitch = match scale {
+                                Some(scale) => scale.shift(note.pitch, delta_semitones.into()),
+                                None => {
+                                    (note.pitch as i16 + delta_semitones as i16).clamp(0, 127) as u8
+                                }
+                            };
                             updates.push((idx, *note));
                         }
                     }
@@ -570,8 +626,15 @@ impl PianoRollState {
                 let mut updates: Vec<(usize, MidiNote)> = Vec::new();
                 if let Some(track) = find_track_mut(tracks, track_id) {
                     if let Some(clip) = track.note_clips.iter_mut().find(|c| c.id == clip_id) {
+                        let scale = clip.scale.filter(|_| self.snap_to_scale);
                         for &(idx, new_beat, new_pitch) in &moves {
                             if idx < clip.notes.len() {
+                                let new_pitch = match scale {
+                                    Some(scale) if clip.notes[idx].pitch != new_pitch => {
+                                        scale.snap(new_pitch)
+                                    }
+                                    _ => new_pitch,
+                                };
                                 clip.notes[idx].start_beat = new_beat;
                                 clip.notes[idx].pitch = new_pitch;
                                 updates.push((idx, clip.notes[idx]));

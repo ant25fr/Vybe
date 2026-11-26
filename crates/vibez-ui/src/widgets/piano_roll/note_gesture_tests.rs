@@ -59,6 +59,7 @@ impl Editor {
                 loop_start_beats: 0.0,
                 loop_end_beats: CLIP_BEATS,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                scale: None,
                 color_index: None,
             });
         Self {

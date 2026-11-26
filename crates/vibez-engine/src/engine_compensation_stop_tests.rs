@@ -40,6 +40,7 @@ fn setup() -> (
                 inputs: vec![],
                 assignments: vec![],
             }],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -47,6 +48,7 @@ fn setup() -> (
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];

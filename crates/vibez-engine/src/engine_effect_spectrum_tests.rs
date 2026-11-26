@@ -47,6 +47,7 @@ fn fixture(kind: EffectType) -> (AudioEngine, Producer<EngineCommand>, TrackId, 
                     })
                     .collect(),
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -54,6 +55,7 @@ fn fixture(kind: EffectType) -> (AudioEngine, Producer<EngineCommand>, TrackId, 
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
         ],
@@ -302,6 +304,7 @@ fn return_and_master_taps_use_the_selected_insert_before_channel_gain() {
             is_bus: false,
             effects: vec![],
             sends: if master { vec![] } else { vec![selected] },
+            output: None,
             midi_from: None,
         }];
         if !master {
@@ -310,6 +313,7 @@ fn return_and_master_taps_use_the_selected_insert_before_channel_gain() {
                 is_bus: true,
                 effects: effects(),
                 sends: vec![],
+                output: None,
                 midi_from: None,
             });
         }
@@ -318,6 +322,7 @@ fn return_and_master_taps_use_the_selected_insert_before_channel_gain() {
             is_bus: true,
             effects: if master { effects() } else { vec![] },
             sends: vec![],
+            output: None,
             midi_from: None,
         });
         commands
@@ -382,12 +387,14 @@ fn side_tap_delivers_the_selected_outputs_side_signal() {
     let mut receiver = engine.take_side_spectrum_consumer().unwrap();
     assert!(engine.take_side_spectrum_consumer().is_none());
     commands
-        .push(EngineCommand::SetSideSpectrumTap(Some(EffectSpectrumTarget {
-            track_id: track,
-            effect_id: effect,
-            position: EffectSpectrumPosition::Output,
-            generation: 3,
-        })))
+        .push(EngineCommand::SetSideSpectrumTap(Some(
+            EffectSpectrumTarget {
+                track_id: track,
+                effect_id: effect,
+                position: EffectSpectrumPosition::Output,
+                generation: 3,
+            },
+        )))
         .unwrap();
     let input = [0.6, -0.2].repeat(256);
     let mut output = vec![0.0; input.len()];
@@ -407,12 +414,14 @@ fn widener_output_streams_both_mid_and_side_with_one_command() {
     let mut side = engine.take_side_spectrum_consumer().unwrap();
     let mut mid = engine.take_mid_spectrum_consumer().unwrap();
     commands
-        .push(EngineCommand::SetSideSpectrumTap(Some(EffectSpectrumTarget {
-            track_id: track,
-            effect_id: effect,
-            position: EffectSpectrumPosition::Output,
-            generation: 5,
-        })))
+        .push(EngineCommand::SetSideSpectrumTap(Some(
+            EffectSpectrumTarget {
+                track_id: track,
+                effect_id: effect,
+                position: EffectSpectrumPosition::Output,
+                generation: 5,
+            },
+        )))
         .unwrap();
     let input = [0.6, -0.2].repeat(256);
     let mut output = vec![0.0; input.len()];
@@ -422,6 +431,10 @@ fn widener_output_streams_both_mid_and_side_with_one_command() {
     assert_eq!(side.len(), 256);
     assert_eq!(mid.len(), 256);
     // Width 1 leaves the signal untouched: side (L - R) / 2 and mid (L + R) / 2.
-    assert!(side.iter().all(|s| s.generation == 5 && s.value.abs() > 0.01));
-    assert!(mid.iter().all(|s| s.generation == 5 && s.value.abs() > 0.01));
+    assert!(side
+        .iter()
+        .all(|s| s.generation == 5 && s.value.abs() > 0.01));
+    assert!(mid
+        .iter()
+        .all(|s| s.generation == 5 && s.value.abs() > 0.01));
 }

@@ -50,6 +50,25 @@ pub enum EngineCommand {
     Seek(u64),
     /// Change the project tempo.
     SetBpm(f64),
+    /// Click on every beat while the transport plays.
+    SetMetronome(bool),
+    /// Level of the click, 0 to 2 where 1 is the normal level.
+    SetMetronomeVolume(f32),
+    /// Arrange's time signatures.
+    SetMeterMap(vibez_core::meter::MeterMap),
+    /// Add, edit or remove (`None`) one of a channel's modulators.
+    SetModulator {
+        track_id: TrackId,
+        slot: u8,
+        settings: Option<vibez_core::modulation::ModulatorSettings>,
+    },
+    /// Set or remove one parameter a modulator moves.
+    SetModulationLink {
+        track_id: TrackId,
+        slot: u8,
+        link: u8,
+        value: Option<vibez_core::modulation::ModulationLink>,
+    },
     /// Set Project Swing for generated events and opted-in MIDI clips.
     SetProjectSwing(SwingAmount),
     /// Immediately activate a complete resident Section playback source.
@@ -239,6 +258,11 @@ pub enum EngineCommand {
     },
     /// Set the solo state for a track.
     SetTrackSolo(TrackId, bool),
+    /// Freeze a track onto one of its audio clips, or unfreeze it: while
+    /// frozen only that clip plays and the devices are not processed.
+    SetTrackFrozen(TrackId, Option<ClipId>),
+    /// The MIDI effects ahead of a track's instrument.
+    SetMidiEffects(TrackId, vibez_core::midi_effects::MidiEffects),
     /// Set the optional Project Track Swing adjustment used by generated
     /// events and opted-in MIDI clips on this channel.
     SetTrackSwingOffset(TrackId, Option<SwingOffset>),
@@ -250,6 +274,12 @@ pub enum EngineCommand {
     /// Remove a bus and every send pointing at it.
     RemoveBus(TrackId),
     /// Set a track's post-fader send amount into a bus (0.0 = off).
+    /// Take a send before the channel fader and pan instead of after them.
+    SetSendPreFader {
+        track_id: TrackId,
+        bus_id: TrackId,
+        pre_fader: bool,
+    },
     SetSend {
         track_id: TrackId,
         bus_id: TrackId,
@@ -454,6 +484,11 @@ pub enum EngineCommand {
     /// keyboard, Push, virtual cable) to the instrument on the named
     /// track. Routed outside the clip pipeline so it works regardless
     /// of transport state.
+    /// The hardware pitch wheel, applied to a track's instrument.
+    ExternalPitchBend {
+        track_id: TrackId,
+        semitones: f32,
+    },
     ExternalNoteOn {
         track_id: TrackId,
         pitch: u8,

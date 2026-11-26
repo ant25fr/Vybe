@@ -53,6 +53,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -60,6 +61,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];
@@ -75,7 +77,7 @@ fn offline_rate_reuse_is_rejected_before_processing_and_retains_the_owner() {
     assert_eq!(engine.pending_retirements.reserved(), 0);
     assert!(engine.pending_retirements.len() <= 32);
     let mut output = [0.0; 16];
-    engine.render_offline_routing_segment(0, &mut output, None);
+    engine.render_offline_routing_segment(0, &mut output, None, None);
     assert_eq!(engine.pending_retirements.reserved(), 0);
     assert!(engine.pending_retirements.len() <= 32);
     assert!(!engine.compensation_plan.applied_plan_is_valid());

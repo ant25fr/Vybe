@@ -129,6 +129,7 @@ fn fully_compensated_bounce_replays_heard_section_and_live_note_relationship_wit
         for clip in &content.clips {
             clip_audio.insert(clip.id, Arc::clone(&clip.audio));
             audio_clips.push(ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: clip.id,
                 track_id: id,
@@ -166,6 +167,7 @@ fn fully_compensated_bounce_replays_heard_section_and_live_note_relationship_wit
                 loop_start_beats: clip.loop_start_beats,
                 loop_end_beats: clip.loop_end_beats,
                 groove_grid: clip.groove_grid,
+                scale: clip.scale,
                 color_index: None,
             });
         }

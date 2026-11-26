@@ -35,11 +35,16 @@ impl EngineTrack {
             launch_declick: GainRamp::default(),
             pickup_launch_notes: false,
             solo: false,
+            frozen: None,
+            modulation: ModulationState::default(),
+            held_peaks: (0.0, 0.0),
+            midi_effects: Default::default(),
             swing_offset: None,
             automation_swing_offset: None,
             mix_buffer: Vec::with_capacity(crate::routing::MAX_BLOCK_FRAMES * 2),
             effects: Vec::with_capacity(super::DEVICE_CHAIN_CAPACITY),
             sends: Vec::with_capacity(super::CHANNEL_CAPACITY),
+            pre_fader_sends: Vec::with_capacity(super::CHANNEL_CAPACITY),
             instrument: None,
             timed_note_ons: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
             timed_note_offs: Vec::with_capacity(SCHEDULED_NOTES_PER_BLOCK),
@@ -69,6 +74,23 @@ impl EngineTrack {
                 self.sends.push((bus_id, amount));
             }
             None => {}
+        }
+    }
+
+    pub(crate) fn set_send_pre_fader(&mut self, bus_id: TrackId, pre_fader: bool) {
+        let position = self.pre_fader_sends.iter().position(|id| *id == bus_id);
+        match position {
+            Some(index) if !pre_fader => {
+                self.pre_fader_sends.swap_remove(index);
+            }
+            // Bounded like the sends, so the callback never grows it.
+            None if pre_fader
+                && self.pre_fader_sends.len() < super::CHANNEL_CAPACITY
+                && self.pre_fader_sends.len() < self.pre_fader_sends.capacity() =>
+            {
+                self.pre_fader_sends.push(bus_id);
+            }
+            _ => {}
         }
     }
 
@@ -152,7 +174,9 @@ impl EngineTrack {
                 | AutomationTarget::TrackPan
                 | AutomationTarget::TrackSwingOffset
                 | AutomationTarget::EffectParam { .. }
-                | AutomationTarget::Send { .. } => {}
+                | AutomationTarget::Send { .. }
+                // The transport reads the tempo lane itself.
+                | AutomationTarget::Tempo => {}
             }
         }
         if stage.is_none() || stage == Some(vibez_core::routing::NodeStage::Source) {
@@ -551,6 +575,53 @@ impl EngineTrack {
     /// block — which surfaces as a "double beat" when the clip
     /// extends slightly past the looped region (common with warped
     /// samples that aren't exactly one bar).
+    /// The frozen clip's audio alone, at `pos` on the timeline.
+    pub(crate) fn render_frozen(
+        &mut self,
+        clip: ClipId,
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        loop_region: Option<(u64, u64)>,
+    ) {
+        let buf_size = frames * channels;
+        self.ensure_buffer(buf_size);
+        self.playback_source.render_audio_of(
+            Some(clip),
+            &mut self.mix_buffer[..buf_size],
+            pos,
+            frames,
+            channels,
+            loop_region,
+        );
+    }
+
+    /// Render `positions` of the timeline into `frames` of output, so audio
+    /// re-pitches with an automated tempo.
+    pub(crate) fn render_repitched(
+        &mut self,
+        pos: u64,
+        positions: usize,
+        frames: usize,
+        channels: usize,
+        loop_region: Option<(u64, u64)>,
+    ) {
+        if positions == frames {
+            self.render(pos, frames, channels, loop_region);
+            return;
+        }
+        self.ensure_buffer(positions.max(frames) * channels);
+        self.playback_source.render_audio(
+            &mut self.mix_buffer[..positions * channels],
+            pos,
+            positions,
+            channels,
+            loop_region,
+        );
+        repitch(&mut self.mix_buffer, positions, frames, channels);
+        self.apply_launch_declick(frames, channels);
+    }
+
     pub fn render(
         &mut self,
         pos: u64,
@@ -571,6 +642,23 @@ impl EngineTrack {
         rendered
     }
 
+    /// [`Self::render_frozen`] through an automated tempo.
+    pub(crate) fn render_frozen_repitched(
+        &mut self,
+        clip: ClipId,
+        pos: u64,
+        positions: usize,
+        frames: usize,
+        channels: usize,
+        loop_region: Option<(u64, u64)>,
+    ) {
+        self.ensure_buffer(positions.max(frames) * channels);
+        self.render_frozen(clip, pos, positions, channels, loop_region);
+        if positions != frames {
+            repitch(&mut self.mix_buffer, positions, frames, channels);
+        }
+    }
+
     pub fn process_effects(
         &mut self,
         frames: usize,
@@ -584,5 +672,28 @@ impl EngineTrack {
         for slot in &mut self.effects {
             slot.process(&mut self.mix_buffer[..buf_size], channels, meter_generation);
         }
+    }
+}
+
+/// Resample the first `from` interleaved frames of `buffer` to `to` frames in
+/// place, by linear interpolation.
+fn repitch(buffer: &mut [f32], from: usize, to: usize, channels: usize) {
+    let mut write = |frame: usize| {
+        let exact = frame as f64 * from as f64 / to as f64;
+        let first = (exact as usize).min(from - 1);
+        let second = (first + 1).min(from - 1);
+        let blend = (exact - first as f64) as f32;
+        for channel in 0..channels {
+            let a = buffer[first * channels + channel];
+            let b = buffer[second * channels + channel];
+            buffer[frame * channels + channel] = a + (b - a) * blend;
+        }
+    };
+    // Reading stays ahead of writing: forward when shrinking, backward when
+    // stretching.
+    if from > to {
+        (0..to).for_each(&mut write);
+    } else {
+        (0..to).rev().for_each(&mut write);
     }
 }

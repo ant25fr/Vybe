@@ -29,10 +29,17 @@ pub(super) struct AutomationLanePart<'a> {
     pub height: f32,
 }
 
+/// A parameter a menu offers, for a lane or a modulator.
 #[derive(Debug, Clone, PartialEq)]
-struct LaneChoice {
-    label: String,
-    target: vibez_core::automation::AutomationTarget,
+pub(super) struct LaneChoice {
+    pub label: String,
+    pub target: vibez_core::automation::AutomationTarget,
+}
+
+impl std::fmt::Display for LaneChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.label)
+    }
 }
 
 impl App {
@@ -128,7 +135,12 @@ impl App {
                 Some((t, l, i)) if t == track.id && l == lane.id => Some(i),
                 _ => None,
             };
-            let (reference, min_label, max_label, ref_label) = lane_scale(track, &lane.target);
+            let (reference, min_label, max_label, ref_label) =
+                if lane.target == vibez_core::automation::AutomationTarget::Tempo {
+                    tempo_scale(self.state.transport.bpm)
+                } else {
+                    lane_scale(track, &lane.target)
+                };
             let body = canvas(AutomationLaneWidget {
                 track_id: track.id,
                 lane_id: lane.id,
@@ -237,6 +249,16 @@ impl App {
 
             let mut list = column![].spacing(1);
             for choice in choices.into_iter().take(MAX_PICKER_RESULTS) {
+                let add = if choice.target == vibez_core::automation::AutomationTarget::Tempo {
+                    AutomationMsg::AddTempoLane {
+                        bpm: self.state.transport.bpm,
+                    }
+                } else {
+                    AutomationMsg::AddLane {
+                        track_id: track.id,
+                        target: choice.target,
+                    }
+                };
                 list = list.push(
                     button(
                         text(choice.label)
@@ -244,10 +266,7 @@ impl App {
                             .size(11)
                             .color(th::text()),
                     )
-                    .on_press(Message::Automation(AutomationMsg::AddLane {
-                        track_id: track.id,
-                        target: choice.target,
-                    }))
+                    .on_press(Message::Automation(add))
                     .width(Length::Fill)
                     .padding([3, 10])
                     .style(|_theme: &Theme, status| button::Style {
@@ -346,7 +365,7 @@ impl App {
         }
     }
 
-    fn automation_lane_choices(
+    pub(super) fn automation_lane_choices(
         &self,
         track: &crate::state::ProjectTrack,
         automation: &[vibez_core::automation::AutomationLane],
@@ -421,15 +440,21 @@ impl App {
                 });
             }
         }
-        let is_channel = track.id.is_master()
-            || self
-                .state
-                .project_tracks
+        let is_master = track.id.is_master();
+        if is_master {
+            choices.push(LaneChoice {
+                label: "Tempo".into(),
+                target: vibez_core::automation::AutomationTarget::Tempo,
+            });
+        }
+        // The master is the one channel that cannot send.
+        if !is_master {
+            let tracks = &self.state.project_tracks;
+            for bus in tracks
                 .buses
                 .iter()
-                .any(|bus| bus.id == track.id);
-        if !is_channel {
-            for bus in &self.state.project_tracks.buses {
+                .filter(|bus| !bus.is_group && !tracks.send_would_loop(track.id, bus.id))
+            {
                 choices.push(LaneChoice {
                     label: format!("Send: {}", bus.name),
                     target: vibez_core::automation::AutomationTarget::Send { bus_id: bus.id },
@@ -544,6 +569,17 @@ fn lane_scale(
             None => (reference, String::new(), String::new(), String::new()),
         },
     }
+}
+
+/// A tempo lane's reference is the project tempo.
+fn tempo_scale(bpm: f64) -> (Option<f32>, String, String, String) {
+    let descriptor = &crate::domains::automation::TEMPO_DESCRIPTOR;
+    (
+        Some(vibez_core::tempo::normalized_from_bpm(bpm)),
+        fmt_value(descriptor.min, descriptor.unit),
+        fmt_value(descriptor.max, descriptor.unit),
+        fmt_value(bpm as f32, descriptor.unit),
+    )
 }
 
 fn fmt_value(value: f32, unit: &str) -> String {

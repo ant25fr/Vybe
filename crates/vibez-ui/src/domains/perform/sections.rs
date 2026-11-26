@@ -277,6 +277,7 @@ pub(super) fn prepare_track_source(
         .into_iter()
         .flat_map(|content| content.clips.iter())
         .map(|clip| EngineClip {
+            audition: false,
             id: clip.id,
             audio: Arc::clone(&clip.audio),
             position: clip.position,
@@ -434,6 +435,7 @@ mod tests {
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
                     groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+                    scale: None,
                     color_index: None,
                 }],
                 automation: vec![lane],
@@ -488,6 +490,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                scale: None,
                 color_index: None,
             });
 
@@ -518,6 +521,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                scale: None,
                 color_index: None,
             });
         let section_clip = &section.editor().timeline.get(track_id).unwrap().note_clips[0];
@@ -590,6 +594,7 @@ mod tests {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: vibez_core::perform::GrooveGrid::Off,
+            scale: None,
             color_index: None,
         };
         Arc::make_mut(&mut section.timeline)
@@ -632,6 +637,7 @@ mod tests {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: vibez_core::perform::GrooveGrid::Off,
+                scale: None,
                 color_index: None,
             });
         let tracks = [

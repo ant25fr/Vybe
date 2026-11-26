@@ -33,6 +33,7 @@ impl Fixture {
         });
         let audio_owner = Arc::downgrade(&audio);
         let clip = EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio,
             position: 0,
@@ -60,6 +61,7 @@ impl Fixture {
             is_bus: id.is_master(),
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         });
         let mut routing = crate::routing::PreparedRouting::prepare(&model, 64).unwrap();

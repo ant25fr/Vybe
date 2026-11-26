@@ -39,6 +39,7 @@ fn channel(id: TrackId) -> RoutingChannel {
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        output: None,
         midi_from: None,
     }
 }
@@ -366,4 +367,253 @@ fn ordinary_bus_delay_tail_survives_solo_without_a_selected_track_send() {
     }
     assert_eq!(output, capture, "the audible return must remain capturable");
     assert!(engine.tracks[1].sends.is_empty());
+}
+
+#[test]
+fn a_pre_fader_send_ignores_fader_and_pan_but_not_mute() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let source = TrackId::new();
+    let bus = TrackId::new();
+    commands.push(EngineCommand::add_track(source)).unwrap();
+    commands.push(EngineCommand::add_bus(bus)).unwrap();
+    commands.push(clip(source, 0.5)).unwrap();
+    commands
+        .push(EngineCommand::SetSend {
+            track_id: source,
+            bus_id: bus,
+            amount: 1.0,
+        })
+        .unwrap();
+    // Fader fully down and panned hard left.
+    commands
+        .push(EngineCommand::SetTrackGain(source, 0.0))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetTrackPan(source, 0.0))
+        .unwrap();
+    let mut source_model = channel(source);
+    source_model.sends.push(bus);
+    let mut bus_model = channel(bus);
+    bus_model.is_bus = true;
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[source_model, bus_model, channel(TrackId::MASTER)],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 512];
+    let mut settle = |engine: &mut AudioEngine| {
+        for _ in 0..4 {
+            engine.process(&mut output, 2);
+            while events.pop().is_ok() {}
+        }
+        (output[510], output[511])
+    };
+    // Post-fader, the lowered fader silences the return.
+    assert_eq!(settle(&mut engine), (0.0, 0.0));
+
+    commands
+        .push(EngineCommand::SetSendPreFader {
+            track_id: source,
+            bus_id: bus,
+            pre_fader: true,
+        })
+        .unwrap();
+    let (left, right) = settle(&mut engine);
+    assert!((left - 0.5).abs() < 1e-6, "{left}");
+    assert!((right - 0.5).abs() < 1e-6, "{right}");
+
+    commands
+        .push(EngineCommand::SetTrackMute(source, true))
+        .unwrap();
+    assert_eq!(settle(&mut engine), (0.0, 0.0));
+
+    commands
+        .push(EngineCommand::SetTrackMute(source, false))
+        .unwrap();
+    commands
+        .push(EngineCommand::SetSendPreFader {
+            track_id: source,
+            bus_id: bus,
+            pre_fader: false,
+        })
+        .unwrap();
+    assert_eq!(settle(&mut engine), (0.0, 0.0));
+}
+
+#[test]
+fn a_return_sends_to_another_return_and_forgets_it_when_removed() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let source = TrackId::new();
+    let first = TrackId::new();
+    let second = TrackId::new();
+    commands.push(EngineCommand::add_track(source)).unwrap();
+    commands.push(EngineCommand::add_bus(first)).unwrap();
+    commands.push(EngineCommand::add_bus(second)).unwrap();
+    commands.push(clip(source, 0.5)).unwrap();
+    for (from, to) in [(source, first), (first, second)] {
+        commands
+            .push(EngineCommand::SetSend {
+                track_id: from,
+                bus_id: to,
+                amount: 1.0,
+            })
+            .unwrap();
+    }
+    let mut source_model = channel(source);
+    source_model.sends.push(first);
+    let mut first_model = channel(first);
+    first_model.is_bus = true;
+    first_model.sends.push(second);
+    let mut second_model = channel(second);
+    second_model.is_bus = true;
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[
+                    source_model,
+                    first_model,
+                    second_model,
+                    channel(TrackId::MASTER),
+                ],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 128];
+    let mut captured = [0.0; 128];
+    engine.process_block(
+        AudioProcessBlock::new(&mut output, 2)
+            .with_track_output_capture(second.raw(), &mut captured),
+    );
+    // The source at the centre, passed through the first return.
+    let expected = 0.5 * std::f32::consts::FRAC_1_SQRT_2;
+    assert!(
+        (captured[126] - expected).abs() < 1e-6,
+        "{} != {expected}",
+        captured[126]
+    );
+
+    commands.push(EngineCommand::RemoveBus(second)).unwrap();
+    for _ in 0..4 {
+        engine.process(&mut output, 2);
+        while events.pop().is_ok() {}
+    }
+    assert!(engine.buses[0].sends.is_empty());
+}
+
+#[test]
+fn a_group_carries_its_members_through_its_fader_and_solo() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let member = TrackId::new();
+    let outside = TrackId::new();
+    let group = TrackId::new();
+    commands.push(EngineCommand::add_track(member)).unwrap();
+    commands.push(EngineCommand::add_track(outside)).unwrap();
+    commands.push(EngineCommand::add_bus(group)).unwrap();
+    commands.push(clip(member, 0.25)).unwrap();
+    commands.push(clip(outside, 0.5)).unwrap();
+    let mut member_model = channel(member);
+    member_model.output = Some(group);
+    let mut group_model = channel(group);
+    group_model.is_bus = true;
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[
+                    member_model,
+                    channel(outside),
+                    group_model,
+                    channel(TrackId::MASTER),
+                ],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 512];
+    let mut settle = |engine: &mut AudioEngine| {
+        for _ in 0..4 {
+            engine.process(&mut output, 2);
+            while events.pop().is_ok() {}
+        }
+        output[510]
+    };
+    let pan = std::f32::consts::FRAC_1_SQRT_2;
+    let close = |value: f32, expected: f32| {
+        assert!((value - expected).abs() < 1e-5, "{value} != {expected}");
+    };
+    close(settle(&mut engine), 0.75 * pan);
+    // The group's fader scales its member only.
+    commands
+        .push(EngineCommand::SetTrackGain(group, 0.0))
+        .unwrap();
+    close(settle(&mut engine), 0.5 * pan);
+    commands
+        .push(EngineCommand::SetTrackGain(group, 1.0))
+        .unwrap();
+    // Soloing the group, or its member, leaves only the member.
+    for (soloed, other) in [(group, member), (member, group)] {
+        commands
+            .push(EngineCommand::SetTrackSolo(soloed, true))
+            .unwrap();
+        commands
+            .push(EngineCommand::SetTrackSolo(other, false))
+            .unwrap();
+        close(settle(&mut engine), 0.25 * pan);
+    }
+}
+
+#[test]
+fn a_frozen_track_plays_only_its_frozen_clip_until_unfrozen() {
+    let (mut engine, mut commands, mut events) = AudioEngine::new();
+    let track = TrackId::new();
+    commands.push(EngineCommand::add_track(track)).unwrap();
+    commands.push(clip(track, 0.5)).unwrap();
+    let mut rendered = clip(track, 0.25);
+    let EngineCommand::AddClip {
+        clip_id, insertion, ..
+    } = &mut rendered
+    else {
+        unreachable!("clip builds an AddClip")
+    };
+    // Room for both clips; the app answers the engine's request for it.
+    *insertion = crate::clip_insertion::PreparedClipInsertion::with_capacity(2);
+    let frozen = *clip_id;
+    commands.push(rendered).unwrap();
+    commands
+        .push(EngineCommand::SetRouting(
+            crate::routing::PreparedRouting::prepare(
+                &[channel(track), channel(TrackId::MASTER)],
+                64,
+            )
+            .unwrap(),
+        ))
+        .unwrap();
+    engine.process(&mut [], 2);
+    commands.push(EngineCommand::Play).unwrap();
+    let mut output = [0.0; 128];
+    let pan = std::f32::consts::FRAC_1_SQRT_2;
+    for (state, expected) in [(Some(frozen), 0.25 * pan), (None, 0.75 * pan)] {
+        commands
+            .push(EngineCommand::SetTrackFrozen(track, state))
+            .unwrap();
+        engine.process(&mut output, 2);
+        while events.pop().is_ok() {}
+        assert!(
+            (output[126] - expected).abs() < 1e-6,
+            "{state:?}: {}",
+            output[126]
+        );
+    }
 }

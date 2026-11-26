@@ -266,8 +266,10 @@ mod tests {
         let mut track = ProjectTrack::new(TrackId::new(), "T1".to_string(), 0);
         track.effects = effects;
         ProjectSnapshot {
+            meter: Default::default(),
             project_tracks: std::sync::Arc::new(ProjectTracksState {
                 reduced_latency_monitoring: false,
+                midi_mappings: Vec::new(),
                 tracks: vec![track],
                 master: crate::state::new_master_track(),
                 buses: Vec::new(),

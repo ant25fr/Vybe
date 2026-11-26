@@ -666,6 +666,10 @@ impl App {
             }
         };
 
+        if self.refuse_frozen_track(track_id) {
+            return Task::none();
+        }
+
         let clip_id = ClipId::new();
         let duration = audio.num_frames() as u64;
         let (original_bpm, warped, warped_to_bpm) = match treatment.mode {

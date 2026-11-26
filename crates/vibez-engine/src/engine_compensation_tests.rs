@@ -25,6 +25,7 @@ fn channel(id: TrackId, fx: &[EffectId]) -> RoutingChannel {
                 assignments: vec![],
             })
             .collect(),
+        output: None,
         midi_from: None,
     }
 }
@@ -843,6 +844,7 @@ fn short_one_shot_section_drains_last_content_before_its_heard_stop_notification
         ))
         .unwrap();
     let clip = EngineClip {
+        audition: false,
         id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
             channels: vec![vec![1.0; 128]; 2],

@@ -113,7 +113,10 @@ impl Flexible {
             Self::Phaser => phaser_device::WIDTHS,
             Self::AutoPan => auto_pan_device::WIDTHS,
             Self::MultibandDynamics => multiband_dynamics_device::WIDTHS,
-            Self::Chorus | Self::Flanger | Self::PitchShifter | Self::RingModulator
+            Self::Chorus
+            | Self::Flanger
+            | Self::PitchShifter
+            | Self::RingModulator
             | Self::FrequencyShifter => {
                 let count = self.simple_descriptors().map_or(0, <[_]>::len);
                 simple_fx_device::SimpleKind::widths(count)
@@ -374,6 +377,16 @@ impl App {
             )));
         }
         let shares = flexible.len() + usize::from(native.is_some());
+        // MIDI effects head an instrument track's chain, as in Live. Plugin
+        // instruments take their notes directly.
+        let midi_card = (track.kind.is_midi()
+            && track.has_instrument
+            && track.plugin_instrument_name.is_none())
+        .then(|| self.view_midi_effects_card(track));
+        if midi_card.is_some() {
+            used += super::midi_effect_devices::MIDI_CARD_W + CHAIN_SPACING;
+        }
+        used += self.modulator_card_width(track) + CHAIN_SPACING;
         let spacing = CHAIN_SPACING * cards.len() as f32;
         let mut chain_width = used + spacing + CHAIN_END_ROOM;
         if shares > 0 {
@@ -455,21 +468,26 @@ impl App {
                 ));
             }
         }
-        let devices_row = row(cards.into_iter().flatten())
-            .push(
-                container(
-                    text(add_hint(track.kind.is_midi()))
-                        .size(10)
-                        .color(th::text_muted())
-                        .align_x(iced::alignment::Horizontal::Center)
-                        .width(Length::Fill),
-                )
-                .padding([0, 8])
-                .width(CHAIN_END_ROOM)
-                .center_y(Length::Fill),
+        // Modulators close the chain: they move it rather than pass through it.
+        let modulator_card = self.view_modulator_card(track, track_color);
+        let devices_row = row(midi_card
+            .into_iter()
+            .chain(cards.into_iter().flatten())
+            .chain(std::iter::once(modulator_card)))
+        .push(
+            container(
+                text(add_hint(track.kind.is_midi()))
+                    .size(10)
+                    .color(th::text_muted())
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .width(Length::Fill),
             )
-            .spacing(CHAIN_SPACING)
-            .height(Length::Fill);
+            .padding([0, 8])
+            .width(CHAIN_END_ROOM)
+            .center_y(Length::Fill),
+        )
+        .spacing(CHAIN_SPACING)
+        .height(Length::Fill);
 
         use crate::widgets::device_chrome::{chain_bar_room, CHAIN_BAR_GAP, CHAIN_PAD_BELOW};
         use crate::widgets::quiet_scroll;

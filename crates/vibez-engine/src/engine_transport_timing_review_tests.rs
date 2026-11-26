@@ -64,6 +64,7 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
             assignments: vec![],
             inactive_inputs: vec![],
         }],
+        output: None,
         midi_from: None,
     };
     let master = RoutingChannel {
@@ -71,6 +72,7 @@ fn stop_then_seek_preserves_a_musical_tail_with_zero_processing_latency() {
         is_bus: true,
         sends: vec![],
         effects: vec![],
+        output: None,
         midi_from: None,
     };
     commands
@@ -141,6 +143,7 @@ fn model(
                 inactive_inputs: vec![],
             })
             .collect(),
+            output: None,
             midi_from: None,
         })
         .collect()
@@ -239,6 +242,7 @@ fn arrange_stop_then_seek_retains_the_processing_tail() {
 
 fn section(tracks: &[TrackId], frames: u64, looping: bool) -> Box<PreparedSectionPlaybackSource> {
     let clip = || EngineClip {
+        audition: false,
         id: ClipId::new(),
         audio: Arc::new(DecodedAudio {
             channels: vec![vec![0.2; 8192]; 2],

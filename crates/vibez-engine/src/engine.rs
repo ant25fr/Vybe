@@ -89,6 +89,22 @@ pub struct AudioEngine {
     /// The side signal of one effect's output (the Stereo Widener's scope).
     side_spectrum: crate::effect_spectrum::EffectSpectrumTap,
     side_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
+    /// Whether the metronome clicks while the transport plays.
+    metronome: bool,
+    /// Channels whose post-fader signal an offline stem render collects,
+    /// interleaved stereo. Always empty on the audio thread.
+    offline_stems: Vec<(TrackId, Vec<f32>)>,
+    metronome_volume: f32,
+    /// Arrange's time signatures, which the metronome counts.
+    meter: vibez_core::meter::MeterMap,
+    /// The render slice in progress, when the block is split.
+    tempo_slice: Option<tempo::TempoSlice>,
+    /// Timeline positions this callback covered, when not one per frame.
+    tempo_advance: Option<u64>,
+    /// Share of a timeline position carried between slices.
+    tempo_carry: f64,
+    /// Whether later slices will publish this callback's track meters.
+    hold_meters: bool,
     /// The mono sum of the same output, selected with the side tap.
     mid_spectrum: crate::effect_spectrum::EffectSpectrumTap,
     mid_spectrum_rx: Option<Consumer<crate::effect_spectrum::EffectSpectrumSample>>,
@@ -269,6 +285,7 @@ impl AudioEngine {
                     is_bus: true,
                     effects: vec![],
                     sends: vec![],
+                    output: None,
                     midi_from: None,
                 }],
                 crate::routing::MAX_BLOCK_FRAMES,
@@ -307,6 +324,14 @@ impl AudioEngine {
             effect_spectrum_rx: Some(effect_spectrum_rx),
             side_spectrum,
             side_spectrum_rx: Some(side_spectrum_rx),
+            metronome: false,
+            offline_stems: Vec::new(),
+            metronome_volume: 1.0,
+            meter: Default::default(),
+            tempo_slice: None,
+            tempo_advance: None,
+            tempo_carry: 0.0,
+            hold_meters: false,
             mid_spectrum,
             mid_spectrum_rx: Some(mid_spectrum_rx),
             effect_meter: effect_meters::EffectMeterTarget::default(),
@@ -476,6 +501,10 @@ impl AudioEngine {
             .midi
             .render_preview_voice(output, frames, channels, self.audition.gain);
 
+        // After the audition bus, before the transport moves on.
+        let advance = self.tempo_advance.take().unwrap_or(frames as u64);
+        self.mix_metronome(output, frames, channels, advance);
+
         // ---- 5. Advance transport and send events -----------------------
         let was_playing = self.transport.is_playing();
         let pos_before = self.transport.position();
@@ -483,7 +512,7 @@ impl AudioEngine {
         let new_pos = if performing {
             self.transport.position()
         } else {
-            self.transport.advance(frames as u64)
+            self.transport.advance(advance)
         };
         if was_playing && !performing && !self.transport.is_playing() {
             self.present_natural_playback_stop_after(self.mix_latency());
@@ -602,7 +631,7 @@ impl AudioEngine {
         if was_playing
             && !performing
             && !self.split_wrap_handled
-            && new_pos != pos_before.saturating_add(frames as u64)
+            && new_pos != pos_before.saturating_add(advance)
         {
             for track in &mut self.tracks {
                 track.flush_notes();
@@ -690,6 +719,19 @@ impl AudioEngine {
 
     pub(super) fn tracks_mut_for_retirement(&mut self) -> &mut [Box<EngineTrack>] {
         &mut self.tracks
+    }
+
+    /// How many channels can send: the tracks, then the buses.
+    pub(super) fn sender_count(&self) -> usize {
+        self.tracks.len() + self.buses.len()
+    }
+
+    /// The sending channel at `index`, below [`Self::sender_count`].
+    pub(super) fn sender_mut(&mut self, index: usize) -> &mut EngineTrack {
+        match index.checked_sub(self.tracks.len()) {
+            Some(bus) => &mut self.buses[bus],
+            None => &mut self.tracks[index],
+        }
     }
 
     pub fn tracks(&self) -> &[Box<EngineTrack>] {
@@ -794,6 +836,12 @@ mod section_queue;
 
 #[path = "engine_section_record.rs"]
 pub(crate) mod section_record;
+
+#[path = "engine_metronome.rs"]
+mod metronome;
+
+#[path = "engine_tempo.rs"]
+pub(crate) mod tempo;
 
 #[path = "engine_clip_record.rs"]
 mod clip_record;
@@ -1235,6 +1283,9 @@ mod natural_playback_stop_pressure_tests;
 #[cfg(test)]
 #[path = "engine_effect_spectrum_tests.rs"]
 mod effect_spectrum_tests;
+#[cfg(test)]
+#[path = "engine_metronome_tests.rs"]
+mod metronome_tests;
 
 #[cfg(test)]
 #[path = "engine_dynamics_meter_tests.rs"]

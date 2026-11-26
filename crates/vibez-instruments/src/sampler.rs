@@ -3,6 +3,7 @@
 //! synth's filter and envelopes, within a key and velocity zone. Eight
 //! voices, each new note taking a free voice or else the oldest.
 
+use crate::pitch_bend::PitchBend;
 use std::sync::Arc;
 
 use vibez_core::audio_buffer::DecodedAudio;
@@ -48,6 +49,7 @@ pub fn default_params() -> [f32; param::COUNT] {
 
 /// Polyphonic sample-playback instrument.
 pub struct Sampler {
+    bend: PitchBend,
     voices: [SamplerVoice; MAX_VOICES],
     sample_rate: f32,
     sample: Option<Arc<DecodedAudio>>,
@@ -77,6 +79,7 @@ impl Sampler {
         };
         let params = default_params();
         let mut sampler = Self {
+            bend: PitchBend::new(sample_rate),
             voices: [SamplerVoice::default(); MAX_VOICES],
             sample_rate,
             sample: None,
@@ -299,6 +302,10 @@ impl Instrument for Sampler {
         }
     }
 
+    fn set_pitch_bend(&mut self, semitones: f32) {
+        self.bend.set(semitones);
+    }
+
     fn render(&mut self, buffer: &mut [f32], channels: usize) {
         let Some(region) = self.region else {
             return;
@@ -340,11 +347,13 @@ impl Instrument for Sampler {
                 + f64::from(p[param::LFO_RATE]) / f64::from(self.sample_rate))
             .fract();
             let target = self.choice(param::LFO_TARGET);
+            let bend = self.bend.tick();
             let frame = Frame {
                 audio: &audio,
                 region,
                 base_speed,
-                offset_semitones: p[param::TUNE]
+                offset_semitones: bend
+                    + p[param::TUNE]
                     + p[param::FINE] / 100.0
                     + if target == lfo_target::PITCH {
                         modulation * LFO_PITCH_SEMITONES

@@ -166,6 +166,7 @@ mod tests {
                 is_bus: false,
                 effects: vec![],
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -188,6 +189,7 @@ mod tests {
                         tap: SourceTap::AfterEffects,
                     }],
                 }],
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -195,6 +197,7 @@ mod tests {
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
         ];

@@ -54,6 +54,10 @@ impl AudioEngine {
         mut track_output_capture: Option<&mut TrackOutputCapture<'_>>,
     ) {
         if !self.transport.is_playing() {
+            if self.has_modulators() {
+                self.render_idle_slices(output, frames, channels, live_input, track_output_capture);
+                return;
+            }
             // Stopped transport still renders instruments so
             // auditioned notes (piano-roll keys, drum pads) and
             // plugin-queued events are audible, like any DAW.
@@ -91,6 +95,11 @@ impl AudioEngine {
                 );
             }
             self.process_section_multitrack(output, frames, channels);
+            return;
+        }
+
+        if self.arrange_tempo_is_automated() || self.has_modulators() {
+            self.process_arrange_slices(output, frames, channels, live_input, track_output_capture);
             return;
         }
 

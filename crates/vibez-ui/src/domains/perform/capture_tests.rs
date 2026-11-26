@@ -64,6 +64,7 @@ fn midi_section(name: &str, track_id: TrackId, pitch: u8) -> Section {
             loop_start_beats: 0.0,
             loop_end_beats: 0.0,
             groove_grid: GrooveGrid::Sixteenth,
+            scale: None,
             color_index: None,
         });
     section

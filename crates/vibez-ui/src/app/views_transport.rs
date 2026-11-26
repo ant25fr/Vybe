@@ -25,7 +25,9 @@ const POSITION_WIDTH: f32 = 100.0;
 /// the display's other fields.
 const TIME_WIDTH: f32 = 96.0;
 const BPM_INPUT_WIDTH: f32 = 40.0;
+const METRONOME_BUTTON_WIDTH: f32 = 42.0;
 const SWING_WIDTH: f32 = 86.0;
+const SIGNATURE_WIDTH: f32 = 36.0;
 
 /// What the position display reads.
 #[derive(Debug, Clone, PartialEq)]
@@ -38,21 +40,33 @@ pub(super) struct PositionReadout {
 /// Perform runs its own clock from zero, so the display follows that clock
 /// there and the Arrange cursor everywhere else.
 pub(super) fn position_readout(state: &AppState) -> PositionReadout {
-    let (seconds, time_label) = if state.view.workspace == Workspace::Perform {
+    if state.view.workspace == Workspace::Perform {
         let seconds = if state.transport.sample_rate == 0 {
             0.0
         } else {
             state.perform.performance_position_samples as f64
                 / f64::from(state.transport.sample_rate)
         };
-        (seconds, "PERFORMANCE TIME")
-    } else {
-        (state.position_seconds(), "TIME")
+        // Perform counts in 4/4.
+        return PositionReadout {
+            position: MusicalTime(seconds * state.transport.bpm / 60.0).bar_beat_sixteenth(),
+            time: AppState::format_time(seconds),
+            time_label: "PERFORMANCE TIME",
+        };
+    }
+    let counted = state.position_seconds();
+    let beat = counted * state.transport.bpm / 60.0;
+    // An automated tempo makes elapsed time differ from the counted one.
+    let seconds = match state.tempo_lane() {
+        Some(lane) => {
+            vibez_core::tempo::seconds_at(std::slice::from_ref(lane), beat, state.transport.bpm)
+        }
+        None => counted,
     };
     PositionReadout {
-        position: MusicalTime(seconds * state.transport.bpm / 60.0).bar_beat_sixteenth(),
+        position: state.transport.meter.position_label(beat),
         time: AppState::format_time(seconds),
-        time_label,
+        time_label: "TIME",
     }
 }
 
@@ -131,6 +145,18 @@ impl App {
                 self.state.transport.loop_enabled.then(th::accent),
                 Message::Transport(TransportMsg::ToggleArrangementLoop),
             ),
+            style::segment_button(
+                text("Click").size(11),
+                Size::new(METRONOME_BUTTON_WIDTH, TRANSPORT_BUTTON_HEIGHT),
+                self.state.transport.metronome.then(th::accent),
+                Message::Transport(TransportMsg::ToggleMetronome),
+            ),
+            style::segment_button(
+                text("Map").size(11),
+                Size::new(METRONOME_BUTTON_WIDTH, TRANSPORT_BUTTON_HEIGHT),
+                self.midi_learn.active.then(th::accent),
+                Message::MidiMap(super::midi_mapping::MidiMapMsg::ToggleLearn),
+            ),
         ]
         .spacing(2);
         container(buttons)
@@ -157,6 +183,8 @@ impl App {
             style::display_divider(),
             self.view_bpm_field(),
             style::display_divider(),
+            self.view_signature_field(),
+            style::display_divider(),
             self.view_swing_field(),
         ]
         .height(Length::Fill)
@@ -169,15 +197,68 @@ impl App {
             .into()
     }
 
+    /// The signature in effect at the playhead; typing one changes it from
+    /// the bar of the play start.
+    fn view_signature_field(&self) -> Element<'_, Message> {
+        let transport = &self.state.transport;
+        let current = transport
+            .meter
+            .position_at(transport.position_beats())
+            .signature
+            .to_string();
+        let shown = transport.signature_text.clone().unwrap_or(current);
+        let input = text_input("4/4", &shown)
+            .on_input(|value| Message::Transport(TransportMsg::SignatureChanged(value)))
+            .on_submit(Message::Transport(TransportMsg::SignatureSubmit))
+            .font(typography::PERFORM_TECH)
+            .size(14)
+            .padding([0, 2])
+            .width(Length::Fixed(SIGNATURE_WIDTH))
+            .style(style::display_input);
+        let input =
+            crate::widgets::hint::with_hint(input, "Applies from the bar of the play start");
+        container(
+            column![input, style::display_label("SIG", th::text_dim())]
+                .spacing(1)
+                .align_x(Alignment::Center),
+        )
+        .padding([0, 6])
+        .center_y(Length::Fill)
+        .into()
+    }
+
     fn view_bpm_field(&self) -> Element<'_, Message> {
-        let bpm_input = text_input("BPM", &self.state.transport.bpm_text)
-            .on_input(|t| Message::Transport(TransportMsg::BpmChanged(t)))
-            .on_submit(Message::Transport(TransportMsg::BpmSubmit))
+        // An automated tempo is read from its lane and cannot be typed over.
+        let automated = self.state.tempo_lane().map(|lane| {
+            let transport = &self.state.transport;
+            let bpm = vibez_core::tempo::bpm_at(
+                std::slice::from_ref(lane),
+                transport.position_beats(),
+                transport.bpm,
+            );
+            format!("{bpm:.0}")
+        });
+        let label = if automated.is_some() {
+            style::display_label("BPM AUTO", th::accent())
+        } else {
+            style::display_label("BPM", th::text_dim())
+        };
+        let shown = automated
+            .clone()
+            .unwrap_or_else(|| self.state.transport.bpm_text.clone());
+        let bpm_input = text_input("BPM", &shown)
             .font(typography::PERFORM_TECH)
             .size(14)
             .padding([0, 2])
             .width(Length::Fixed(BPM_INPUT_WIDTH))
             .style(style::display_input);
+        let bpm_input = if automated.is_some() {
+            bpm_input
+        } else {
+            bpm_input
+                .on_input(|t| Message::Transport(TransportMsg::BpmChanged(t)))
+                .on_submit(Message::Transport(TransportMsg::BpmSubmit))
+        };
         let nudge = |icon: char, delta: f64| {
             button(icons::icon(icon).size(8))
                 .on_press(Message::Transport(TransportMsg::NudgeBpm(delta)))
@@ -192,10 +273,16 @@ impl App {
 
         container(
             row![
-                column![bpm_input, style::display_label("BPM", th::text_dim())]
+                column![bpm_input, label]
                     .spacing(1)
                     .align_x(Alignment::Center),
                 nudges,
+                button(text("Tap").size(10))
+                    .on_press_with(|| {
+                        Message::Transport(TransportMsg::TapTempo(std::time::Instant::now()))
+                    })
+                    .padding([2, 5])
+                    .style(style::segment(None)),
             ]
             .spacing(2)
             .align_y(Alignment::Center),

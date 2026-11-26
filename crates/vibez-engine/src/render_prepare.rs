@@ -17,6 +17,9 @@ pub(super) fn channel(
     channel.pan = info.pan;
     channel.swing_offset = info.swing_offset;
     channel.sends.extend_from_slice(&info.sends);
+    channel
+        .pre_fader_sends
+        .extend_from_slice(&info.pre_fader_sends);
     let selected = dependencies::selected_track(req.mode);
     channel.set_manual_mute(
         if selected == Some(info.id) {
@@ -27,6 +30,8 @@ pub(super) fn channel(
         true,
     );
     channel.solo = matches!(req.mode, BounceMode::Master) && info.solo;
+    // Rendering a track itself ignores that it was frozen.
+    channel.frozen = info.frozen_clip.filter(|_| selected != Some(info.id));
     channel.playback_source.automation = info
         .automation
         .iter()
@@ -36,6 +41,14 @@ pub(super) fn channel(
         })
         .cloned()
         .collect();
+    for (slot, modulator) in info.modulators.iter().enumerate() {
+        channel
+            .modulation
+            .set_modulator(slot, Some(modulator.settings));
+        for (index, link) in modulator.links.iter().enumerate() {
+            channel.modulation.set_link(slot, index, Some(*link));
+        }
+    }
     if info.plugin_instrument.is_some() {
         channel.instrument = plugins
             .as_deref_mut()
@@ -87,6 +100,10 @@ pub(super) fn channel(
             info.name
         ));
     }
+    channel.midi_effects = info.midi_effects;
+    if let Some(instrument) = channel.instrument.as_mut() {
+        instrument.set_midi_effects(info.midi_effects);
+    }
     if tap != SourceTap::BeforeEffects {
         channel.effects = effects(
             &info.effects,
@@ -99,6 +116,7 @@ pub(super) fn channel(
     for clip in req
         .audio_clips
         .iter()
+        .filter(|clip| clip.take_lane.is_none())
         .filter(|clip| clip.track_id == info.id)
     {
         if selected == Some(info.id) && !clip_included(clip.id, req.mode, false) {
@@ -106,6 +124,7 @@ pub(super) fn channel(
         }
         if let Some(audio) = req.clip_audio.get(&clip.id) {
             channel.playback_source.push_audio_clip(EngineClip {
+                audition: false,
                 id: clip.id,
                 audio: Arc::clone(audio),
                 position: clip.position,

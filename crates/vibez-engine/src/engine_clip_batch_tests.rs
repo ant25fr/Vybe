@@ -16,6 +16,7 @@ fn clip(track_id: TrackId, request_id: u64) -> Box<PreparedClipPlayback> {
         start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id,
                 audio: Arc::new(DecodedAudio {
                     channels: vec![vec![0.1; 100]],
@@ -155,6 +156,7 @@ fn partial_packet_releases_tracks_atomically_at_one_source_timestamp_and_keeps_o
             is_bus: id.is_master(),
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -516,6 +518,7 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
             is_bus: false,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
         vibez_core::routing::RoutingChannel {
@@ -523,6 +526,7 @@ fn in_segment_release_retains_the_actual_output_clock_prefix() {
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];
@@ -825,6 +829,7 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -832,6 +837,7 @@ fn delayed_engine() -> (AudioEngine, Consumer<EngineEvent>, TrackId) {
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];

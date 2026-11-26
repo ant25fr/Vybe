@@ -115,6 +115,8 @@ pub struct RoutingChannel {
     pub sends: Vec<TrackId>,
     /// The track whose played notes this channel's instrument also plays.
     pub midi_from: Option<TrackId>,
+    /// The group bus this channel mixes into instead of the master.
+    pub output: Option<TrackId>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -176,10 +178,15 @@ impl RoutingGraph {
         for channel in channels {
             let after_fader = graph.index(channel.id, NodeStage::AfterFader).unwrap();
             if !channel.id.is_master() {
-                if let Some(master) = graph.index(TrackId::MASTER, NodeStage::Sum) {
+                // A group that is gone leaves its members on the master.
+                let target = channel
+                    .output
+                    .and_then(|group| graph.index(group, NodeStage::Sum))
+                    .or_else(|| graph.index(TrackId::MASTER, NodeStage::Sum));
+                if let Some(to) = target {
                     graph.edges.push(RoutingEdge {
                         from: after_fader,
-                        to: master,
+                        to,
                         kind: EdgeKind::Mix,
                     });
                 }
@@ -393,6 +400,7 @@ mod tests {
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            output: None,
             midi_from: None,
         }
     }
@@ -458,6 +466,7 @@ mod tests {
             is_bus: true,
             effects: vec![],
             sends: vec![send],
+            output: None,
             midi_from: None,
         };
         assert_eq!(
@@ -487,6 +496,7 @@ mod tests {
                 is_bus: false,
                 effects: vec![],
                 sends,
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -494,6 +504,7 @@ mod tests {
                 is_bus: true,
                 effects: vec![],
                 sends: vec![],
+                output: None,
                 midi_from: None,
             },
         ])
@@ -514,6 +525,7 @@ mod tests {
             is_bus: false,
             effects: vec![],
             sends: vec![],
+            output: None,
             midi_from,
         }
     }

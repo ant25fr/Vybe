@@ -21,6 +21,7 @@ use crate::theme as th;
 use crate::timeline_geometry::TimelineGeometry;
 use crate::timeline_snap::SnapTargets;
 use crate::widgets::arrange_corner::{arrange_corner, arrangement_size_labels, song_length_label};
+use crate::widgets::group_lane::{GroupLaneWidget, MiniClip};
 use crate::widgets::quiet_scroll;
 use crate::widgets::timeline::{
     build_row_spans, ArrangementMinimap, LaneGhost, MinimapTrack, NewTrackLane, RulerWidget,
@@ -28,8 +29,9 @@ use crate::widgets::timeline::{
     TIME_RULER_HEIGHT,
 };
 use crate::widgets::track_header::{
-    view_editable_channel_name, view_track_header, with_resize_edge, ChannelNameStyle,
-    TrackHeaderFlags, TrackHeaderRecordingView, TRACK_HEADER_TOTAL_WIDTH,
+    view_editable_channel_name, view_group_header, view_track_header, with_resize_edge,
+    ChannelNameStyle, GroupHeaderView, TrackHeaderFlags, TrackHeaderRecordingView,
+    TRACK_HEADER_TOTAL_WIDTH,
 };
 
 use super::*;
@@ -169,6 +171,7 @@ impl App {
 
         // Beat-based ruler, offset by track header width
         let ruler = RulerWidget {
+            meter: self.state.transport.meter,
             wheel_zoom: self.wheel_zoom(),
             playhead_beats,
             play_start_beats: Some(play_start_beats),
@@ -264,23 +267,40 @@ impl App {
         let minimap_row = row![minimap_spacer, minimap_canvas];
 
         // Collect track IDs and kinds for cross-track drag
-        let track_ids: Vec<TrackId> = self
-            .state
-            .project_tracks
+        // Tracks inside a folded group take no row.
+        let project = &self.state.project_tracks;
+        let shown: Vec<&crate::state::ProjectTrack> = project
             .tracks
             .iter()
-            .map(|t| t.id)
+            .filter(|track| !project.is_folded_away(track.id))
             .collect();
+        let track_ids: Vec<TrackId> = shown.iter().map(|t| t.id).collect();
+        // The group rows above each shown track. A folded group's row waits
+        // for the next shown track, or the end of the list.
+        let mut listed = Vec::new();
+        let mut waiting: Vec<TrackId> = Vec::new();
+        let mut headers: Vec<Vec<TrackId>> = Vec::with_capacity(shown.len());
+        for track in &project.tracks {
+            let mut above: Vec<TrackId> = project.ancestors(track.id);
+            above.reverse();
+            above.retain(|group| !listed.contains(group) && !project.is_folded_away(*group));
+            listed.extend(above.iter().copied());
+            waiting.extend(above);
+            if !project.is_folded_away(track.id) {
+                headers.push(std::mem::take(&mut waiting));
+            }
+        }
 
         // Track rows: header widgets + clip canvas
         // Real vertical layout of the column, so a rubber-band drag can map
         // a y offset back to a track even with automation lanes expanded.
-        let row_spans = build_row_spans(self.state.project_tracks.tracks.iter().map(|track| {
-            let extra_height = if self.state.automation_ui.expanded.contains(&track.id) {
+        let mut row_spans = build_row_spans(shown.iter().map(|track| {
+            let automation = if self.state.automation_ui.expanded.contains(&track.id) {
                 self.automation_rows_height(timeline, track.id)
             } else {
                 0.0
             };
+            let extra_height = automation + self.take_rows_height(timeline, track);
             (
                 track.id,
                 self.state.track_heights.height(track.id).pixels(),
@@ -288,13 +308,40 @@ impl App {
             )
         }));
 
+        // Lanes sit lower by the group rows above them.
+        let mut lowered = 0.0;
+        for (span, above) in row_spans.iter_mut().zip(&headers) {
+            lowered += above
+                .iter()
+                .map(|&group| self.group_row_height(timeline, group))
+                .sum::<f32>();
+            span.top += lowered;
+        }
+
         let mut track_rows = column![].spacing(0);
         let empty_content = TrackTimelineContent::default();
         let browser_drag_active = self.state.browser.drag_source.is_some();
 
-        for (track, span) in self.state.project_tracks.tracks.iter().zip(&row_spans) {
+        for ((track, span), above) in shown.iter().copied().zip(&row_spans).zip(&headers) {
+            for &group in above {
+                track_rows = self.push_group_row(track_rows, timeline, group);
+            }
             let content = timeline.timeline.get(track.id).unwrap_or(&empty_content);
-            let selected = timeline.selected_track == Some(track.id);
+            // A frozen track shows the audio it plays; its clips are set
+            // aside.
+            let frozen_content = track.frozen_clip.map(|frozen| TrackTimelineContent {
+                clips: content
+                    .clips
+                    .iter()
+                    .filter(|clip| clip.id == frozen)
+                    .cloned()
+                    .collect(),
+                automation: content.automation.clone(),
+                ..TrackTimelineContent::default()
+            });
+            let content = frozen_content.as_ref().unwrap_or(content);
+            let selected = timeline.selected_track == Some(track.id)
+                || self.state.arrangement.selected_channels.contains(&track.id);
             let track_color = th::track_color(track.color_index);
 
             // Collect selected clip IDs for this track
@@ -423,6 +470,7 @@ impl App {
                         loop_enabled: false,
                         loop_start: 0,
                         loop_end: 0,
+                        gain_db: 0.0,
                         fade_in_frames: 0,
                         fade_out_frames: 0,
                         fade_in_curve: Default::default(),
@@ -456,13 +504,33 @@ impl App {
                     })
                     .on_exit(Message::Browser(BrowserMsg::ClearDragTarget));
             }
+            let clip_canvas_area: Element<'_, Message> = if track.frozen_clip.is_some() {
+                iced::widget::stack![
+                    clip_canvas_area,
+                    iced::widget::opaque(
+                        container(text("Frozen").size(10).color(th::text_dim()))
+                            .padding([2, 6])
+                            .width(Length::Fill)
+                            .height(Length::Fixed(span.lane_height))
+                            .style(|_theme: &Theme| container::Style {
+                                background: Some(th::with_alpha(th::bg_dark(), 0.25).into()),
+                                ..Default::default()
+                            })
+                    )
+                ]
+                .into()
+            } else {
+                clip_canvas_area.into()
+            };
             let clip_canvas = super::desktop_pointer::drop_target(
                 clip_canvas_area,
                 crate::domains::desktop_pointer::PointerTarget::Lane(track_id),
             );
 
-            let header =
-                mouse_area(header).on_right_press(Message::View(ViewMsg::ShowContextMenu {
+            let header = drop_cue(header, self.drop_would_move(track.id));
+            let header = mouse_area(header)
+                .on_release(Message::HeaderReleased(track.id))
+                .on_right_press(Message::View(ViewMsg::ShowContextMenu {
                     x: self.state.view.cursor_x,
                     y: self.state.view.cursor_y,
                     target: ContextMenuTarget::TrackHeader { track_id: track.id },
@@ -470,9 +538,23 @@ impl App {
             let track_row = row![header, clip_canvas].height(Length::Fixed(span.lane_height));
 
             track_rows = track_rows.push(track_row);
+            track_rows = self.push_take_lanes(track_rows, timeline, track, geometry);
 
             if automation_open {
                 track_rows = self.push_automation_lanes(track_rows, timeline, track, track_color);
+            }
+        }
+
+        // Folded groups after the last shown track, then empty ones.
+        for &group in &waiting {
+            track_rows = self.push_group_row(track_rows, timeline, group);
+        }
+        for bus in &self.state.project_tracks.buses {
+            if bus.is_group
+                && !listed.contains(&bus.id)
+                && !self.state.project_tracks.is_folded_away(bus.id)
+            {
+                track_rows = self.push_group_row(track_rows, timeline, bus.id);
             }
         }
 
@@ -492,6 +574,8 @@ impl App {
             .project_tracks
             .buses
             .iter()
+            // A group has its row among the tracks.
+            .filter(|bus| !bus.is_group)
             .chain(std::iter::once(master_ref))
             .collect();
         for channel in channel_refs {
@@ -808,4 +892,220 @@ fn new_track_lane<'a>(ghost: &DropGhost<'_>, geometry: TimelineGeometry) -> Elem
     .width(Length::Fill)
     .height(Length::Fixed(NEW_TRACK_ROW_HEIGHT))
     .into()
+}
+
+/// `header` outlined while a dragged header would land on it.
+fn drop_cue<'a>(header: impl Into<Element<'a, Message>>, shown: bool) -> Element<'a, Message> {
+    let header = header.into();
+    if !shown {
+        return header;
+    }
+    container(header)
+        .padding(2)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::accent().into()),
+            ..Default::default()
+        })
+        .into()
+}
+
+/// The Clips of every track under `group`, one row a track, as the group's
+/// lane summarises them.
+fn group_clip_rows(
+    project: &crate::state::ProjectTracksState,
+    timeline: &crate::state::TimelineEditorState,
+    group: TrackId,
+    samples_per_beat: f64,
+) -> Vec<Vec<MiniClip>> {
+    project
+        .tracks
+        .iter()
+        .filter(|track| project.ancestors(track.id).contains(&group))
+        .map(|track| {
+            let Some(content) = timeline.timeline.get(track.id) else {
+                return Vec::new();
+            };
+            let color = |own: Option<u8>| {
+                let color = th::track_color(own.unwrap_or(track.color_index));
+                if track.mute {
+                    th::with_alpha(color, 0.35)
+                } else {
+                    color
+                }
+            };
+            // A frozen track shows the audio it plays alone.
+            let shown = |id: ClipId| track.frozen_clip.is_none_or(|frozen| frozen == id);
+            let audio = content
+                .clips
+                .iter()
+                .filter(|clip| shown(clip.id) && samples_per_beat > 0.0)
+                .map(|clip| MiniClip {
+                    start_beats: clip.position as f64 / samples_per_beat,
+                    length_beats: clip.duration as f64 / samples_per_beat,
+                    color: color(clip.color_index),
+                });
+            let notes = content
+                .note_clips
+                .iter()
+                .filter(|clip| shown(clip.id))
+                .map(|clip| MiniClip {
+                    start_beats: clip.position_beats,
+                    length_beats: clip.duration_beats,
+                    color: color(clip.color_index),
+                });
+            audio.chain(notes).collect()
+        })
+        .collect()
+}
+
+impl App {
+    /// A group's row with its automation lanes under it.
+    fn push_group_row<'a>(
+        &'a self,
+        mut rows: iced::widget::Column<'a, Message>,
+        timeline: &'a crate::state::TimelineEditorState,
+        group: TrackId,
+    ) -> iced::widget::Column<'a, Message> {
+        rows = rows.push(self.view_group_row(timeline, group));
+        let bus = self
+            .state
+            .project_tracks
+            .buses
+            .iter()
+            .find(|b| b.id == group);
+        match bus {
+            Some(bus) if self.state.automation_ui.expanded.contains(&group) => {
+                self.push_automation_lanes(rows, timeline, bus, th::track_color(bus.color_index))
+            }
+            _ => rows,
+        }
+    }
+
+    /// How much room a group's row takes, open automation lanes included.
+    fn group_row_height(
+        &self,
+        timeline: &crate::state::TimelineEditorState,
+        group: TrackId,
+    ) -> f32 {
+        let lanes = if self.state.automation_ui.expanded.contains(&group) {
+            self.automation_rows_height(timeline, group)
+        } else {
+            0.0
+        };
+        self.state.track_heights.height(group).pixels() + lanes
+    }
+
+    /// A group's row: a header like a track's, beside its tracks' Clips in
+    /// miniature.
+    fn view_group_row<'a>(
+        &'a self,
+        timeline: &'a crate::state::TimelineEditorState,
+        group: TrackId,
+    ) -> Element<'a, Message> {
+        let project = &self.state.project_tracks;
+        let Some(bus) = project.buses.iter().find(|bus| bus.id == group) else {
+            return column![].into();
+        };
+        let selected = timeline.selected_track == Some(group)
+            || self.state.arrangement.selected_channels.contains(&group);
+        let height = self.state.track_heights.height(group).pixels();
+        let header = view_group_header(
+            bus,
+            GroupHeaderView {
+                flags: TrackHeaderFlags {
+                    selected,
+                    editing_name: self.state.view.editing_track_name == Some(group),
+                    automation_open: self.state.automation_ui.expanded.contains(&group),
+                    hovered: self.state.view.hovered_track_header == Some(group),
+                },
+                peaks: self
+                    .track_meter_peaks
+                    .get(&group)
+                    .copied()
+                    .unwrap_or_default(),
+                depth: project.ancestors(group).len(),
+            },
+            &self.state.view.edit_name_text,
+        );
+        let header = with_resize_edge(
+            header,
+            group,
+            self.state.track_heights.resizing() == Some(group),
+        );
+        let menu = Message::View(ViewMsg::ShowContextMenu {
+            x: self.state.view.cursor_x,
+            y: self.state.view.cursor_y,
+            target: ContextMenuTarget::TrackHeader { track_id: group },
+        });
+        let header = mouse_area(drop_cue(header, self.drop_would_move(group)))
+            .on_release(Message::HeaderReleased(group))
+            .on_right_press(menu.clone());
+        let lane = canvas(GroupLaneWidget {
+            group,
+            rows: group_clip_rows(
+                project,
+                timeline,
+                group,
+                self.state.transport.samples_per_beat(),
+            ),
+            geometry: TimelineGeometry::from_zoom(
+                self.state.view.viewport.zoom_level,
+                self.state.view.viewport.scroll_offset_beats,
+            ),
+            playhead_beats: self.state.transport.position_beats(),
+            selected,
+            meter: self.state.transport.meter,
+            wheel_zoom: self.wheel_zoom(),
+        })
+        .width(Length::Fill)
+        .height(Length::Fixed(height));
+        row![header, mouse_area(lane).on_right_press(menu)]
+            .height(Length::Fixed(height))
+            .into()
+    }
+}
+
+#[cfg(test)]
+mod group_lane_rows_tests {
+    use super::*;
+    use crate::state::{ProjectTrack, UiClip};
+
+    #[test]
+    fn a_group_lane_shows_one_row_per_track_with_its_clips_in_place() {
+        let mut app = super::super::test_support::app();
+        let mut group = ProjectTrack::new(TrackId::new(), "Group 1".into(), 0);
+        group.is_group = true;
+        let group_id = group.id;
+        let mut kick = ProjectTrack::new(TrackId::new(), "Kick".into(), 1);
+        let mut bass = ProjectTrack::new(TrackId::new(), "Bass".into(), 2);
+        let outside = ProjectTrack::new(TrackId::new(), "Vox".into(), 3);
+        kick.output = Some(group_id);
+        bass.output = Some(group_id);
+        let kick_id = kick.id;
+        let project = std::sync::Arc::make_mut(&mut app.state.project_tracks);
+        project.tracks.extend([kick, bass, outside]);
+        project.buses.push(group);
+        let mut clip = UiClip::test_clip(2_000, 1_000);
+        clip.color_index = Some(5);
+        app.state.arrange_content_mut(kick_id).clips.push(clip);
+
+        let rows = group_clip_rows(
+            &app.state.project_tracks,
+            &app.state.arrangement,
+            group_id,
+            1_000.0,
+        );
+
+        assert_eq!(
+            rows,
+            [
+                vec![MiniClip {
+                    start_beats: 2.0,
+                    length_beats: 1.0,
+                    color: th::track_color(5),
+                }],
+                Vec::new(),
+            ]
+        );
+    }
 }

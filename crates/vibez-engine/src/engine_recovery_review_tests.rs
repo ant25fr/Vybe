@@ -19,6 +19,7 @@ fn routing(track: TrackId, effect: Option<EffectId>) -> Box<crate::routing::Prep
                     inactive_inputs: vec![],
                 })
                 .collect(),
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -26,6 +27,7 @@ fn routing(track: TrackId, effect: Option<EffectId>) -> Box<crate::routing::Prep
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];

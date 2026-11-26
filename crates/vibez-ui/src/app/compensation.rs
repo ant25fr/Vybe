@@ -3,7 +3,7 @@ use vibez_engine::engine::reconfiguration::DeviceReconfiguration;
 
 impl App {
     pub(super) fn compensation_signature(&self) -> crate::domains::compensation::TimingSignature {
-        self.compensation_signature_for_input(self.midi_input.is_some())
+        self.compensation_signature_for_input(!self.midi_ports.open.is_empty())
     }
 
     pub(super) fn compensation_signature_for_input(

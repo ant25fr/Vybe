@@ -3,6 +3,7 @@
 //! cutoff and one LFO. Poly takes a free voice for each note, or else the
 //! oldest; Mono and Legato play the last held note on one voice.
 
+use crate::pitch_bend::PitchBend;
 use vibez_core::effect::ParamDescriptor;
 use vibez_core::midi::MidiNote;
 
@@ -102,6 +103,7 @@ fn triangle(x: f32) -> f32 {
 }
 
 pub struct SubtractiveSynth {
+    bend: PitchBend,
     voices: [Voice; MAX_VOICES],
     sample_rate: f32,
     params: [f32; param::COUNT],
@@ -134,6 +136,7 @@ impl SubtractiveSynth {
         };
         let params: [f32; param::COUNT] = std::array::from_fn(|index| SYNTH_PARAMS[index].default);
         let mut synth = Self {
+            bend: PitchBend::new(sample_rate),
             voices: [Voice::default(); MAX_VOICES],
             sample_rate,
             params,
@@ -312,6 +315,7 @@ impl SubtractiveSynth {
         self.lfo_phase =
             (self.lfo_phase + f64::from(p[param::LFO_RATE]) / f64::from(self.sample_rate)).fract();
         let target = self.choice(param::LFO_TARGET);
+        let bend = self.bend.tick();
         let frame = Frame {
             sample_rate: self.sample_rate,
             waveform: Waveform::from_index(p[param::WAVEFORM] as usize),
@@ -331,11 +335,12 @@ impl SubtractiveSynth {
             } else {
                 0.0
             },
-            pitch_semitones: if target == lfo_target::PITCH {
-                modulation * LFO_PITCH_SEMITONES
-            } else {
-                0.0
-            },
+            pitch_semitones: bend
+                + if target == lfo_target::PITCH {
+                    modulation * LFO_PITCH_SEMITONES
+                } else {
+                    0.0
+                },
             amp_times: self.amp_times,
             filter_times: self.filter_times,
         };
@@ -429,6 +434,10 @@ impl crate::Instrument for SubtractiveSynth {
 
     fn note_off(&mut self, pitch: u8) {
         self.note_off(pitch);
+    }
+
+    fn set_pitch_bend(&mut self, semitones: f32) {
+        self.bend.set(semitones);
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {

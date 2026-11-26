@@ -43,6 +43,7 @@ fn setup(
             is_bus: false,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -50,6 +51,7 @@ fn setup(
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];
@@ -159,6 +161,7 @@ fn graph_control_visits_are_linear_in_configured_controls_not_channels_times_con
             is_bus: false,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         });
         targets.push((id, AutomationTarget::TrackGain));
@@ -168,6 +171,7 @@ fn graph_control_visits_are_linear_in_configured_controls_not_channels_times_con
         is_bus: true,
         sends: vec![],
         effects: vec![],
+        output: None,
         midi_from: None,
     });
     let mut plan =
@@ -201,6 +205,7 @@ fn static_send_gains_do_not_scan_automation_per_audio_frame() {
             is_bus: false,
             sends: vec![bus],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -208,6 +213,7 @@ fn static_send_gains_do_not_scan_automation_per_audio_frame() {
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -215,6 +221,7 @@ fn static_send_gains_do_not_scan_automation_per_audio_frame() {
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];
@@ -280,6 +287,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
         let mut source = EngineTrack::new(track);
         source.sends.push((bus, 0.5));
         source.playback_source.push_audio_clip(EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: Arc::new(DecodedAudio {
                 channels: vec![vec![1.0; 128]; 2],
@@ -317,6 +325,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
                 is_bus: false,
                 sends: vec![bus],
                 effects: vec![],
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -324,6 +333,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
                 is_bus: true,
                 sends: vec![],
                 effects: vec![],
+                output: None,
                 midi_from: None,
             },
             RoutingChannel {
@@ -331,6 +341,7 @@ fn prepared_and_new_send_automation_keep_sample_exact_ramps() {
                 is_bus: true,
                 sends: vec![],
                 effects: vec![],
+                output: None,
                 midi_from: None,
             },
         ];

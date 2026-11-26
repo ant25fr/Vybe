@@ -131,6 +131,8 @@ pub struct PreparedClipInsertion {
     reply: Option<ClipInsertionStorage>,
     pub(crate) clip: Option<ClipInsertionDelta>,
     pub(crate) target: Option<(TrackId, ClipInsertionTarget)>,
+    /// The Audio Clip inserted is a take to listen to.
+    pub(crate) audition: bool,
 }
 
 impl PreparedClipInsertion {
@@ -156,7 +158,15 @@ impl PreparedClipInsertion {
             reply: None,
             clip,
             target: None,
+            audition: false,
         })
+    }
+
+    /// Marks the Audio Clip this inserts as a take to listen to: the track
+    /// plays its auditioned Clips alone until they are removed.
+    pub fn for_audition(mut self: Box<Self>) -> Box<Self> {
+        self.audition = true;
+        self
     }
 
     pub fn id(&self) -> ClipInsertionId {

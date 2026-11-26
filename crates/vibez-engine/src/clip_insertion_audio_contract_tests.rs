@@ -105,6 +105,7 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
                     marker_allocation: markers.as_slice().as_ptr(),
                 });
                 EngineClip {
+                    audition: false,
                     id,
                     audio,
                     position: if index == 0 {
@@ -151,6 +152,7 @@ fn prepared_source_and_live_growth_preserve_matching_storage_at_content_boundari
                 is_bus: id.is_master(),
                 sends: Vec::new(),
                 effects: Vec::new(),
+                output: None,
                 midi_from: None,
             })
             .collect();
@@ -274,6 +276,7 @@ fn pending_audio() -> PendingAudio {
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();

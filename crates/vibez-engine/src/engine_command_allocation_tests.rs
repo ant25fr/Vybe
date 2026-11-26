@@ -46,6 +46,13 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::Stop
         | C::Seek(_)
         | C::SetBpm(_)
+        | C::SetMetronome(_)
+        | C::SetMetronomeVolume(_)
+        | C::SetMeterMap(_)
+        | C::SetModulator { .. }
+        | C::SetModulationLink { .. }
+        | C::SetSendPreFader { .. }
+        | C::ExternalPitchBend { .. }
         | C::SetProjectSwing(_)
         | C::BeginClipPerformance
         | C::ArmClipRecord { .. }
@@ -82,6 +89,8 @@ fn coverage(command: &EngineCommand) -> Coverage {
         | C::UpdateAutomationGesture { .. }
         | C::EndAutomationGesture { .. }
         | C::SetTrackSolo(..)
+        | C::SetTrackFrozen(..)
+        | C::SetMidiEffects(..)
         | C::SetTrackSwingOffset(..)
         | C::AddBus(..)
         | C::RemoveBus(_)
@@ -233,6 +242,7 @@ fn refresh_section_source(fixture: &Fixture, value: f32) -> Box<PreparedSectionP
             fixture.audio,
             PreparedPlaybackSource::new(
                 vec![crate::playback_source::EngineClip {
+                    audition: false,
                     id: ClipId::new(),
                     audio: Arc::new(DecodedAudio {
                         channels: vec![vec![value; 4096]],
@@ -478,6 +488,29 @@ fn cases() -> Vec<Case> {
         case!("Stop", false, |_| C::Stop),
         case!("Seek", false, |_| C::Seek(64)),
         case!("SetBpm", false, |_| C::SetBpm(128.0)),
+        case!("SetMetronome", false, |_| C::SetMetronome(true)),
+        case!("SetMetronomeVolume", false, |_| C::SetMetronomeVolume(0.5)),
+        case!("SetMeterMap", false, |_| C::SetMeterMap(Default::default())),
+        case!("SetModulator", false, |_| C::SetModulator {
+            track_id: TrackId::MASTER,
+            slot: 0,
+            settings: Some(Default::default()),
+        }),
+        case!("SetModulationLink", false, |_| C::SetModulationLink {
+            track_id: TrackId::MASTER,
+            slot: 0,
+            link: 0,
+            value: None,
+        }),
+        case!("ExternalPitchBend", false, |f| C::ExternalPitchBend {
+            track_id: f.synth,
+            semitones: 1.0,
+        }),
+        case!("SetSendPreFader", false, |f| C::SetSendPreFader {
+            track_id: f.synth,
+            bus_id: f.bus,
+            pre_fader: true,
+        }),
         case!("SetProjectSwing", false, |_| C::SetProjectSwing(
             Default::default()
         )),
@@ -646,6 +679,13 @@ fn cases() -> Vec<Case> {
             target: AutomationTarget::TrackPan,
         }),
         case!("SetTrackSolo", false, |f| C::SetTrackSolo(f.synth, true)),
+        case!("SetTrackFrozen", false, |f| C::SetTrackFrozen(
+            f.synth, None
+        )),
+        case!("SetMidiEffects", false, |f| C::SetMidiEffects(
+            f.synth,
+            Default::default()
+        )),
         case!("SetTrackSwingOffset", false, |f| C::SetTrackSwingOffset(
             f.synth, None
         )),
@@ -1081,6 +1121,7 @@ fn public_add_clip_at_exhausted_capacity_preserves_content_without_callback_heap
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();
@@ -1267,6 +1308,7 @@ fn public_add_clip_to_missing_track_returns_unique_payload_without_callback_heap
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();

@@ -65,6 +65,13 @@ impl App {
             Message::ExportProject,
         );
 
+        let export_stems_btn = make_menu_btn(
+            "Export Stems...",
+            icons::AUDIO_WAVEFORM,
+            Message::ExportStems,
+        );
+        let export_midi_btn = make_menu_btn("Export MIDI...", icons::MUSIC, Message::ExportMidi);
+
         let export_daw_btn = make_menu_btn(
             "Export DAWproject...",
             icons::AUDIO_WAVEFORM,
@@ -144,6 +151,8 @@ impl App {
             .push(save_btn)
             .push(save_as_btn)
             .push(export_btn)
+            .push(export_stems_btn)
+            .push(export_midi_btn)
             .push(export_daw_btn)
             .push(settings_btn)
             .push(about_btn)

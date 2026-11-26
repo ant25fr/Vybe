@@ -607,6 +607,15 @@ impl App {
                 self.state.status_text = "Stop Perform playback to change BPM".into();
                 Task::none()
             }
+            TransportAction::TempoAutomated => {
+                self.state.status_text =
+                    "The tempo is automated: edit or remove the Master Tempo lane".into();
+                Task::none()
+            }
+            TransportAction::SignatureRejected => {
+                self.state.status_text = "Type a signature such as 3/4 or 7/8".into();
+                Task::none()
+            }
         }
     }
 

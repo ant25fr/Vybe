@@ -94,9 +94,45 @@ impl AudioEngine {
         let continuous_sample = self
             .output_position
             .saturating_add(self.rendered_callback_frames as u64);
+        // Positions this block covers, and the tempo devices hear in it.
+        let positions = self
+            .tempo_slice
+            .map_or(block.frames, |slice| slice.grid_frames);
+        let device_bpm = self.effective_bpm();
+        let tempo_ratio = if self.transport.bpm() > 0.0 {
+            self.transport.bpm() / device_bpm
+        } else {
+            1.0
+        };
         let track_solo = any_solo(&self.tracks);
         let bus_solo = any_solo(&self.buses);
         let tempo = TempoMap::new(self.transport.bpm(), self.sample_rate);
+        let modulation_clock = {
+            let seconds = |sample: u64| sample as f64 / f64::from(self.sample_rate.max(1));
+            let (beat, seconds) = if idle {
+                let seconds = seconds(continuous_sample);
+                (seconds * device_bpm / 60.0, seconds)
+            } else {
+                (
+                    block.pos as f64 / tempo.samples_per_beat(),
+                    seconds(block.pos),
+                )
+            };
+            crate::mixer::ModulationClock {
+                beat,
+                seconds,
+                frames: block.frames,
+                sample_rate: self.sample_rate,
+            }
+        };
+        for track in self
+            .tracks
+            .iter_mut()
+            .chain(self.buses.iter_mut())
+            .chain(std::iter::once(&mut self.master))
+        {
+            track.advance_modulation(modulation_clock);
+        }
         let prepared = self.routing.as_mut();
         for channel in &mut prepared.channels {
             channel.bind(&self.tracks, &self.buses);
@@ -147,6 +183,9 @@ impl AudioEngine {
             {
                 let prepared = self.routing.as_mut();
                 prepared.nodes[index].samples[..len].fill(0.0);
+                if let Some(pre_fader) = prepared.nodes[index].pre_fader.get_mut(..len) {
+                    pre_fader.fill(0.0);
+                }
                 for incoming_index in 0..prepared.nodes[index].incoming.len() {
                     let edge_index = prepared.nodes[index].incoming[incoming_index];
                     let edge = prepared.graph.edges[edge_index];
@@ -159,6 +198,13 @@ impl AudioEngine {
                             &self.buses,
                             &self.master,
                         );
+                        if track.is_some_and(|track| track.pre_fader_sends.contains(&node.channel))
+                        {
+                            if let Some(pre_fader) = prepared.nodes[edge.from].pre_fader.get(..len)
+                            {
+                                prepared.edge_samples[edge_index][..len].copy_from_slice(pre_fader);
+                            }
+                        }
                         let target = vibez_core::automation::AutomationTarget::Send {
                             bus_id: node.channel,
                         };
@@ -212,9 +258,54 @@ impl AudioEngine {
                     );
                 }
             }
+            let arrange_playback = !self.clip_performance
+                && self.active_section.is_none()
+                && self.clock_domain == ClockDomain::Arrange;
             match node.stage {
                 NodeStage::Source => {
                     self.forget_played_notes(channel_index);
+                    // Freezing renders Arrange: Perform still plays the
+                    // track's own clips and devices.
+                    let frozen = binding
+                        .get(&self.tracks, &self.buses, &self.master)
+                        .and_then(|track| track.frozen)
+                        .filter(|_| arrange_playback);
+                    // A MIDI From receiver needs the notes the instrument
+                    // plays, so such a source still runs it, unheard.
+                    let heard_for_notes = self
+                        .routing
+                        .channels
+                        .iter()
+                        .any(|channel| channel.note_source == Some(channel_index));
+                    if let Some(clip) = frozen.filter(|_| !heard_for_notes) {
+                        let prepared = self.routing.as_mut();
+                        // The audio was rendered with the instrument's delay
+                        // taken out, so it is read that much late again.
+                        let latency = u64::from(prepared.compensation.node_output_latency[index]);
+                        if let Some(track) =
+                            binding.get_mut(&mut self.tracks, &mut self.buses, &mut self.master)
+                        {
+                            if !idle {
+                                std::mem::swap(
+                                    &mut track.mix_buffer,
+                                    &mut prepared.nodes[index].samples,
+                                );
+                                track.render_frozen_repitched(
+                                    clip,
+                                    block.pos.saturating_sub(latency),
+                                    positions,
+                                    frames,
+                                    channels,
+                                    block.loop_region,
+                                );
+                                std::mem::swap(
+                                    &mut track.mix_buffer,
+                                    &mut prepared.nodes[index].samples,
+                                );
+                            }
+                        }
+                        continue;
+                    }
                     if self.is_device_recovering(node.channel, None) {
                         self.release_routed_notes(channel_index);
                         continue;
@@ -247,18 +338,22 @@ impl AudioEngine {
                             node.stage,
                         );
                     }
+                    track.apply_modulation(node.stage);
                     if let Some(instrument) = track.instrument.as_mut() {
                         instrument.set_audio_context(
                             vibez_core::audio_context::DeviceAudioContext {
-                                musical_sample: device_musical_sample(
-                                    self.clip_performance,
-                                    pos,
-                                    block.repeat_pos,
-                                    0,
+                                musical_sample: at_tempo(
+                                    device_musical_sample(
+                                        self.clip_performance,
+                                        pos,
+                                        block.repeat_pos,
+                                        0,
+                                    ),
+                                    tempo_ratio,
                                 ),
                                 continuous_sample,
                                 sample_rate: self.sample_rate,
-                                bpm: self.transport.bpm(),
+                                bpm: device_bpm,
                                 playing: !idle,
                             },
                         );
@@ -341,6 +436,7 @@ impl AudioEngine {
                                     pos,
                                     repeat_pos: block.repeat_pos,
                                     frames,
+                                    positions,
                                     channels,
                                     tempo_map: &tempo,
                                     project_swing: self.project_swing,
@@ -351,7 +447,7 @@ impl AudioEngine {
                     } else if idle {
                         track.clear_buffer(frames, channels);
                     } else {
-                        track.render(pos, frames, channels, block.loop_region);
+                        track.render_repitched(pos, positions, frames, channels, block.loop_region);
                     }
                     if let Some(input) = block
                         .live_input
@@ -361,6 +457,19 @@ impl AudioEngine {
                         {
                             *sample += live;
                         }
+                    }
+                    if let Some(clip) = frozen.filter(|_| !idle) {
+                        // The audio was rendered with the instrument's delay
+                        // taken out, so it is read that much late again.
+                        let latency = u64::from(prepared.compensation.node_output_latency[index]);
+                        track.render_frozen_repitched(
+                            clip,
+                            block.pos.saturating_sub(latency),
+                            positions,
+                            frames,
+                            channels,
+                            block.loop_region,
+                        );
                     }
                     std::mem::swap(&mut track.mix_buffer, &mut prepared.nodes[index].samples);
                     track.keep_played_notes();
@@ -411,6 +520,10 @@ impl AudioEngine {
                     }
                 }
                 NodeStage::Effect(effect_id) => {
+                    let frozen = arrange_playback
+                        && binding
+                            .get(&self.tracks, &self.buses, &self.master)
+                            .is_some_and(|track| track.frozen.is_some());
                     let recovery_bypass = self.recovering_effect_bypass(node.channel, effect_id);
                     let meter_generation = self.effect_meter.generation_for(node.channel);
                     let prepared = self.routing.as_mut();
@@ -423,6 +536,13 @@ impl AudioEngine {
                             prepared.nodes[index].samples[sample] +=
                                 prepared.edge_samples[edge_index][sample];
                         }
+                    }
+                    // A frozen track's audio passes by the effect, delayed as
+                    // the effect would have delayed it.
+                    if frozen {
+                        prepared.bypass_delays[index]
+                            .process_layout(&mut prepared.nodes[index].samples[..len], channels);
+                        continue;
                     }
                     let destination = &mut prepared.nodes[index];
                     for input in &mut destination.inputs {
@@ -546,6 +666,7 @@ impl AudioEngine {
                                     node.stage,
                                 );
                             }
+                            track.apply_modulation(node.stage);
                             if let Some(slot) =
                                 track.effects.iter_mut().find(|slot| slot.id == effect_id)
                             {
@@ -562,15 +683,18 @@ impl AudioEngine {
                                 destination.bypass_state = Some(slot.bypass);
                                 slot.effect.set_audio_context(
                                     vibez_core::audio_context::DeviceAudioContext {
-                                        musical_sample: device_musical_sample(
-                                            self.clip_performance,
-                                            target_pos,
-                                            block.repeat_pos + offset as u64,
-                                            delay,
+                                        musical_sample: at_tempo(
+                                            device_musical_sample(
+                                                self.clip_performance,
+                                                target_pos,
+                                                block.repeat_pos + offset as u64,
+                                                delay,
+                                            ),
+                                            tempo_ratio,
                                         ),
                                         continuous_sample: continuous_sample + offset as u64,
                                         sample_rate: self.sample_rate,
-                                        bpm: self.transport.bpm(),
+                                        bpm: device_bpm,
                                         playing: !idle,
                                     },
                                 );
@@ -708,16 +832,36 @@ impl AudioEngine {
                                     tempo.samples_per_beat(),
                                 );
                             }
+                            if let Some(pre_fader) = prepared.nodes[index].pre_fader.get_mut(..len)
+                            {
+                                pre_fader.copy_from_slice(&track.mix_buffer[..len]);
+                            }
+                            let modulated = track.modulation.is_active();
                             for frame in 0..frames {
                                 let (gain, left, right) = if delayed {
                                     let (frame_gain, frame_pan) =
                                         track.delayed_mix_values(controls, frame);
+                                    let (mixed_gain, mixed_pan) = track.modulation.mixed(
+                                        frame_gain.unwrap_or(track.gain),
+                                        frame_pan.unwrap_or(track.pan),
+                                        frame,
+                                        frames,
+                                    );
                                     let (left, right) = if bus_channel {
-                                        crate::mixer::balance_pan(frame_pan.unwrap_or(track.pan))
+                                        crate::mixer::balance_pan(mixed_pan)
                                     } else {
-                                        equal_power_pan(frame_pan.unwrap_or(track.pan))
+                                        equal_power_pan(mixed_pan)
                                     };
-                                    (frame_gain.unwrap_or(track.gain), left, right)
+                                    (mixed_gain, left, right)
+                                } else if modulated {
+                                    let (mixed_gain, mixed_pan) =
+                                        track.modulation.mixed(gain, pan, frame, frames);
+                                    let (left, right) = if bus_channel {
+                                        crate::mixer::balance_pan(mixed_pan)
+                                    } else {
+                                        equal_power_pan(mixed_pan)
+                                    };
+                                    (mixed_gain, left, right)
                                 } else {
                                     (gain, left, right)
                                 };
@@ -742,11 +886,19 @@ impl AudioEngine {
                                 &prepared.nodes[index].samples[..len],
                                 channels,
                             );
-                            let _ = self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
-                                track_id: node.channel,
-                                peak_l: levels.peak_l,
-                                peak_r: levels.peak_r,
-                            }));
+                            track.held_peaks = (
+                                track.held_peaks.0.max(levels.peak_l),
+                                track.held_peaks.1.max(levels.peak_r),
+                            );
+                            if !self.hold_meters {
+                                let (peak_l, peak_r) = std::mem::take(&mut track.held_peaks);
+                                let _ =
+                                    self.event_tx.push(EngineEvent::TrackMeter(TrackMeterEvent {
+                                        track_id: node.channel,
+                                        peak_l,
+                                        peak_r,
+                                    }));
+                            }
                             if let Some(capture) = capture.as_deref_mut().filter(|capture| {
                                 capture.source_track_raw == node.channel.raw()
                                     && capture.samples.len() >= len
@@ -759,6 +911,14 @@ impl AudioEngine {
                                 } else {
                                     capture.samples[..len].fill(0.0);
                                 }
+                            }
+                            // Offline only: live engines collect no stems.
+                            if let Some((_, stem)) = self
+                                .offline_stems
+                                .iter_mut()
+                                .find(|(id, _)| *id == node.channel)
+                            {
+                                stem.extend_from_slice(&prepared.nodes[index].samples[..len]);
                             }
                             if node.channel.is_master() {
                                 output[..len]
@@ -802,6 +962,16 @@ impl AudioEngine {
                 .record_clocks(first, frames, !performing && !idle, true);
         }
         self.rendered_callback_frames += frames;
+    }
+}
+
+/// A timeline position as the sample a device at `bpm` would count to reach
+/// the same beat; `ratio` is the project tempo over that tempo.
+fn at_tempo(position: u64, ratio: f64) -> u64 {
+    if ratio == 1.0 {
+        position
+    } else {
+        (position as f64 * ratio).round() as u64
     }
 }
 

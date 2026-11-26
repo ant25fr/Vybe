@@ -185,6 +185,29 @@ fn live_output_requests(
     }
 }
 
+pub(super) fn scan_audio_catalog(
+    backend: AudioBackend,
+) -> Result<vibez_audio_io::audio_host::AudioDeviceCatalog, String> {
+    AudioHost::new(backend)
+        .and_then(|host| host.catalog())
+        .map_err(|error| {
+            eprintln!("vibez: failed to scan audio devices: {error}");
+            error.to_string()
+        })
+}
+
+/// [`scan_audio_catalog`] on its own thread.
+pub(super) fn scan_audio_catalog_task(backend: AudioBackend) -> Task<Message> {
+    Task::perform(
+        async move {
+            tokio::task::spawn_blocking(move || scan_audio_catalog(backend))
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()))
+        },
+        move |result| Message::AudioCatalogScanned(backend, result),
+    )
+}
+
 impl App {
     /// Tells the engine the hardware rate, with a preview voice built for it.
     pub(super) fn apply_engine_sample_rate(&mut self, sample_rate: u32) {
@@ -360,6 +383,34 @@ impl App {
         self.persist_ui_settings();
         if let Err(error) = self.sync_audio_input_runtime() {
             self.state.status_text = format!("Audio Input selected but could not start — {error}");
+        }
+        Task::none()
+    }
+
+    /// Takes the device list scanned while the window opened, unless the
+    /// producer has since chosen another backend.
+    pub(super) fn handle_audio_catalog_scanned(
+        &mut self,
+        backend: AudioBackend,
+        result: Result<vibez_audio_io::audio_host::AudioDeviceCatalog, String>,
+    ) -> Task<Message> {
+        if backend != self.state.audio_settings.backend {
+            return Task::none();
+        }
+        match result {
+            Ok(catalog) => {
+                self.state.audio_settings.catalog = catalog;
+                self.state.audio_settings.catalog_error = None;
+                // A project opened meanwhile may be waiting on an input.
+                if self.state.audio_recording.armed_track.is_some()
+                    || self.state.audio_recording.monitor_track.is_some()
+                {
+                    if let Err(error) = self.sync_audio_input_runtime() {
+                        self.state.status_text = format!("Audio Input could not start — {error}");
+                    }
+                }
+            }
+            Err(error) => self.state.audio_settings.catalog_error = Some(error),
         }
         Task::none()
     }

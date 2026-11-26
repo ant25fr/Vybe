@@ -247,6 +247,99 @@ fn track_header_menu(track_id: vibez_core::id::TrackId) -> [(char, &'static str,
     )]
 }
 
+/// An Audio track's take lane entries.
+fn take_menu(
+    arrangement: &crate::state::ArrangementState,
+    project: &crate::state::ProjectTracksState,
+    track_id: vibez_core::id::TrackId,
+) -> Vec<(char, &'static str, Message)> {
+    use crate::domains::arrangement::ArrangementMsg;
+    if !project
+        .tracks
+        .iter()
+        .any(|track| track.id == track_id && !track.kind.is_midi())
+    {
+        return Vec::new();
+    }
+    let mut entries = Vec::new();
+    let has_takes = arrangement
+        .timeline
+        .get(track_id)
+        .is_some_and(|content| !content.take_lanes.is_empty());
+    if has_takes {
+        let label = if arrangement.open_take_lanes.contains(&track_id) {
+            "Hide Take Lanes"
+        } else {
+            "Show Take Lanes"
+        };
+        entries.push((
+            icons::AUDIO_WAVEFORM,
+            label,
+            Message::Arrangement(ArrangementMsg::ToggleTakeLanes(track_id)),
+        ));
+    }
+    let has_selection = arrangement.selected_clips.iter().any(|selected| {
+        matches!(selected, crate::state::ArrangementSelection::AudioClip { track_id: of, .. }
+            if *of == track_id)
+    });
+    if has_selection {
+        entries.push((
+            icons::PLUS,
+            "Selection to Take Lane",
+            Message::Arrangement(ArrangementMsg::SelectionToTakeLane(track_id)),
+        ));
+    }
+    entries
+}
+
+/// The grouping entries of a track or group header's menu: group the
+/// selection, move it into this group, move out, or ungroup.
+fn group_menu(
+    project: &crate::state::ProjectTracksState,
+    arrangement: &crate::state::ArrangementState,
+    track_id: vibez_core::id::TrackId,
+) -> Vec<(char, &'static str, Message)> {
+    use crate::domains::arrangement::ArrangementMsg;
+    let Some(channel) = project.sender(track_id) else {
+        return Vec::new();
+    };
+    let is_track = project.tracks.iter().any(|track| track.id == track_id);
+    // Returns take no part in groups.
+    if !is_track && !channel.is_group {
+        return Vec::new();
+    }
+    let mut entries = vec![(
+        icons::PLUS,
+        "Group Tracks",
+        Message::Arrangement(ArrangementMsg::GroupSelectedTracks),
+    )];
+    if channel.is_group {
+        if arrangement
+            .selected_channels
+            .iter()
+            .any(|id| *id != track_id)
+        {
+            entries.push((
+                icons::PLUS,
+                "Move Selection into Group",
+                Message::Arrangement(ArrangementMsg::AddSelectionToGroup(track_id)),
+            ));
+        }
+        entries.push((icons::X, "Ungroup", Message::remove_bus(track_id)));
+    }
+    if let Some(parent) = channel.output {
+        entries.push((
+            icons::CHEVRON_UP,
+            "Remove from Group",
+            Message::Arrangement(ArrangementMsg::RemoveSelectionFromGroup),
+        ));
+        if !channel.is_group {
+            entries.push((icons::X, "Ungroup", Message::remove_bus(parent)));
+        }
+    }
+    entries
+}
+
 /// A menu opened in the window's lower half grows up from the pointer, since
 /// the timeline menus can be taller than the room left below it.
 fn context_menu_opens_upward(y: f32, window_height: f32) -> bool {
@@ -1286,9 +1379,34 @@ impl App {
             }
             ContextMenuTarget::TrackHeader { track_id } => {
                 let track_id = *track_id;
+                let project = &self.state.project_tracks;
+                let is_group = project
+                    .buses
+                    .iter()
+                    .any(|bus| bus.id == track_id && bus.is_group);
+                // A group is removed by ungrouping, which keeps its tracks.
+                let delete = (!is_group).then(|| track_header_menu(track_id));
+                let rename = project
+                    .sender(track_id)
+                    .filter(|_| !track_id.is_master())
+                    .map(|channel| {
+                        (
+                            icons::PENCIL,
+                            "Rename",
+                            Message::View(ViewMsg::StartEditingTrackName {
+                                track_id,
+                                name: channel.name.clone(),
+                            }),
+                        )
+                    });
+                let takes = take_menu(&self.state.arrangement, project, track_id);
+                let entries = rename
+                    .into_iter()
+                    .chain(takes)
+                    .chain(group_menu(project, &self.state.arrangement, track_id))
+                    .chain(delete.into_iter().flatten());
                 let mut col = iced::widget::Column::with_children(
-                    track_header_menu(track_id)
-                        .map(|(icon, label, msg)| menu_btn(icon, label.into(), msg)),
+                    entries.map(|(icon, label, msg)| menu_btn(icon, label.into(), msg)),
                 )
                 .spacing(0)
                 .width(Length::Fixed(200.0));
@@ -1775,5 +1893,42 @@ mod tests {
         assert!(drum_rack_slice_can_create(16));
         assert!(drum_rack_slice_can_create(64));
         assert!(!drum_rack_slice_can_create(65));
+    }
+}
+
+#[cfg(test)]
+mod group_menu_tests {
+    use super::*;
+    use crate::state::{ArrangementState, ProjectTrack, ProjectTracksState};
+    use vibez_core::id::TrackId;
+
+    #[test]
+    fn headers_offer_the_grouping_that_applies_to_them() {
+        let mut group = ProjectTrack::new(TrackId::new(), "Group 1".into(), 0);
+        group.is_group = true;
+        let ret = ProjectTrack::new(TrackId::new(), "A Return".into(), 0);
+        let mut member = ProjectTrack::new(TrackId::new(), "Kick".into(), 0);
+        member.output = Some(group.id);
+        let free = ProjectTrack::new(TrackId::new(), "Bass".into(), 0);
+        let ids = (group.id, ret.id, member.id, free.id);
+        let project = ProjectTracksState {
+            tracks: vec![member, free],
+            buses: vec![group, ret],
+            ..Default::default()
+        };
+        let arrangement = ArrangementState::default();
+        let labels = |id| -> Vec<&'static str> {
+            group_menu(&project, &arrangement, id)
+                .into_iter()
+                .map(|(_, label, _)| label)
+                .collect()
+        };
+        assert_eq!(labels(ids.3), ["Group Tracks"]);
+        assert_eq!(
+            labels(ids.2),
+            ["Group Tracks", "Remove from Group", "Ungroup"]
+        );
+        assert_eq!(labels(ids.0), ["Group Tracks", "Ungroup"]);
+        assert!(labels(ids.1).is_empty());
     }
 }

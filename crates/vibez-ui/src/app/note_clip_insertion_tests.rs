@@ -59,6 +59,7 @@ fn note_clip(name: &str, position: f64) -> UiNoteClip {
         loop_start_beats: 0.0,
         loop_end_beats: 8.0,
         groove_grid: GrooveGrid::Off,
+        scale: None,
         color_index: None,
     }
 }

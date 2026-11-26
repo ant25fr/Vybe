@@ -34,6 +34,11 @@ pub enum KnobTarget {
     Effect(EffectId),
     GainDb(EffectId),
     Instrument,
+    /// A control of a modulator card.
+    Modulator {
+        modulator: usize,
+        field: crate::domains::modulation::ModField,
+    },
     /// Any device a `DeviceSlot` names.
     Device(crate::domains::device_params::DeviceSlot),
     /// Post-fader send amount into a bus.
@@ -178,6 +183,14 @@ impl EffectKnobWidget {
             }
             KnobTarget::Instrument => {
                 Message::set_instrument_param(self.track_id, self.param_index, value)
+            }
+            KnobTarget::Modulator { modulator, field } => {
+                Message::Modulation(crate::domains::modulation::ModulationMsg::SetField(
+                    self.track_id,
+                    modulator,
+                    field,
+                    value,
+                ))
             }
             KnobTarget::Device(slot) => slot.set(self.track_id, self.param_index, value),
             KnobTarget::Send { bus_id } => Message::set_send(self.track_id, bus_id, value),
@@ -492,7 +505,9 @@ impl canvas::Program<Message> for EffectKnobWidget {
                             Some(crate::domains::device_params::DeviceSlot::Instrument)
                         }
                         KnobTarget::Device(slot) => Some(slot),
-                        KnobTarget::Send { .. } | KnobTarget::AudioClip { .. } => None,
+                        KnobTarget::Send { .. }
+                        | KnobTarget::AudioClip { .. }
+                        | KnobTarget::Modulator { .. } => None,
                     };
                     if let Some(slot) = slot {
                         return (

@@ -19,7 +19,7 @@ use super::*;
 
 /// The narrowest window, in interface pixels, that holds the whole bar in
 /// one row without its groups touching.
-const ONE_ROW_MIN_WIDTH: f32 = 1270.0;
+const ONE_ROW_MIN_WIDTH: f32 = 1440.0;
 const BAR_PADDING: f32 = 16.0;
 
 /// Where the File and Edit menus open, under their buttons.

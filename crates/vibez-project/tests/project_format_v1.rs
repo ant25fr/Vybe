@@ -163,7 +163,9 @@ fn project_with_source(source: MediaSourceRef) -> Project {
         reduced_latency_monitoring: false,
         tracks: vec![track.clone()],
         arrange: TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: ClipId::new(),
                 track_id: track.id,
@@ -203,6 +205,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
     let track = TrackInfo::new("Audio");
     let track_id = track.id;
     let clip = |id| ClipInfo {
+        take_lane: None,
         color_index: None,
         id,
         track_id,
@@ -232,6 +235,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
         reduced_latency_monitoring: false,
         tracks: vec![track],
         arrange: TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![clip(ClipId::new())],
             ..TimelineInfo::default()
         },
@@ -243,6 +247,7 @@ fn arrange_and_section_share_one_embedded_media_row() {
             launch_quantization: SectionLaunchQuantization::EndOfSection,
             looping: false,
             timeline: TimelineInfo {
+                take_lanes: Vec::new(),
                 clips: vec![clip(ClipId::new())],
                 ..TimelineInfo::default()
             },
@@ -336,6 +341,7 @@ fn sliced_drum_rack_pads_and_reconstruction_notes_survive_reopen_with_one_media_
         loop_start_beats: 0.0,
         loop_end_beats: 8.0,
         groove_grid: Default::default(),
+        scale: None,
         color_index: None,
     };
     let project = Project {

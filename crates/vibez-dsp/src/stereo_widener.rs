@@ -280,7 +280,10 @@ mod tests {
         // The first frame is compared with the last settled one.
         let mut joined = vec![settle[settle.len() - 2], after[0]];
         joined.extend(after.chunks_exact(2).map(|f| f[0]).skip(1));
-        let jump = joined.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0_f32, f32::max);
+        let jump = joined
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0_f32, f32::max);
         assert!(jump < steady * 3.0, "step {jump} against a steady {steady}");
     }
 }

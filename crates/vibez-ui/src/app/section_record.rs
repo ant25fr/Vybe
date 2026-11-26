@@ -233,6 +233,7 @@ fn apply_recording_to_section(
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: grid,
+                scale: None,
                 color_index: None,
             });
             content.note_clips.last_mut().expect("record clip")
@@ -298,6 +299,7 @@ mod tests {
                     loop_start_beats: 0.0,
                     loop_end_beats: 0.0,
                     groove_grid: GrooveGrid::Off,
+                    scale: None,
                     color_index: None,
                 }],
                 ..TrackTimelineContent::default()

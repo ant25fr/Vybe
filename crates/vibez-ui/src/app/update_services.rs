@@ -327,11 +327,8 @@ impl App {
             }
             Message::RescanMidiInputs => return self.on_rescan_midi_inputs(),
             Message::OpenMidiInput(name) => return self.on_open_midi_input(name),
-            Message::CloseMidiInput => {
-                self.midi_input = None;
-                self.persist_ui_settings();
-                self.state.status_text = "MIDI input disconnected".to_string();
-            }
+            Message::CloseMidiInput => self.on_close_all_midi_ports(),
+            Message::CloseMidiPort(name) => self.on_close_midi_port(&name),
             Message::SelectTheme(name) => return self.on_select_theme(name),
             Message::RescanThemes => return self.on_rescan_themes(),
             Message::ThemeSaveNameChanged(name) => {

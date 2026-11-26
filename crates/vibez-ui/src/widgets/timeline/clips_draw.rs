@@ -6,14 +6,19 @@ use iced::{Rectangle, Renderer};
 
 use crate::icons;
 use crate::theme;
+use vibez_core::level::db_to_amplitude;
 
 use super::clip_colors::{clip_colors, ClipColors};
 use super::clip_frame::{clip_box, draw_clip_back, draw_clip_front, LoopPasses};
 use super::drag_preview::draw_drag_shadow;
-use super::fade_drag::{fade_curve_handle, fade_handle_xs};
+use super::fade_drag::{
+    fade_curve_handle, fade_handle_xs, gain_handle, GAIN_HANDLE_HALF_WIDTH,
+    HOVER_HANDLES_MIN_CLIP_PX,
+};
 use super::lane_grid::{lane_grid, GridLine};
 use super::lane_layers::StaticLayer;
 use super::loop_tint::{parts, LoopSpan};
+use super::meter_lines::metered_lane_grid;
 use super::note_marks::note_marks;
 use super::*;
 
@@ -118,6 +123,7 @@ pub(super) fn draw_waveform(
     clip_w: f32,
     w: f32,
     ink: iced::Color,
+    gain: f32,
 ) {
     if peaks.is_empty() || clip_w <= 4.0 {
         return;
@@ -132,8 +138,9 @@ pub(super) fn draw_waveform(
         let Some((min_val, max_val)) = waveform_peak_for_pixel(peaks, px, pixels, scale) else {
             break;
         };
-        let y_top = center_y - (max_val * half_h);
-        let y_bottom = center_y - (min_val * half_h);
+        // The drawn height follows the Clip's gain, clipped at full scale.
+        let y_top = center_y - ((max_val * gain).clamp(-1.0, 1.0) * half_h);
+        let y_bottom = center_y - ((min_val * gain).clamp(-1.0, 1.0) * half_h);
         let height = (y_bottom - y_top).max(1.0);
         frame.fill_rectangle(
             iced::Point::new(screen_x, y_top),
@@ -253,7 +260,11 @@ impl TrackClipCanvas {
         // Grid lines use the same effective division as interaction.
         if self.bpm > 0.0 {
             let step = self.grid.effective_grid(ppb).beat_size();
-            let grid = lane_grid(geometry, w, step);
+            let grid = if self.meter.is_default() {
+                lane_grid(geometry, w, step)
+            } else {
+                metered_lane_grid(geometry, w, step, self.meter)
+            };
             let ink = theme::text();
             let band = theme::blend(bg_color, ink, style.band);
             for &(start, end) in &grid.bands {
@@ -400,6 +411,21 @@ impl TrackClipCanvas {
             }
         }
 
+        // The unselected Clip under the pointer offers its handles too.
+        if let Some(pos) = cursor.position_in(bounds).filter(|_| self.bpm > 0.0) {
+            let spb = self.sample_rate as f64 * 60.0 / self.bpm;
+            for clip in &self.clips {
+                let clip_x = self.beat_to_x(clip.position as f64 / spb);
+                let clip_w = self.geometry().width_for_beats(clip.duration as f64 / spb);
+                if !self.selected_clips.contains(&clip.clip_id)
+                    && clip_w >= HOVER_HANDLES_MIN_CLIP_PX
+                    && (clip_x..=clip_x + clip_w).contains(&pos.x)
+                {
+                    draw_clip_handles(frame, clip, clip_x, clip_w);
+                }
+            }
+        }
+
         self.draw_drag_guide(frame, w, h);
 
         // A playing Section has an engine-owned playback marker in addition
@@ -519,6 +545,7 @@ impl TrackClipCanvas {
             clip_w,
             w,
             colors.ink,
+            db_to_amplitude(clip.gain_db),
         );
 
         if !is_recording_preview
@@ -557,13 +584,6 @@ impl TrackClipCanvas {
                     .with_width(1.25),
             );
             if is_selected {
-                for x in [fade_in_x, fade_out_x] {
-                    frame.fill_rectangle(
-                        iced::Point::new(x - 2.5, FADE_HANDLE_Y - 2.5),
-                        iced::Size::new(5.0, 5.0),
-                        theme::accent(),
-                    );
-                }
                 for edge in [
                     crate::state::AudioClipFadeEdge::In,
                     crate::state::AudioClipFadeEdge::Out,
@@ -582,6 +602,12 @@ impl TrackClipCanvas {
             title_icon(is_recording_preview, looped),
             w,
         );
+        if is_selected {
+            draw_clip_handles(frame, clip, clip_x, clip_w);
+        }
+        if !is_recording_preview {
+            draw_gain_readout(frame, clip.gain_db, clip_x, clip_w, colors.ink);
+        }
 
         // Diagonal stripe overlay when the clip's warp is
         // stale relative to the current project tempo. Low
@@ -764,4 +790,48 @@ mod tests {
         assert_eq!(visible_pixel_columns(200.0, 400.0, 1_000.0), 0..400);
         assert_eq!(visible_pixel_columns(1_200.0, 400.0, 1_000.0), 0..0);
     }
+}
+
+/// The fade handles at both ends and the gain handle between them.
+fn draw_clip_handles(frame: &mut canvas::Frame, clip: &TimelineClip, clip_x: f32, clip_w: f32) {
+    let outline = canvas::Stroke::default()
+        .with_color(theme::bg_dark())
+        .with_width(1.0);
+    let mut mark = |center: iced::Point, half_width: f32, half_height: f32| {
+        let path = canvas::Path::rectangle(
+            iced::Point::new(center.x - half_width, center.y - half_height),
+            iced::Size::new(half_width * 2.0, half_height * 2.0),
+        );
+        frame.fill(&path, theme::accent());
+        frame.stroke(&path, outline.clone());
+    };
+    let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
+    for x in [fade_in_x, fade_out_x] {
+        mark(iced::Point::new(x, FADE_HANDLE_Y), 3.5, 3.5);
+    }
+    if let Some(center) = gain_handle(clip_x, clip_w) {
+        mark(center, GAIN_HANDLE_HALF_WIDTH, 2.5);
+    }
+}
+
+/// The gain of a Clip that is not at 0 dB, under its gain handle.
+fn draw_gain_readout(
+    frame: &mut canvas::Frame,
+    gain_db: f32,
+    clip_x: f32,
+    clip_w: f32,
+    ink: iced::Color,
+) {
+    let Some(handle) = gain_handle(clip_x, clip_w).filter(|_| gain_db != 0.0) else {
+        return;
+    };
+    frame.fill_text(canvas::Text {
+        content: format!("{gain_db:+.1} dB"),
+        position: iced::Point::new(handle.x, handle.y + 4.0),
+        color: ink,
+        size: 9.0.into(),
+        font: crate::typography::PERFORM_TECH,
+        horizontal_alignment: iced::alignment::Horizontal::Center,
+        ..canvas::Text::default()
+    });
 }

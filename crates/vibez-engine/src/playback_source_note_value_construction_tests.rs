@@ -79,6 +79,7 @@ pub(crate) fn verify_note_value_source_growth(source: PreparedPlaybackSource, co
             is_bus: id.is_master(),
             sends: Vec::new(),
             effects: Vec::new(),
+            output: None,
             midi_from: None,
         })
         .collect();

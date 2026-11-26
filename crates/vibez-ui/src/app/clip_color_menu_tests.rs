@@ -124,9 +124,9 @@ fn track_header_menu_recolors_the_track() {
         target: ContextMenuTarget::TrackHeader { track_id },
     });
 
-    // The header menu opens at (20, 200): Delete Track, then "Color", then
+    // The header menu opens at (20, 200): its entries, then "Color", then
     // the swatch row.
-    let found = menu_has_item(&app, 20.0, 220.0, 235.0, 300.0, |m| {
+    let found = menu_has_item(&app, 20.0, 220.0, 235.0, 370.0, |m| {
         carries(m, |a| matches!(a, ArrangementMsg::SetTrackColor { .. }))
     });
     assert!(found, "the track header menu must offer the track palette");

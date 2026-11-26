@@ -29,6 +29,7 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
     });
     let audio_id = ClipId::new();
     let audio = vibez_core::track::ClipInfo {
+        take_lane: None,
         color_index: None,
         id: audio_id,
         track_id: audio_track_id,
@@ -59,6 +60,7 @@ async fn clip_project_reopens_audio_midi_and_independent_arrange_content() {
         track_id: audio_track_id,
         row: 8,
         timeline: vibez_project::TimelineInfo {
+            take_lanes: Vec::new(),
             clips: vec![audio],
             ..Default::default()
         },
@@ -139,6 +141,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
         .await
         .unwrap();
         let info = vibez_core::track::ClipInfo {
+            take_lane: None,
             color_index: None,
             id,
             track_id: track.id,
@@ -172,6 +175,7 @@ async fn recorded_audio_cells_require_container_saves_and_reopen_with_embedded_m
                 track_id: track.id,
                 row: 2,
                 timeline: vibez_project::TimelineInfo {
+                    take_lanes: Vec::new(),
                     clips: vec![info],
                     ..Default::default()
                 },

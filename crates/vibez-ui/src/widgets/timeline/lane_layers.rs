@@ -95,6 +95,14 @@ impl TrackClipCanvas {
             self.sample_rate,
         )
             .hash(&mut hasher);
+        for change in self.meter.changes() {
+            (
+                change.bar,
+                change.signature.numerator(),
+                change.signature.denominator(),
+            )
+                .hash(&mut hasher);
+        }
         (
             self.loop_enabled,
             self.loop_start_beats.to_bits(),
@@ -129,6 +137,7 @@ impl TrackClipCanvas {
             )
                 .hash(&mut hasher);
             (
+                clip.gain_db.to_bits(),
                 clip.fade_in_frames,
                 clip.fade_out_frames,
                 clip.fade_in_curve,

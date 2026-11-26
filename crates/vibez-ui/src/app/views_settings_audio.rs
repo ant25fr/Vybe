@@ -8,8 +8,13 @@ use crate::message::Message;
 use crate::theme as th;
 use crate::widgets::control_style;
 
-use super::views_settings_rows::{action, group, hint, label_block, pick, setting_row, status};
+use super::midi_mapping::MidiMapMsg;
+use super::views_settings_rows::{
+    action, group, hint, label_block, pick, setting_row, slider_control, status,
+};
 use super::*;
+use crate::domains::transport::TransportMsg;
+use crate::shortcuts::ShortcutAction;
 
 const DEVICE_PICK_W: f32 = 260.0;
 const SHORT_PICK_W: f32 = 140.0;
@@ -171,21 +176,46 @@ impl App {
             ),
         ]);
 
-        let connected = self
-            .midi_input
-            .as_ref()
-            .map(|input| input.port_name.as_str());
+        let volume = self.state.transport.metronome_volume;
+        let on_macos = cfg!(target_os = "macos");
+        let combo = |action: ShortcutAction| {
+            self.shortcuts
+                .combos_for(action)
+                .first()
+                .map_or_else(|| "unbound".to_string(), |combo| combo.label(on_macos))
+        };
+        let metronome = group([setting_row(
+            "Metronome volume",
+            Some(
+                hint(format!(
+                    "On / off: {}. Louder: {}. Quieter: {}. Change them in Shortcuts.",
+                    combo(ShortcutAction::ToggleMetronome),
+                    combo(ShortcutAction::MetronomeLouder),
+                    combo(ShortcutAction::MetronomeQuieter),
+                ))
+                .into(),
+            ),
+            slider_control(
+                0.0..=2.0,
+                volume,
+                0.01,
+                |volume| Message::Transport(TransportMsg::SetMetronomeVolume(volume)),
+                format!("{:.0} %", volume * 100.0),
+            ),
+        )]);
+
+        let open = self.midi_ports.open.len();
         let mut midi: Vec<Element<'_, Message>> = vec![setting_row(
-            "MIDI input",
+            "MIDI inputs",
             Some(
                 column![
                     hint(
-                        "External MIDI plays the selected instrument track. Plug your \
-                         keyboard or Push in, rescan, then pick its port."
+                        "External MIDI plays the selected instrument track. Plug your                          keyboards or Push in, rescan, then turn on each port you use."
                     ),
-                    hint(match connected {
-                        Some(port) => format!("Connected: {port}"),
-                        None => "Not connected".into(),
+                    hint(match open {
+                        0 => "None on".to_string(),
+                        1 => "1 input on".to_string(),
+                        count => format!("{count} inputs on"),
                     }),
                 ]
                 .spacing(2)
@@ -194,15 +224,15 @@ impl App {
             row![
                 action("Rescan ports", Some(Message::RescanMidiInputs), false),
                 action(
-                    "Disconnect",
-                    connected.is_some().then_some(Message::CloseMidiInput),
+                    "Disconnect all",
+                    (open > 0).then_some(Message::CloseMidiInput),
                     false
                 ),
             ]
             .spacing(6),
         )];
         for name in &self.midi_input_ports {
-            let current = connected == Some(name.as_str());
+            let current = self.midi_ports.is_open(name);
             midi.push(
                 button(
                     row![
@@ -223,12 +253,59 @@ impl App {
                     .spacing(8)
                     .align_y(iced::Alignment::Center),
                 )
-                .on_press(Message::OpenMidiInput(name.clone()))
+                .on_press(if current {
+                    Message::CloseMidiPort(name.clone())
+                } else {
+                    Message::OpenMidiInput(name.clone())
+                })
                 .padding([5, 8])
                 .width(Length::Fill)
                 .style(move |_theme: &Theme, status| {
                     super::views_browser_style::browser_place_button_style(current, status)
                 })
+                .into(),
+            );
+        }
+
+        midi.push(setting_row(
+            "MIDI mappings",
+            Some(
+                hint(
+                    "Turn on learn (the Map button), move a fader or knob, then move \
+                     your controller. Mappings are saved in the project.",
+                )
+                .into(),
+            ),
+            action(
+                if self.midi_learn.active {
+                    "Stop learning"
+                } else {
+                    "Learn"
+                },
+                Some(Message::MidiMap(MidiMapMsg::ToggleLearn)),
+                false,
+            ),
+        ));
+        for mapping in &self.state.project_tracks.midi_mappings {
+            midi.push(
+                row![
+                    text(format!(
+                        "CC {}  \u{2192}  {}",
+                        mapping.cc,
+                        self.midi_mapping_label(mapping.track_id, mapping.target)
+                    ))
+                    .size(11.5)
+                    .color(th::text()),
+                    Space::with_width(Length::Fill),
+                    action(
+                        "Remove",
+                        Some(Message::MidiMap(MidiMapMsg::Remove(mapping.cc))),
+                        false
+                    ),
+                ]
+                .spacing(8)
+                .padding([4, 8])
+                .align_y(iced::Alignment::Center)
                 .into(),
             );
         }
@@ -239,6 +316,7 @@ impl App {
         }
         body.push(group(hardware))
             .push(engine)
+            .push(metronome)
             .push(group(midi))
             .into()
     }

@@ -125,6 +125,8 @@ impl App {
                 self.state.perform.section_editor.edit_cursor_beats(),
             ));
             let ruler = RulerWidget {
+                // Perform counts in 4/4.
+                meter: Default::default(),
                 wheel_zoom: self.wheel_zoom(),
                 playhead_beats: playback_playhead_beats.unwrap_or(-1.0),
                 play_start_beats: None,

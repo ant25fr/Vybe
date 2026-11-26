@@ -16,6 +16,8 @@ pub(super) struct ExportJob {
     request: Option<vibez_engine::render::BounceRequest>,
     path: PathBuf,
     bounce: Option<(String, u64)>,
+    /// A stem export: each channel with its file name; `path` is the folder.
+    pub(super) stems: Option<Vec<(TrackId, String)>>,
     receiver: std::sync::mpsc::Receiver<ExportPluginLoadEvent>,
     plugins: vibez_engine::render::OfflinePlugins,
     expected_plugins: usize,
@@ -77,6 +79,7 @@ impl App {
             request: Some(request),
             path,
             bounce,
+            stems: None,
             receiver,
             plugins: vibez_engine::render::OfflinePlugins::default(),
             expected_plugins,
@@ -196,7 +199,19 @@ impl App {
         let path = job.path;
         let (plugin_return, plugin_return_rx) = std::sync::mpsc::channel();
         self.export_plugin_return_rx = Some(plugin_return_rx);
-        if let Some((clip_name, insert_position)) = job.bounce {
+        if let Some(stems) = job.stems {
+            Task::perform(
+                super::stem_export::stems_async(
+                    request,
+                    job.plugins,
+                    path,
+                    stems,
+                    progress,
+                    plugin_return,
+                ),
+                Message::ExportComplete,
+            )
+        } else if let Some((clip_name, insert_position)) = job.bounce {
             Task::perform(
                 bounce_async(
                     request,

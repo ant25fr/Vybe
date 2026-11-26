@@ -15,7 +15,7 @@ use crate::widgets::device_chrome::CardWidths;
 use crate::widgets::device_controls::{heading, plot_band, rule, vertical_rule, Param};
 use crate::widgets::device_layout::{stack, Stack, KNOB_ROW_H};
 use crate::widgets::simple_fx_display::{
-    CombPlot, DelaySweepPlot, Delayed, PitchPlot, SidebandPlot, Shifting,
+    CombPlot, DelaySweepPlot, Delayed, PitchPlot, Shifting, SidebandPlot,
 };
 
 pub const PAD: f32 = 10.0;

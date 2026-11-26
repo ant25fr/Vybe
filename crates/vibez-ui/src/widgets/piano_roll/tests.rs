@@ -95,6 +95,7 @@ fn loop_end_marker_drag_snaps_and_keeps_the_start_fixed() {
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let widget = PianoRollWidget::from_clip(
@@ -169,6 +170,7 @@ fn loop_end_drags_past_the_clip_end_when_the_pointer_leaves_the_editor() {
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let widget = PianoRollWidget::from_clip(
@@ -225,6 +227,7 @@ fn start_marker_has_its_own_row_when_it_overlaps_loop_start() {
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let widget = PianoRollWidget::from_clip(
@@ -286,6 +289,7 @@ fn loop_drag_skips_moves_that_stay_in_the_same_grid_cell() {
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let widget = PianoRollWidget::from_clip(
@@ -338,6 +342,7 @@ fn loop_handle_keeps_its_resize_cursor_in_draw_mode() {
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let widget = PianoRollWidget::from_clip(
@@ -452,6 +457,7 @@ fn dragging_a_selection_moves_every_note_together_in_one_undo_step() {
         loop_start_beats: 0.0,
         loop_end_beats: 8.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
@@ -541,6 +547,7 @@ fn a_selection_dragged_past_the_clip_start_keeps_its_shape() {
         loop_start_beats: 0.0,
         loop_end_beats: 8.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
@@ -607,6 +614,7 @@ fn shift_with_up_or_down_moves_selected_notes_an_octave() {
         loop_start_beats: 0.0,
         loop_end_beats: 4.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     };
     let bounds = Rectangle::new(Point::ORIGIN, iced::Size::new(852.0, 400.0));
@@ -805,6 +813,7 @@ fn looped_two_bars() -> UiNoteClip {
         loop_start_beats: 2.0,
         loop_end_beats: 6.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     }
 }

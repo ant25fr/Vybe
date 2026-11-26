@@ -171,6 +171,31 @@ impl BrowserState {
             .collect()
     }
 
+    /// The saved tag library: `(tags, folders, top-level tag ids)`. With
+    /// nothing saved it is the seven colours; a library the user emptied
+    /// stays empty. A tag saved in no folder is listed at the top.
+    pub fn restore_tags(
+        saved: Option<Vec<TagDef>>,
+        tree: Vec<TagFolderNode>,
+        mut top: Vec<u32>,
+    ) -> (Vec<TagDef>, Vec<TagFolderNode>, Vec<u32>) {
+        let tags = match saved {
+            Some(tags) => tags,
+            None => Self::default_tags(),
+        };
+        fn filed(nodes: &[TagFolderNode], id: u32) -> bool {
+            nodes
+                .iter()
+                .any(|node| node.tags.contains(&id) || filed(&node.folders, id))
+        }
+        for tag in &tags {
+            if !top.contains(&tag.id) && !filed(&tree, tag.id) {
+                top.push(tag.id);
+            }
+        }
+        (tags, tree, top)
+    }
+
     /// The next free id, shared by tags and folders and never reused.
     pub fn next_tag_id(&self) -> u32 {
         let mut max = 0u32;
@@ -186,17 +211,27 @@ impl BrowserState {
         for node in &self.tag_tree {
             walk(node, &mut max);
         }
-        max.saturating_add(1)
+        max.max(self.retired_tag_id).saturating_add(1)
     }
 
-    fn name_is_usable(&self, name: &str) -> Result<(), String> {
+    /// Remembers the highest id in use, ahead of removing one.
+    fn retire_tag_ids(&mut self) {
+        self.retired_tag_id = self.next_tag_id() - 1;
+    }
+
+    /// Whether `name` is free for a new tag, or for the tag `renaming`.
+    fn name_is_usable(&self, name: &str, renaming: Option<u32>) -> Result<(), String> {
         if name.is_empty() || name.len() > TAG_NAME_MAX_BYTES {
             return Err(format!("a name is 1 to {TAG_NAME_MAX_BYTES} bytes"));
         }
         if is_selector_name(name) {
             return Err("a name cannot look like a tag id selector".into());
         }
-        if self.tags.iter().any(|tag| tag.name == name) {
+        if self
+            .tags
+            .iter()
+            .any(|tag| tag.name == name && Some(tag.id) != renaming)
+        {
             return Err(format!("a tag named {name} already exists"));
         }
         Ok(())
@@ -207,7 +242,7 @@ impl BrowserState {
         if self.tags.len() >= TAG_LIMIT {
             return Err(format!("the library holds at most {TAG_LIMIT} tags"));
         }
-        self.name_is_usable(name)?;
+        self.name_is_usable(name, None)?;
         let id = self.next_tag_id();
         self.tags.push(TagDef {
             id,
@@ -250,7 +285,7 @@ impl BrowserState {
         if self.tags.len() >= TAG_LIMIT {
             return Err(format!("the library holds at most {TAG_LIMIT} tags"));
         }
-        self.name_is_usable(name)?;
+        self.name_is_usable(name, None)?;
         let id = self.next_tag_id();
         self.tags.push(TagDef {
             id,
@@ -308,7 +343,7 @@ impl BrowserState {
     }
 
     pub fn rename_tag(&mut self, id: u32, name: &str) -> Result<(), String> {
-        self.name_is_usable(name)?;
+        self.name_is_usable(name, Some(id))?;
         let tag = self
             .tags
             .iter_mut()
@@ -344,6 +379,7 @@ impl BrowserState {
     /// Returns how many items carried it.
     pub fn remove_tag(&mut self, id: u32) -> usize {
         let carriers = self.tag_carrier_count(id);
+        self.retire_tag_ids();
         self.tags.retain(|tag| tag.id != id);
         self.top_tag_ids.retain(|top| *top != id);
         fn strip(node: &mut TagFolderNode, id: u32) {
@@ -384,6 +420,7 @@ impl BrowserState {
             }
             None
         }
+        self.retire_tag_ids();
         // Find the parent before detaching.
         let parent = find_parent_id(&self.tag_tree, id);
         let Some(mut node) = detach(&mut self.tag_tree, id) else {
@@ -433,6 +470,11 @@ impl BrowserState {
     /// Set or clear one tag on an item; returns the tag's new state.
     pub fn toggle_item_tag(&mut self, source: &MediaSourceRef, tag_id: u32) -> bool {
         let key = browser_path_string(source);
+        // Sources with no path of their own (cloud, project media) would
+        // all share one empty key, and each other's tags.
+        if key.is_empty() {
+            return false;
+        }
         let tags = self.item_tags.entry(key).or_default();
         if let Some(index) = tags.iter().position(|t| *t == tag_id) {
             tags.remove(index);
@@ -450,7 +492,11 @@ impl BrowserState {
 
     /// Set a tag on a taggable item; returns false when it already carried it.
     pub fn set_taggable_tag(&mut self, item: &BrowserTaggable, tag_id: u32) -> bool {
-        let tags = self.item_tags.entry(item.key()).or_default();
+        let key = item.key();
+        if key.is_empty() {
+            return false;
+        }
+        let tags = self.item_tags.entry(key).or_default();
         if tags.contains(&tag_id) {
             false
         } else {
@@ -462,6 +508,9 @@ impl BrowserState {
     /// Set or clear one tag on a taggable item; returns the tag's new state.
     pub fn toggle_taggable_tag(&mut self, item: &BrowserTaggable, tag_id: u32) -> bool {
         let key = item.key();
+        if key.is_empty() {
+            return false;
+        }
         let tags = self.item_tags.entry(key).or_default();
         if let Some(index) = tags.iter().position(|t| *t == tag_id) {
             tags.remove(index);
@@ -563,5 +612,51 @@ impl BrowserState {
             }
             _ => self.select_tag_place(vec![id]),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fresh_library_lists_the_seven_colours_and_an_emptied_one_stays_empty() {
+        let (tags, _, top) = BrowserState::restore_tags(None, Vec::new(), Vec::new());
+        assert_eq!(tags.len(), 7);
+        assert_eq!(top, (1..=7).collect::<Vec<_>>());
+        let (tags, _, top) = BrowserState::restore_tags(Some(Vec::new()), Vec::new(), Vec::new());
+        assert!(tags.is_empty() && top.is_empty());
+    }
+
+    #[test]
+    fn a_tag_keeps_its_name_through_a_rename_but_cannot_take_another() {
+        let mut browser = BrowserState::default();
+        assert!(browser.rename_tag(1, "Red").is_ok());
+        assert!(browser.rename_tag(1, "Blue").is_err());
+    }
+
+    #[test]
+    fn a_removed_tag_or_folder_id_is_not_given_out_again() {
+        let mut browser = BrowserState::default();
+        let tag = browser.make_tag("Mine", 0).unwrap();
+        browser.remove_tag(tag);
+        let folder = browser.make_folder(None, "Kits").unwrap();
+        assert!(folder > tag);
+        browser.remove_folder(folder);
+        assert!(browser.make_tag("Again", 0).unwrap() > folder);
+    }
+
+    #[test]
+    fn sources_without_a_path_do_not_share_tags() {
+        let mut browser = BrowserState::default();
+        let cloud = |name: &str| {
+            BrowserTaggable::Sample(MediaSourceRef::LocalFile {
+                path: std::path::PathBuf::from(name),
+            })
+        };
+        assert!(browser.set_taggable_tag(&cloud("kick.wav"), 1));
+        // An empty key stands for no path at all.
+        assert!(!browser.set_taggable_tag(&cloud(""), 1));
+        assert!(browser.tags_of_taggable(&cloud("")).is_empty());
     }
 }

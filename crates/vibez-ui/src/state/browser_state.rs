@@ -250,6 +250,8 @@ pub struct BrowserState {
     pub tag_tree: Vec<TagFolderNode>,
     /// Tag ids sitting at the top level (not inside any folder).
     pub top_tag_ids: Vec<u32>,
+    /// The highest tag or folder id ever removed, so none is reused.
+    pub retired_tag_id: u32,
     /// Per-item tagging, keyed by absolute path. Persisted.
     pub item_tags: std::collections::HashMap<String, Vec<u32>>,
     /// Active footer-dot tag filters (any-of); empty shows everything.
@@ -381,6 +383,7 @@ impl Default for BrowserState {
             tags: Self::default_tags(),
             tag_tree: Vec::new(),
             top_tag_ids: (1..=7).collect(),
+            retired_tag_id: 0,
             item_tags: std::collections::HashMap::new(),
             tag_filters: Vec::new(),
             results_view: BrowserResultsView::List,

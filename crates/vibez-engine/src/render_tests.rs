@@ -100,6 +100,13 @@ fn bare_track(name: &str) -> TrackInfo {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        pre_fader_sends: Vec::new(),
+        output: None,
+        is_group: false,
+        folded: false,
+        frozen_clip: None,
+        midi_effects: Default::default(),
+        modulators: Vec::new(),
         midi_from: None,
     }
 }
@@ -186,6 +193,7 @@ fn master_bounce_routes_sends_through_buses() {
     let audio = audio_of(200, 0.5);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid,
         track_id: tid,
@@ -256,6 +264,7 @@ fn master_render_applies_audio_clip_gain() {
     let audio = audio_of(200, 0.5);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid,
         track_id: tid,
@@ -317,6 +326,7 @@ fn offline_render_uses_the_same_reverse_traversal_as_live_playback() {
     let track_id = track.id;
     let clip_id = ClipId::new();
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: clip_id,
         track_id,
@@ -384,6 +394,7 @@ fn offline_and_prepared_live_paths_share_the_exact_piecewise_warp_map() {
     let mut warp_markers = vibez_core::warp_marker::WarpMarkers::default();
     assert!(warp_markers.add(1, 2, 0, 4, 4));
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: clip_id,
         track_id,
@@ -425,6 +436,7 @@ fn offline_and_prepared_live_paths_share_the_exact_piecewise_warp_map() {
     let mut live = vec![0.0; 4];
     PreparedPlaybackSource::new(
         vec![EngineClip {
+            audition: false,
             id: clip_id,
             audio,
             position: 0,
@@ -470,6 +482,7 @@ fn clip_bounce_keeps_reverse_warp_and_shaped_fades_in_one_render() {
         .with_fade_in_curve(vibez_core::track::FadeCurve::new(70))
         .with_fade_out_curve(vibez_core::track::FadeCurve::new(-60));
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: clip_id,
         track_id,
@@ -515,6 +528,7 @@ fn clip_bounce_keeps_reverse_warp_and_shaped_fades_in_one_render() {
     let mut live = vec![0.0; 8];
     PreparedPlaybackSource::new(
         vec![EngineClip {
+            audition: false,
             id: clip_id,
             audio,
             position: 0,
@@ -550,6 +564,7 @@ fn mute_silences_master_bounce() {
     let audio = audio_of(100, 0.7);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid,
         track_id: tid,
@@ -603,6 +618,7 @@ fn track_mode_ignores_mute() {
     let audio = audio_of(100, 0.5);
     let cid = ClipId::new();
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid,
         track_id: tid,
@@ -657,6 +673,7 @@ fn clip_mode_isolates_single_clip() {
     let audio_a = audio_of(100, 0.3);
     let audio_b = audio_of(100, 0.9);
     let clip_a = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid_a,
         track_id: tid,
@@ -681,6 +698,7 @@ fn clip_mode_isolates_single_clip() {
         warped_to_bpm: None,
     };
     let clip_b = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid_b,
         track_id: tid,
@@ -754,6 +772,13 @@ fn synth_note_clip_produces_audio() {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        pre_fader_sends: Vec::new(),
+        output: None,
+        is_group: false,
+        folded: false,
+        frozen_clip: None,
+        midi_effects: Default::default(),
+        modulators: Vec::new(),
         midi_from: None,
     };
     let note_clip = NoteClipInfo {
@@ -767,6 +792,7 @@ fn synth_note_clip_produces_audio() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+        scale: None,
         color_index: None,
         notes: vec![MidiNote {
             pitch: 60,
@@ -818,6 +844,13 @@ fn warns_on_midi_track_with_no_native_instrument() {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        pre_fader_sends: Vec::new(),
+        output: None,
+        is_group: false,
+        folded: false,
+        frozen_clip: None,
+        midi_effects: Default::default(),
+        modulators: Vec::new(),
         midi_from: None,
     };
     let req = BounceRequest {
@@ -858,6 +891,7 @@ fn strict_render_uses_prepared_plugin_instrument_and_reports_progress() {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Sixteenth,
+        scale: None,
         color_index: None,
         notes: vec![MidiNote {
             pitch: 36,
@@ -914,3 +948,82 @@ mod device_observation_tests;
 
 #[path = "render_audio_insertion_tests.rs"]
 mod audio_storage_tests;
+
+#[test]
+fn stems_split_the_mix_into_its_channels() {
+    let first = TrackId::new();
+    let second = TrackId::new();
+    let mut request = empty_stem_request();
+    for (id, value) in [(first, 0.25), (second, 0.5)] {
+        let clip = ClipId::new();
+        let mut info = bare_track("Stem");
+        info.id = id;
+        info.pan = DEFAULT_TRACK_PAN;
+        request.tracks.push(info);
+        request.audio_clips.push(ClipInfo {
+            take_lane: None,
+            color_index: None,
+            id: clip,
+            track_id: id,
+            name: "Tone".into(),
+            position: 0,
+            source_offset: 0,
+            start_marker: None,
+            duration: 2_048,
+            source: None,
+            file_path: None,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            gain_db: Default::default(),
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            transient_markers: Default::default(),
+            warp_markers: Default::default(),
+            transpose: Default::default(),
+            original_bpm: None,
+            warped: false,
+            warped_to_bpm: None,
+        });
+        request.clip_audio.insert(
+            clip,
+            Arc::new(DecodedAudio {
+                sample_rate: 48_000,
+                channels: vec![vec![value; 2_048]; 2],
+            }),
+        );
+    }
+    let mut plugins = OfflinePlugins::default();
+    let (stems, warnings) =
+        render_stems_with_plugins(&request, &mut plugins, &[first, second], |_| {}).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let mix = render_offline(&request).audio;
+    assert_eq!(stems.len(), 2);
+    for (_, stem) in &stems {
+        assert_eq!(stem.channels[0].len(), 2_048);
+    }
+    // Centred tracks: the two stems add up to the mix.
+    for frame in [0, 1_000, 2_047] {
+        let sum = stems[0].1.channels[0][frame] + stems[1].1.channels[0][frame];
+        assert!((sum - mix.channels[0][frame]).abs() < 1e-6, "frame {frame}");
+        assert!(stems[0].1.channels[0][frame] > 0.1);
+    }
+}
+
+fn empty_stem_request() -> BounceRequest {
+    BounceRequest {
+        tracks: Vec::new(),
+        master: None,
+        buses: Vec::new(),
+        audio_clips: Vec::new(),
+        note_clips: Vec::new(),
+        clip_audio: HashMap::new(),
+        sampler_audio: HashMap::new(),
+        drum_pad_audio: HashMap::new(),
+        mode: BounceMode::Master,
+        range_samples: (0, 2_048),
+        bpm: 120.0,
+        sample_rate: 48_000,
+        swing: Default::default(),
+    }
+}

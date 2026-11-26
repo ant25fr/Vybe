@@ -18,6 +18,9 @@ use vibez_core::track::{ClipGainDb, ClipTranspose};
 
 use super::*;
 
+/// The timing fields with the knobs under them.
+const INSPECTOR_WIDTH: f32 = 388.0;
+
 fn audio_clip_value_input_style(
     _theme: &Theme,
     status: iced::widget::text_input::Status,
@@ -146,11 +149,17 @@ impl App {
                          min: f32,
                          max: f32| {
             let inspector_field = rotary_field.inspector_field();
+            // A fade's text is in seconds, its knob in knob positions.
+            let typed = matches!(
+                rotary_field,
+                AudioClipRotaryField::Gain | AudioClipRotaryField::Transpose
+            );
             let knob_value = self
                 .state
                 .active_timeline_editor()
                 .audio_clip_inspector_edits
                 .get(&(clip.id, inspector_field))
+                .filter(|_| typed)
                 .and_then(|text| text.parse::<f32>().ok())
                 .unwrap_or(current_value);
             let knob = canvas(EffectKnobWidget::for_audio_clip(
@@ -200,7 +209,28 @@ impl App {
                 ..Default::default()
             })
         };
-        let gain_and_pitch = column![
+        let fade_knobs = row![
+            parameter(
+                "FADE IN",
+                AudioClipRotaryField::FadeIn,
+                AudioClipRotaryField::fade_position(clip.fades.fade_in_frames(), clip.duration),
+                format!("{fade_in:.3}"),
+                "s",
+                0.0,
+                1.0,
+            ),
+            parameter(
+                "FADE OUT",
+                AudioClipRotaryField::FadeOut,
+                AudioClipRotaryField::fade_position(clip.fades.fade_out_frames(), clip.duration),
+                format!("{fade_out:.3}"),
+                "s",
+                0.0,
+                1.0,
+            ),
+        ]
+        .spacing(8);
+        let level_knobs = row![
             parameter(
                 "GAIN",
                 AudioClipRotaryField::Gain,
@@ -220,7 +250,7 @@ impl App {
                 f32::from(ClipTranspose::MAX),
             ),
         ]
-        .spacing(6);
+        .spacing(8);
 
         let range_field = |label_text: &'static str,
                            inspector_field: AudioClipInspectorField,
@@ -417,37 +447,23 @@ impl App {
             ),
         ]
         .spacing(3);
-        let fade_bounds = column![
-            text("FADES").size(8).color(th::text_dim()),
-            range_row(
-                "FADE IN",
-                AudioClipInspectorField::FadeIn,
-                format!("{fade_in:.3}"),
-                "FADE OUT",
-                AudioClipInspectorField::FadeOut,
-                format!("{fade_out:.3}"),
-            ),
-        ]
-        .spacing(3);
-
         let timing_controls = column![
             self.view_audio_warp_row(track_id, clip),
             divider(),
             source_bounds,
             loop_bounds,
-            fade_bounds,
+            fade_knobs,
+            level_knobs,
         ]
         .spacing(6)
         .width(Length::Fill);
-        let inspector_body = row![timing_controls, gain_and_pitch]
-            .spacing(8)
-            .align_y(iced::Alignment::Start);
-        let inspector = container(
-            column![clip_identity, inspector_body]
+        // A low panel scrolls the inspector so the knobs stay reachable.
+        let inspector = container(crate::widgets::quiet_scroll::vertical(
+            column![clip_identity, timing_controls]
                 .spacing(6)
                 .padding([7, 8]),
-        )
-        .width(Length::Fixed(388.0))
+        ))
+        .width(Length::Fixed(INSPECTOR_WIDTH))
         .height(Length::Fill)
         .style(|_theme: &Theme| container::Style {
             background: Some(th::bg_dark().into()),

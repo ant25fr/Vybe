@@ -87,6 +87,8 @@ pub struct Frame<'a> {
     pub env2_dest: usize,
     pub amp_times: Times,
     pub env2_times: Times,
+    /// The pitch wheel, in semitones.
+    pub bend: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -167,7 +169,8 @@ impl Voice {
         let mut push = frame.lfo;
         push[frame.env2_dest.min(dest::COUNT - 1)] += env2;
 
-        let semitones = f32::from(self.pitch) + push[dest::PITCH] * MOD_PITCH_SEMITONES;
+        let semitones =
+            f32::from(self.pitch) + frame.bend + push[dest::PITCH] * MOD_PITCH_SEMITONES;
         if semitones != self.increment_for || self.increment == 0.0 {
             self.increment_for = semitones;
             self.increment = 440.0 * ((semitones - 69.0) / 12.0).exp2() / frame.sample_rate;

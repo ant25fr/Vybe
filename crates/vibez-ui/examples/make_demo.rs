@@ -34,6 +34,13 @@ fn track(name: &str, kind: InstrumentKind, color_index: u8) -> TrackInfo {
         plugin_instrument: None,
         automation: Vec::new(),
         sends: Vec::new(),
+        pre_fader_sends: Vec::new(),
+        output: None,
+        is_group: false,
+        folded: false,
+        frozen_clip: None,
+        midi_effects: Default::default(),
+        modulators: Vec::new(),
         midi_from: None,
     }
 }
@@ -57,6 +64,7 @@ fn clip(
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: vibez_core::perform::GrooveGrid::Off,
+        scale: None,
         color_index: None,
     }
 }
@@ -159,6 +167,8 @@ fn main() {
     note_clips.push(clip(lead.id, "Hook", 32.0, 16.0, notes));
 
     let project = Project {
+        time_signatures: Default::default(),
+        midi_mappings: Vec::new(),
         reduced_latency_monitoring: false,
         master: None,
         buses: Vec::new(),

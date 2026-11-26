@@ -36,6 +36,8 @@ fn audio_recording_transport_guard(
         | TransportMsg::SetArrangementLoopRegion { .. }
         | TransportMsg::BpmSubmit
         | TransportMsg::NudgeBpm(_)
+        | TransportMsg::TapTempo(_)
+        | TransportMsg::SignatureSubmit
             if matches!(
                 phase,
                 crate::domains::audio_recording::AudioRecordingPhase::Recording
@@ -66,6 +68,7 @@ impl App {
             },
             perform_tempo_locked: perform_playback_active,
             perform_playback_active,
+            tempo_automated: self.state.tempo_lane().is_some(),
         }
     }
 
@@ -134,6 +137,33 @@ impl App {
         if undo_gesture.is_some_and(|gesture| self.state.project.history.is_reverted(gesture)) {
             return Task::none();
         }
+        if matches!(&message, Message::View(ViewMsg::MouseReleased))
+            && self.dragged_header.is_some()
+        {
+            let source = self.dragged_header.take();
+            let rest = self.update(message);
+            self.dragged_header = source;
+            return Task::batch([rest, Task::done(Message::EndHeaderDrag)]);
+        }
+        self.observe_midi_learn(&message);
+        // A right-click outside the selection moves it to that header, so
+        // the menu acts on what was clicked.
+        if let Message::View(ViewMsg::ShowContextMenu {
+            target: crate::state::ContextMenuTarget::TrackHeader { track_id },
+            ..
+        }) = &message
+        {
+            let arrangement = &self.state.arrangement;
+            if !arrangement.selected_channels.contains(track_id) {
+                let track_id = *track_id;
+                let _ = self.update(Message::select_track(track_id));
+            }
+        }
+        if let Message::Devices(crate::domains::devices::DevicesMsg::SetEffectParam(_, id, ..)) =
+            &message
+        {
+            self.widener_devices.focus = Some(*id);
+        }
         if let Message::Devices(edit) = &message {
             self.discard_param_entry(edit);
             if crate::domains::devices::is_unchanged_param_edit(&self.state.project_tracks, edit) {
@@ -187,6 +217,15 @@ impl App {
             self.state.status_text = "Finish Clip recording before Capture".into();
             return Task::none();
         }
+        if self.state.audio_recording.is_recording()
+            && matches!(
+                &message,
+                Message::Automation(crate::domains::automation::AutomationMsg::AddTempoLane { .. })
+            )
+        {
+            self.state.status_text = "Stop Audio recording before automating the tempo".into();
+            return Task::none();
+        }
         if let Message::Transport(transport) = &message {
             if self.state.perform.clip_record.is_active()
                 && audio_recording_transport_guard(
@@ -234,6 +273,9 @@ impl App {
             self.state.status_text = "Drag cancelled".into();
             return Task::none();
         }
+        if self.refuse_frozen_edit(&message) {
+            return Task::none();
+        }
         let owns_project_transaction = self.begin_project_track_deletion_transaction(&message);
         self.invalidate_device_preset_load(&message);
         let deferred_arrangement_project_edit = matches!(
@@ -246,41 +288,56 @@ impl App {
                     | crate::domains::devices::DevicesMsg::SetSidechainTap { .. }
             )
         );
-        let should_mark_dirty = matches!(
-            &message,
-            Message::Transport(TransportMsg::BpmSubmit)
-                | Message::Arrangement(ArrangementMsg::AddTrack)
-                | Message::ClipAudioDecoded(..)
-                | Message::Arrangement(ArrangementMsg::AddInstrumentTrack)
-                | Message::SamplerSampleDecoded(..)
-                | Message::DrumRackPadSampleDecoded(..)
-                | Message::BrowserImportPrepared { .. }
-                | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
-                | Message::Arrangement(ArrangementMsg::ResizeAudioClip { .. })
-                | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
-                | Message::Transport(TransportMsg::ToggleArrangementLoop)
-                | Message::Transport(TransportMsg::SetArrangementLoopRegion { .. })
-                | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)
-                | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
-                | Message::Arrangement(ArrangementMsg::AddMidiTrack)
-                | Message::AudioQuantizeReady { result: Ok(_), .. }
-                | Message::ClipBpmDetected { bpm: Some(_), .. }
-                | Message::ClipWarpReady {
-                    record_undo: true,
-                    ..
-                }
-                | Message::ClipAutoWarpReady { .. }
-        ) || matches!(&message, Message::Devices(m) if m.marks_dirty())
-            || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
-            || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
-            || matches!(&message, Message::Automation(m) if m.marks_dirty())
-            || matches!(&message, Message::Perform(m) if m.marks_dirty());
+        let should_mark_dirty =
+            matches!(
+                &message,
+                Message::Transport(TransportMsg::BpmSubmit)
+                    | Message::Arrangement(ArrangementMsg::AddTrack)
+                    | Message::ClipAudioDecoded(..)
+                    | Message::Arrangement(ArrangementMsg::AddInstrumentTrack)
+                    | Message::SamplerSampleDecoded(..)
+                    | Message::DrumRackPadSampleDecoded(..)
+                    | Message::BrowserImportPrepared { .. }
+                    | Message::Arrangement(ArrangementMsg::SetClipLoopRegion { .. })
+                    | Message::Arrangement(ArrangementMsg::ResizeAudioClip { .. })
+                    | Message::Arrangement(ArrangementMsg::DeleteSelectedClip)
+                    | Message::Transport(TransportMsg::ToggleArrangementLoop)
+                    | Message::Transport(TransportMsg::SetArrangementLoopRegion { .. })
+                    | Message::Arrangement(ArrangementMsg::MoveSelectedTrackUp)
+                    | Message::Arrangement(ArrangementMsg::MoveSelectedTrackDown)
+                    | Message::Arrangement(ArrangementMsg::AddMidiTrack)
+                    | Message::AudioQuantizeReady { result: Ok(_), .. }
+                    | Message::ClipBpmDetected { bpm: Some(_), .. }
+                    | Message::ClipWarpReady {
+                        record_undo: true,
+                        ..
+                    }
+                    | Message::ClipAutoWarpReady { .. }
+                    | Message::MidiMap(
+                        super::midi_mapping::MidiMapMsg::Bind(_)
+                            | super::midi_mapping::MidiMapMsg::Remove(_)
+                    )
+            ) || (matches!(&message, Message::Transport(TransportMsg::SignatureSubmit))
+                && self.state.transport.signature_edit().is_some())
+                || matches!(&message, Message::Modulation(m)
+                if m.edit(&self.state.project_tracks).is_some())
+                || matches!(&message, Message::Devices(m) if m.marks_dirty())
+                || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
+                || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
+                || matches!(&message, Message::Automation(m) if m.marks_dirty())
+                || matches!(&message, Message::Perform(m) if m.marks_dirty());
         if should_mark_dirty && !deferred_arrangement_project_edit {
             self.push_undo_step_before(&message, undo_gesture);
             self.mark_project_dirty();
         }
 
         match message {
+            Message::Modulation(message) => self.state.modulation_ui.update(
+                message,
+                &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                &mut self.state.project_tracks,
+            ),
+            Message::MidiMap(message) => return self.update_midi_map(message),
             Message::GainControl(message) => return self.update_gain_control(message),
             Message::Eq(message) => return self.update_eq(message),
             Message::Compressor(message) => return self.update_compressor(message),
@@ -343,6 +400,21 @@ impl App {
             // only computes the cross-domain context, routes the
             // message, and applies the returned action.
             Message::Transport(msg) => {
+                if matches!(
+                    msg,
+                    crate::domains::transport::TransportMsg::SetMetronomeVolume(_)
+                        | crate::domains::transport::TransportMsg::NudgeMetronomeVolume(_)
+                ) {
+                    // An app preference, not part of the project.
+                    let ctx = self.transport_ctx();
+                    self.state.transport.update(msg, &mut self.cmd_tx, ctx);
+                    self.state.status_text = format!(
+                        "Metronome volume {:.0} %",
+                        self.state.transport.metronome_volume * 100.0
+                    );
+                    self.persist_ui_settings();
+                    return Task::none();
+                }
                 if self.state.view.workspace == crate::state::Workspace::Perform
                     && self.state.perform.layout == vibez_project::PerformLayout::Clips
                     && !self.state.transport.will_play()
@@ -570,6 +642,7 @@ impl App {
                     playhead_beats,
                 };
                 let action = self.route_arrangement_editor_message(msg, ctx);
+                self.deselect_frozen_clips();
                 self.state
                     .active_timeline_editor_mut()
                     .discard_orphaned_audio_clip_inspector_edits();
@@ -826,6 +899,7 @@ impl App {
             | Message::RescanMidiInputs
             | Message::OpenMidiInput(..)
             | Message::CloseMidiInput
+            | Message::CloseMidiPort(..)
             | Message::SelectTheme(..)
             | Message::RescanThemes
             | Message::ThemeSaveNameChanged(..)
@@ -924,6 +998,7 @@ impl App {
                 self.finalize_bounce(outcome);
             }
             Message::BounceComplete(Err(err)) => {
+                self.pending_track_render = None;
                 self.finish_export_runtime();
                 self.state.status_text = format!("Bounce error: {err}");
             }
@@ -964,6 +1039,59 @@ impl App {
                     Message::ExportPathSelected,
                 );
             }
+            Message::ToggleTrackFreeze(track) => return self.toggle_track_freeze(track),
+            Message::BounceTrackInPlace(track) => return self.render_track_in_place(track, true),
+            Message::AddSelectionToSelectedGroup => {
+                if let Some(group) = self.state.arrangement.selected_track {
+                    return self.update(Message::Arrangement(
+                        crate::domains::arrangement::ArrangementMsg::AddSelectionToGroup(group),
+                    ));
+                }
+            }
+            Message::HeaderPressed(track) => return self.press_header(track),
+            Message::HeaderReleased(track) => return self.release_over_header(track),
+            Message::EndHeaderDrag => self.dragged_header = None,
+            Message::AudioCatalogScanned(backend, result) => {
+                return self.handle_audio_catalog_scanned(backend, result);
+            }
+            Message::ToggleSelectedTrackTakeLanes => {
+                if let Some(track_id) = self.state.arrangement.selected_track {
+                    return self.update(Message::Arrangement(ArrangementMsg::ToggleTakeLanes(
+                        track_id,
+                    )));
+                }
+                self.state.status_text = "Select a track to show its takes".into();
+            }
+            Message::RenameSelectedTrack => {
+                let channel = self
+                    .state
+                    .arrangement
+                    .selected_track
+                    .filter(|id| !id.is_master())
+                    .and_then(|id| self.state.project_tracks.sender(id))
+                    .map(|channel| (channel.id, channel.name.clone()));
+                if let Some((track_id, name)) = channel {
+                    return self.update(Message::View(ViewMsg::StartEditingTrackName {
+                        track_id,
+                        name,
+                    }));
+                }
+                self.state.status_text = "Select a track to rename".into();
+            }
+            Message::ToggleSelectedTrackFreeze => {
+                if let Some(track) = self.state.arrangement.selected_track {
+                    return self.toggle_track_freeze(track);
+                }
+            }
+            Message::BounceSelectedTrackInPlace => {
+                if let Some(track) = self.state.arrangement.selected_track {
+                    return self.render_track_in_place(track, true);
+                }
+            }
+            Message::ExportStems => return super::stem_export::pick_stem_folder(),
+            Message::StemFolderSelected(folder) => return self.export_stems(folder),
+            Message::ExportMidi => return self.pick_midi_export_path(),
+            Message::MidiExportPathSelected(path) => self.export_midi(path),
             Message::ExportDawProject => {
                 let default_name = self
                     .state

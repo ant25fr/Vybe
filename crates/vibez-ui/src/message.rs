@@ -159,6 +159,7 @@ pub enum Message {
     PianoRoll(crate::domains::piano_roll::PianoRollMsg),
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
+    Modulation(crate::domains::modulation::ModulationMsg),
     Automation(crate::domains::automation::AutomationMsg),
     TrackHeight(crate::domains::track_heights::TrackHeightMsg),
     Perform(crate::domains::perform::PerformMsg),
@@ -325,6 +326,8 @@ pub enum Message {
     /// Settings: save named projects shortly after editing stops.
     ToggleAutoSave,
     SetReducedLatencyMonitoring(bool),
+    /// MIDI learn and controller mappings.
+    MidiMap(crate::app::midi_mapping::MidiMapMsg),
     /// Settings: resize the whole interface. Distinct from timeline
     /// zoom, which changes visible musical time instead.
     SetInterfaceScale(f32),
@@ -355,6 +358,8 @@ pub enum Message {
     OpenMidiInput(String),
     /// Settings: close the currently-open MIDI input port.
     CloseMidiInput,
+    /// Turn one MIDI input off.
+    CloseMidiPort(String),
     /// Appearance: activate a theme by name (built-in or user).
     SelectTheme(String),
     /// Appearance: rescan the themes directory for `.vzt` files.
@@ -659,6 +664,37 @@ pub enum Message {
     // Export
     ExportProject,
     ExportDawProject,
+    /// Write one WAV per track and return into a folder.
+    /// Freeze a track, or unfreeze it when it is frozen.
+    ToggleTrackFreeze(TrackId),
+    /// Replace a track with the audio its devices make.
+    BounceTrackInPlace(TrackId),
+    /// The same two for the selected track.
+    ToggleSelectedTrackFreeze,
+    /// The audio device list scanned while the window opened.
+    AudioCatalogScanned(
+        vibez_audio_io::audio_host::AudioBackend,
+        Result<vibez_audio_io::audio_host::AudioDeviceCatalog, String>,
+    ),
+    /// Start renaming the selected track, group or return.
+    RenameSelectedTrack,
+    /// Show or hide the selected track's take lanes.
+    ToggleSelectedTrackTakeLanes,
+    /// A track or group header was pressed in Arrange: select it, and it
+    /// may be dragged.
+    HeaderPressed(TrackId),
+    /// The button was released over this header.
+    HeaderReleased(TrackId),
+    /// Forget a header drag that ended anywhere else.
+    EndHeaderDrag,
+    /// Move the other selected channels into the selected group.
+    AddSelectionToSelectedGroup,
+    BounceSelectedTrackInPlace,
+    ExportStems,
+    StemFolderSelected(Option<PathBuf>),
+    /// Write the Arrangement's notes to a Standard MIDI File.
+    ExportMidi,
+    MidiExportPathSelected(Option<PathBuf>),
     DawProjectExportPathSelected(Option<PathBuf>),
     DawProjectExported(Result<(PathBuf, Vec<String>), String>),
     ExportPathSelected(Option<PathBuf>),

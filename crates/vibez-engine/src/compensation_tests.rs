@@ -19,6 +19,7 @@ fn channel(id: TrackId, effects: &[EffectId], bus: bool) -> RoutingChannel {
             })
             .collect(),
         sends: vec![],
+        output: None,
         midi_from: None,
     }
 }
@@ -316,4 +317,75 @@ fn aggregate_delay_budget_is_rejected_before_any_individual_line_is_prepared() {
             .storage_samples(),
         needed
     );
+}
+
+#[test]
+fn reduced_latency_monitoring_reaches_through_a_group() {
+    let monitored = TrackId::new();
+    let late = TrackId::new();
+    let group = TrackId::new();
+    let effect = EffectId::new();
+    let mut member = channel(monitored, &[], false);
+    member.output = Some(group);
+    let graph = RoutingGraph::prepare(&[
+        member,
+        channel(late, &[effect], false),
+        channel(group, &[], true),
+        channel(TrackId::MASTER, &[], true),
+    ])
+    .unwrap();
+    let mut reports = vec![0; graph.nodes.len()];
+    reports[graph.index(late, NodeStage::Effect(effect)).unwrap()] = 100;
+    let plan = CompensationPlan::prepare(&graph, &reports, &[monitored], 1).unwrap();
+    // Neither the way into the group nor the group's way out waits.
+    for (edge, &delay) in graph.edges.iter().zip(&plan.edge_delays) {
+        if edge.kind == EdgeKind::Mix {
+            let from = graph.nodes[edge.from].channel;
+            assert!(from == late || delay == 0, "{from:?} waits {delay}");
+        }
+    }
+    assert_eq!(plan.direct_path_latency(&graph, monitored), 0);
+}
+
+#[test]
+fn a_monitored_track_does_not_wait_for_the_mix_inside_a_shared_group() {
+    let monitored = TrackId::new();
+    let sibling = TrackId::new();
+    let late = TrackId::new();
+    let group = TrackId::new();
+    let effect = EffectId::new();
+    let member = |id| {
+        let mut member = channel(id, &[], false);
+        member.output = Some(group);
+        member
+    };
+    let graph = RoutingGraph::prepare(&[
+        member(monitored),
+        member(sibling),
+        channel(late, &[effect], false),
+        channel(group, &[], true),
+        channel(TrackId::MASTER, &[], true),
+    ])
+    .unwrap();
+    let mut reports = vec![0; graph.nodes.len()];
+    reports[graph.index(late, NodeStage::Effect(effect)).unwrap()] = 100;
+    let plan = CompensationPlan::prepare(&graph, &reports, &[monitored], 1).unwrap();
+    let delay_out_of = |channel: TrackId| {
+        graph
+            .edges
+            .iter()
+            .zip(&plan.edge_delays)
+            .find(|(edge, _)| {
+                edge.kind == EdgeKind::Mix && graph.nodes[edge.from].channel == channel
+            })
+            .map(|(_, &delay)| delay)
+            .unwrap()
+    };
+    // The monitored track goes straight through; its sibling waits ahead of
+    // the group, which then needs no wait of its own.
+    assert_eq!(delay_out_of(monitored), 0);
+    assert_eq!(delay_out_of(sibling), 100);
+    assert_eq!(delay_out_of(group), 0);
+    assert_eq!(plan.output_latency, 100);
+    assert_eq!(plan.direct_path_latency(&graph, monitored), 0);
 }

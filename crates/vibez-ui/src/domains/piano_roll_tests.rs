@@ -32,6 +32,7 @@ fn midi_track_with_clip() -> (TimelineEditorState, TrackId, ClipId) {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: GrooveGrid::Off,
+        scale: None,
         color_index: None,
     });
     (timeline, track_id, clip_id)
@@ -658,4 +659,61 @@ fn toggle_edit_mode_flips_and_reports() {
     );
     assert_eq!(pr.edit_mode, PianoRollEditMode::Draw);
     assert_eq!(action.status.as_deref(), Some("Piano roll: Draw mode"));
+}
+
+#[test]
+fn a_drawn_note_snaps_to_the_scale_and_becomes_its_chord() {
+    use vibez_core::scale::{ChordKind, Scale, ScaleKind};
+    let (mut tracks, track_id, clip_id) = midi_track_with_clip();
+    let mut state = PianoRollState {
+        chord: ChordKind::ScaleTriad,
+        ..PianoRollState::default()
+    };
+    let mut engine = RecordingEngine::default();
+    state.update(
+        PianoRollMsg::SetScale(
+            track_id,
+            clip_id,
+            Some(Scale {
+                root: 0,
+                kind: ScaleKind::Major,
+            }),
+        ),
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+    let before = tracks.get(track_id).unwrap().note_clips[0].notes.len();
+    state.update(
+        PianoRollMsg::AddNote {
+            track_id,
+            clip_id,
+            // C sharp moves down to C.
+            pitch: 61,
+            start_beat: 3.0,
+            duration_beats: 1.0,
+        },
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+    let notes = &tracks.get(track_id).unwrap().note_clips[0].notes;
+    let pitches: Vec<u8> = notes[before..].iter().map(|note| note.pitch).collect();
+    assert_eq!(pitches, [60, 64, 67]);
+    assert_eq!(engine.0.len(), 3);
+
+    // Moving a note keeps it in the clip's scale.
+    let index = before;
+    let mut moved = tracks.get(track_id).unwrap().note_clips[0].notes[index];
+    moved.pitch = 66;
+    state.update(
+        PianoRollMsg::EditNote(track_id, clip_id, index, moved),
+        &mut engine,
+        &mut tracks,
+        PianoRollCtx::default(),
+    );
+    assert_eq!(
+        tracks.get(track_id).unwrap().note_clips[0].notes[index].pitch,
+        65
+    );
 }

@@ -14,11 +14,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Where the notice's action sends the user. Human-facing page rather
 /// than a binary, because this feature never installs anything.
-pub const RELEASES_PAGE_URL: &str = "https://github.com/alexanderwanyoike/vibez/releases";
+pub const RELEASES_PAGE_URL: &str = crate::about::RELEASES_URL;
 
 /// Unauthenticated endpoint for the newest published, non-draft release.
-const LATEST_RELEASE_API_URL: &str =
-    "https://api.github.com/repos/alexanderwanyoike/vibez/releases/latest";
+const LATEST_RELEASE_API_URL: &str = "https://api.github.com/repos/ant25fr/Vybe/releases/latest";
 
 /// Minimum spacing between two network checks. GitHub rate-limits
 /// unauthenticated callers by IP, and knowing about a release a few

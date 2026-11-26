@@ -9,7 +9,7 @@ use crate::domains::browser::BrowserMsg;
 use crate::domains::perform::PerformMsg;
 use crate::domains::view::ViewMsg;
 use rtrb::Consumer;
-use vibez_audio_io::audio_host::{AudioBackend, AudioHost};
+use vibez_audio_io::audio_host::AudioBackend;
 use vibez_audio_io::audio_stream::AudioOutputStream;
 use vibez_core::constants::UI_TICK_MS;
 use vibez_core::track::MediaSourceRef;
@@ -99,7 +99,12 @@ struct App {
 
     // External MIDI input (USB keyboard, Ableton Push, virtual cable...).
     // Dropping the handle closes the port.
-    midi_input: Option<vibez_audio_io::midi_input::MidiInputHandle>,
+    midi_ports: midi_ports::MidiPorts,
+    /// The Arrange header being dragged.
+    dragged_header: Option<vibez_core::id::TrackId>,
+    /// The freeze or bounce in place being rendered.
+    pending_track_render: Option<track_freeze::TrackRender>,
+    midi_learn: midi_mapping::MidiLearn,
     hardware_keys: crate::domains::hardware_keys::HardwareKeys,
     /// Cached list of port names last seen by `list_midi_input_ports`.
     /// Populated when the user opens the MIDI picker; used so the UI
@@ -178,7 +183,6 @@ mod drum_rack_devices;
 mod drum_rack_preparation;
 mod engine_events;
 mod eq_devices;
-mod widener_devices;
 mod filter_devices;
 mod fm_devices;
 mod gain_devices;
@@ -200,6 +204,7 @@ mod synth_devices;
 mod tasks;
 mod tracked_request;
 mod wavetable_devices;
+mod widener_devices;
 
 pub(crate) use audio_tasks::*;
 use drum_rack_preparation::*;
@@ -268,6 +273,7 @@ mod views_settings_rows;
 mod views_settings_shortcuts;
 mod views_settings_updates;
 mod views_shell;
+mod views_takes;
 mod views_transient_analysis;
 mod views_transport;
 mod window_policy;
@@ -414,16 +420,24 @@ impl App {
         let active_preferences = audio_backend_preferences.for_backend(settings_audio_backend);
         let preferred_audio_input = active_preferences.input_name.clone();
         let preferred_audio_output = active_preferences.output_name.clone();
-        let (audio_catalog, catalog_error) =
-            match AudioHost::new(settings_audio_backend).and_then(|host| host.catalog()) {
+        // Listing every device takes most of a second, so it runs beside the
+        // opening window. ASIO drivers stay on the thread that loaded them.
+        let catalog_scanned_later = settings_audio_backend != AudioBackend::Asio;
+        let (audio_catalog, catalog_error) = if catalog_scanned_later {
+            Default::default()
+        } else {
+            match audio_settings::scan_audio_catalog(settings_audio_backend) {
                 Ok(catalog) => (catalog, None),
-                Err(error) => {
-                    eprintln!("vibez: failed to scan audio devices: {error}");
-                    (Default::default(), Some(error.to_string()))
-                }
-            };
+                Err(error) => (Default::default(), Some(error)),
+            }
+        };
         let input_bridge = output_stream.input_bridge();
 
+        let restored_tags = crate::state::BrowserState::restore_tags(
+            ui_settings.browser_tags.clone(),
+            ui_settings.browser_tag_tree.clone(),
+            ui_settings.browser_top_tag_ids.clone(),
+        );
         let mut state = AppState {
             transport: crate::state::TransportState {
                 sample_rate,
@@ -486,13 +500,10 @@ impl App {
                         path: PathBuf::from(path),
                     })
                     .collect(),
-                tags: if ui_settings.browser_tags.is_empty() {
-                    crate::state::BrowserState::default_tags()
-                } else {
-                    ui_settings.browser_tags
-                },
-                tag_tree: ui_settings.browser_tag_tree,
-                top_tag_ids: ui_settings.browser_top_tag_ids,
+                tags: restored_tags.0,
+                tag_tree: restored_tags.1,
+                top_tag_ids: restored_tags.2,
+                retired_tag_id: ui_settings.browser_retired_tag_id,
                 item_tags: ui_settings
                     .browser_item_tags
                     .into_iter()
@@ -553,7 +564,10 @@ impl App {
         // matches one currently visible, else to the first available
         // port. Silent on failure: the user can still work without
         // MIDI, and Settings → Audio lets them pick manually later.
-        let midi_input = auto_open_midi_input(ui_settings.preferred_midi_input.as_deref());
+        let midi_ports = midi_ports::MidiPorts::restore(
+            ui_settings.midi_inputs.as_deref(),
+            ui_settings.preferred_midi_input.as_deref(),
+        );
 
         let mut app = Self {
             state,
@@ -601,7 +615,10 @@ impl App {
             export_plugin_return_rx: None,
             browser_import_request: Default::default(),
             section_residency_request: Default::default(),
-            midi_input,
+            midi_ports,
+            dragged_header: None,
+            pending_track_render: None,
+            midi_learn: Default::default(),
             hardware_keys: Default::default(),
             midi_input_ports: Vec::new(),
             interface_scale,
@@ -611,6 +628,9 @@ impl App {
         // Inform the engine of the actual hardware clock and project tempo.
         app.apply_engine_sample_rate(app.state.transport.sample_rate);
         app.send_command(EngineCommand::SetBpm(app.state.transport.bpm));
+        app.send_command(EngineCommand::SetMetronomeVolume(
+            app.state.transport.metronome_volume,
+        ));
         app.send_command(EngineCommand::SetAuditionGain(
             app.state.browser.audition_gain,
         ));
@@ -683,9 +703,16 @@ impl App {
         let maximize_window_task =
             iced::window::get_latest().and_then(|id| iced::window::maximize(id, true));
 
+        let catalog_task = if catalog_scanned_later {
+            audio_settings::scan_audio_catalog_task(app.state.audio_settings.backend)
+        } else {
+            Task::none()
+        };
+
         (
             app,
             Task::batch([
+                catalog_task,
                 local_startup_task,
                 plugin_catalog_startup_task,
                 update_check_task,
@@ -853,10 +880,10 @@ impl App {
                 .plugin_window_manager
                 .as_ref()
                 .is_some_and(|manager| manager.any_open())
-            || self.midi_input.is_some();
+            || !self.midi_ports.open.is_empty();
         let ms = if hot {
             UI_TICK_MS
-        } else if playing {
+        } else if playing || self.lfo_plot_shown() {
             PLAY_TICK_MS
         } else {
             IDLE_TICK_MS
@@ -988,7 +1015,18 @@ mod undo_content_swap_tests;
 #[cfg(test)]
 mod drag_cost_tests;
 
+mod frozen_guard;
+mod header_drag;
+mod midi_effect_devices;
 mod midi_input;
+pub(crate) mod midi_mapping;
+mod midi_ports;
+mod modulator_devices;
+mod stem_export;
+mod track_freeze;
 
 #[cfg(test)]
 mod clip_insertion_tests;
+
+#[cfg(test)]
+mod tempo_modulation_tests;

@@ -11,6 +11,7 @@ use vibez_core::perform::SwingAmount;
 
 fn clip(id: ClipId, value: f32) -> EngineClip {
     EngineClip {
+        audition: false,
         id,
         audio: Arc::new(DecodedAudio {
             channels: vec![vec![value; 4096]],

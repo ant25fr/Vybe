@@ -33,6 +33,9 @@ pub(crate) fn audio_thread_note_end_lookups() -> usize {
 
 /// A resident audio clip on a prepared timeline.
 pub struct EngineClip {
+    /// A take being listened to: while the track holds any, it plays only
+    /// those.
+    pub audition: bool,
     pub id: ClipId,
     pub audio: Arc<DecodedAudio>,
     pub position: u64,
@@ -611,6 +614,19 @@ impl PreparedPlaybackSource {
         channels: usize,
         loop_region: Option<(u64, u64)>,
     ) -> bool {
+        self.render_audio_of(None, output, pos, frames, channels, loop_region)
+    }
+
+    /// [`Self::render_audio`] for one clip alone, or all of them.
+    pub(crate) fn render_audio_of(
+        &self,
+        only: Option<vibez_core::id::ClipId>,
+        output: &mut [f32],
+        pos: u64,
+        frames: usize,
+        channels: usize,
+        loop_region: Option<(u64, u64)>,
+    ) -> bool {
         output.fill(0.0);
         let mut rendered_any = false;
         let block_crosses_loop = matches!(
@@ -620,7 +636,15 @@ impl PreparedPlaybackSource {
                 && pos.saturating_add(frames as u64) > end
         );
 
+        let auditioning = self.clips.iter().any(|clip| clip.audition);
         for clip in &self.clips {
+            let silent = match only {
+                Some(only) => only != clip.id,
+                None => clip.audition != auditioning,
+            };
+            if silent {
+                continue;
+            }
             if !block_crosses_loop && !clip.is_active(pos, frames as u64) {
                 continue;
             }
@@ -835,6 +859,7 @@ mod tests {
             sample_rate: 48_000,
         });
         let clip = || EngineClip {
+            audition: false,
             id: ClipId::new(),
             audio: Arc::clone(&audio),
             position: 0,
@@ -870,6 +895,7 @@ mod tests {
         });
         let source = PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: ClipId::new(),
                 audio,
                 position: 0,
@@ -899,6 +925,7 @@ mod tests {
         assert!(warp_markers.add(1, 2, 0, 4, 4));
         let source = PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: ClipId::new(),
                 audio: Arc::new(DecodedAudio {
                     channels: vec![vec![0.0, 1.0, 2.0, 3.0, 4.0]],
@@ -933,6 +960,7 @@ mod tests {
         });
         let source = PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: ClipId::new(),
                 audio,
                 position: 0,
@@ -966,6 +994,7 @@ mod tests {
         let original = Arc::clone(&audio);
         let mut source = PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: clip_id,
                 audio,
                 position: 0,
@@ -999,6 +1028,7 @@ mod tests {
         let clip_id = ClipId::new();
         let mut source = PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: clip_id,
                 audio: Arc::new(DecodedAudio {
                     channels: vec![vec![1.0, 2.0, 3.0, 4.0]],
@@ -1033,6 +1063,7 @@ mod tests {
         let source = PreparedPlaybackSource::new(
             vec![
                 EngineClip {
+                    audition: false,
                     id: outgoing_id,
                     audio: Arc::new(DecodedAudio {
                         channels: vec![vec![1.0; 8], vec![0.0; 8]],
@@ -1051,6 +1082,7 @@ mod tests {
                     warp_markers: Default::default(),
                 },
                 EngineClip {
+                    audition: false,
                     id: incoming_id,
                     audio: Arc::new(DecodedAudio {
                         channels: vec![vec![0.0; 8], vec![1.0; 8]],
@@ -1090,6 +1122,7 @@ mod tests {
         });
         let audio_source = PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id: ClipId::new(),
                 audio,
                 position: 50,
@@ -1129,6 +1162,39 @@ mod tests {
             calculate_total_length(std::iter::empty::<&PreparedPlaybackSource>(), 22_050.0),
             0
         );
+    }
+
+    #[test]
+    fn an_auditioned_clip_plays_alone() {
+        let clip = |value: f32, audition| EngineClip {
+            audition,
+            id: vibez_core::id::ClipId::new(),
+            audio: std::sync::Arc::new(vibez_core::audio_buffer::DecodedAudio {
+                channels: vec![vec![value; 8]],
+                sample_rate: 48_000,
+            }),
+            position: 0,
+            source_offset: 0,
+            start_marker: 0,
+            duration: 8,
+            loop_enabled: false,
+            loop_start: 0,
+            loop_end: 0,
+            linear_gain: 1.0,
+            fades: Default::default(),
+            playback_direction: Default::default(),
+            warp_markers: Default::default(),
+        };
+        let mut source = PreparedPlaybackSource::default();
+        source.push_audio_clip(clip(0.25, false));
+        source.push_audio_clip(clip(0.5, true));
+        let mut heard = [0.0; 4];
+        source.render_audio(&mut heard, 0, 4, 1, None);
+        assert_eq!(heard, [0.5; 4]);
+
+        source.clips.pop();
+        source.render_audio(&mut heard, 0, 4, 1, None);
+        assert_eq!(heard, [0.25; 4]);
     }
 }
 

@@ -392,9 +392,33 @@ pub struct TrackInfo {
     /// Post-fader send amounts into buses: `(bus id, 0..1)`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sends: Vec<(TrackId, f32)>,
+    /// Buses whose send is taken before the fader and pan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pre_fader_sends: Vec<TrackId>,
+    /// The group this track mixes into instead of the master.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<TrackId>,
+    /// This bus is a group of tracks rather than a return.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_group: bool,
+    /// A group shown folded: its members are hidden in Arrange.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub folded: bool,
+    /// The audio clip standing for this track while it is frozen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_clip: Option<ClipId>,
+    /// The MIDI effects ahead of the instrument.
+    #[serde(
+        default,
+        skip_serializing_if = "crate::midi_effects::MidiEffects::is_neutral"
+    )]
+    pub midi_effects: crate::midi_effects::MidiEffects,
     /// Another track whose played notes this MIDI track also plays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_from: Option<crate::midi_from::MidiFrom>,
+    /// The track's modulators and what they move.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modulators: Vec<crate::modulation::Modulator>,
 }
 
 impl TrackInfo {
@@ -417,7 +441,14 @@ impl TrackInfo {
             plugin_instrument: None,
             automation: Vec::new(),
             sends: Vec::new(),
+            pre_fader_sends: Vec::new(),
+            output: None,
+            is_group: false,
+            folded: false,
+            frozen_clip: None,
+            midi_effects: Default::default(),
             midi_from: None,
+            modulators: Vec::new(),
         }
     }
 }
@@ -514,6 +545,9 @@ pub struct ClipInfo {
     /// back to the track's color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_index: Option<u8>,
+    /// The take lane holding this Clip. A take is kept, not played.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take_lane: Option<u32>,
 }
 
 fn skip_if_false(b: &bool) -> bool {
@@ -681,6 +715,7 @@ mod tests {
 
     fn test_clip(position: u64, duration: u64) -> ClipInfo {
         ClipInfo {
+            take_lane: None,
             color_index: None,
             id: ClipId::new(),
             track_id: TrackId::new(),

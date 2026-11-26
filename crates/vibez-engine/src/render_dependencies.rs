@@ -95,6 +95,7 @@ pub(super) fn actual_dependencies(
                     })
                     .collect()
             },
+            output: channel.output,
             midi_from: channel
                 .midi_from
                 .map(MidiFrom::source)
@@ -107,6 +108,7 @@ pub(super) fn actual_dependencies(
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         });
     }
@@ -206,6 +208,10 @@ fn dependency_taps(
                 if req.tracks.iter().any(|track| track.id == source) {
                     require(&mut taps, source, SourceTap::BeforeEffects);
                 }
+            }
+            // A group is made of the channels that mix into it.
+            for member in all_channels(req).filter(|member| member.output == Some(channel.id)) {
+                require(&mut taps, member.id, SourceTap::AfterFader);
             }
             if req.buses.iter().any(|bus| bus.id == channel.id) {
                 for source in all_channels(req).filter(|source| {

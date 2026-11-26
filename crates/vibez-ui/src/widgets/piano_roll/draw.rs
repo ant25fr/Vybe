@@ -62,6 +62,21 @@ impl PianoRollWidget {
                 iced::Size::new(grid_width, KEY_HEIGHT),
                 row_bg,
             );
+            if let Some(scale) = self.scale.filter(|_| self.pad_labels.is_empty()) {
+                // Scale rows are lit, the root more; the others sink back.
+                let tint = if scale.is_root(pitch) {
+                    theme::with_alpha(self.track_color, 0.20)
+                } else if scale.contains(pitch) {
+                    theme::with_alpha(self.track_color, 0.08)
+                } else {
+                    theme::with_alpha(theme::bg_dark(), 0.45)
+                };
+                frame.fill_rectangle(
+                    iced::Point::new(KEY_WIDTH, y),
+                    iced::Size::new(grid_width, KEY_HEIGHT),
+                    tint,
+                );
+            }
             if !self.pad_labels.is_empty() {
                 // Pads stand out from the rows no pad answers to, which are
                 // dimmed. The pad names sit on the keys.

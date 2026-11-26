@@ -16,6 +16,8 @@ impl EngineCommand {
                 | Self::Stop
                 | Self::Seek(_)
                 | Self::SetArrangementLoop(_)
+                | Self::SetMetronome(_)
+                | Self::SetMetronomeVolume(_)
                 | Self::SetArrangementLoopRegion { .. }
         )
     }
@@ -75,9 +77,12 @@ impl EngineCommand {
                 | Self::SetTrackPan(..)
                 | Self::SetTrackMute(..)
                 | Self::SetTrackSolo(..)
+                | Self::SetTrackFrozen(..)
+                | Self::SetMidiEffects(..)
                 | Self::SetTrackSwingOffset(..)
                 | Self::SetAutomationOverride { .. }
                 | Self::SetSend { .. }
+                | Self::SetSendPreFader { .. }
                 | Self::SetRouting(_)
                 | Self::UpdateAutomationRouting(_)
                 | Self::RejectRoutingUpdate { .. }

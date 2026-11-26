@@ -8,6 +8,7 @@ fn clip(
     duration: u64,
 ) -> (ClipInfo, Arc<DecodedAudio>) {
     let info = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: ClipId::new(),
         track_id: track,

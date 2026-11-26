@@ -3,6 +3,7 @@
 //! controls that move the whole sound: Brightness, Decay, Motion (the
 //! LFO) and Volume. Each note takes a free voice, or else the oldest.
 
+use crate::pitch_bend::PitchBend;
 use vibez_core::effect::ParamDescriptor;
 
 use crate::envelope::Times;
@@ -69,6 +70,7 @@ pub fn preview(params: &[f32], points: usize) -> Vec<f32> {
 }
 
 pub struct FmSynth {
+    bend: PitchBend,
     voices: [Voice; MAX_VOICES],
     sample_rate: f32,
     params: [f32; param::COUNT],
@@ -94,6 +96,7 @@ impl FmSynth {
         crate::fm_voice::prepare();
         let params: [f32; param::COUNT] = std::array::from_fn(|index| FM_PARAMS[index].default);
         let mut synth = Self {
+            bend: PitchBend::new(sample_rate),
             voices: [Voice::default(); MAX_VOICES],
             sample_rate,
             params,
@@ -198,6 +201,7 @@ impl FmSynth {
         }
         let p = &self.params;
         let c = &self.current;
+        let bend = self.bend.tick();
         let frame = Frame {
             sample_rate: self.sample_rate,
             algorithm: algorithm(p),
@@ -208,7 +212,7 @@ impl FmSynth {
             times: self.times,
             depth: depth(c[param::BRIGHTNESS]) * (1.0 + push[dest::BRIGHTNESS]).clamp(0.0, 2.0),
             velocity_sense: p[param::VELOCITY],
-            pitch: push[dest::PITCH] * MOD_PITCH_SEMITONES,
+            pitch: bend + push[dest::PITCH] * MOD_PITCH_SEMITONES,
             volume: (1.0 + push[dest::VOLUME]).clamp(0.0, 2.0),
         };
         let mut sum = 0.0;
@@ -265,6 +269,10 @@ impl crate::Instrument for FmSynth {
 
     fn note_off(&mut self, pitch: u8) {
         self.note_off(pitch);
+    }
+
+    fn set_pitch_bend(&mut self, semitones: f32) {
+        self.bend.set(semitones);
     }
 
     fn render(&mut self, buffer: &mut [f32], channels: usize) {

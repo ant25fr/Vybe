@@ -39,6 +39,7 @@ fn channel(id: TrackId) -> RoutingChannel {
         is_bus: false,
         effects: vec![],
         sends: vec![],
+        output: None,
         midi_from: None,
     }
 }
@@ -619,6 +620,7 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
                 }],
             });
             let clip = ClipInfo {
+                take_lane: None,
                 color_index: None,
                 id: ClipId::new(),
                 track_id: bass.id,
@@ -659,6 +661,7 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
                 loop_start_beats: 0.0,
                 loop_end_beats: 0.0,
                 groove_grid: Default::default(),
+                scale: None,
                 color_index: None,
             };
             let audio = Arc::new(DecodedAudio {

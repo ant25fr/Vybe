@@ -65,6 +65,9 @@ pub enum AutomationTarget {
     Send {
         bus_id: crate::id::TrackId,
     },
+    /// The Arrange tempo, on the master channel only. See [`crate::tempo`].
+    #[serde(rename = "tempo")]
+    Tempo,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

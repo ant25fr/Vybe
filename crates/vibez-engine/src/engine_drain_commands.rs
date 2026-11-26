@@ -203,6 +203,19 @@ impl AudioEngine {
             EngineCommand::StopPerformanceCapture => {
                 self.command_stop_performance_capture(allowance)
             }
+            EngineCommand::ExternalPitchBend {
+                track_id,
+                semitones,
+            } => {
+                if let Some(instrument) = self
+                    .tracks
+                    .iter_mut()
+                    .find(|track| track.id == track_id)
+                    .and_then(|track| track.instrument.as_mut())
+                {
+                    instrument.set_pitch_bend(semitones);
+                }
+            }
             EngineCommand::ExternalNoteOn {
                 track_id,
                 pitch,
@@ -229,6 +242,38 @@ impl AudioEngine {
             EngineCommand::Play => self.command_play(allowance),
             EngineCommand::Stop => self.command_stop(allowance),
             EngineCommand::Seek(pos) => self.command_seek(pos, allowance),
+            EngineCommand::SetMetronomeVolume(volume) => {
+                if volume.is_finite() {
+                    self.metronome_volume = volume.clamp(0.0, 2.0);
+                }
+            }
+            EngineCommand::SetMeterMap(meter) => {
+                self.meter = meter;
+            }
+            EngineCommand::SetModulator {
+                track_id,
+                slot,
+                settings,
+            } => {
+                if let Some(track) = self.channel_mut(track_id) {
+                    track.modulation.set_modulator(usize::from(slot), settings);
+                }
+            }
+            EngineCommand::SetModulationLink {
+                track_id,
+                slot,
+                link,
+                value,
+            } => {
+                if let Some(track) = self.channel_mut(track_id) {
+                    track
+                        .modulation
+                        .set_link(usize::from(slot), usize::from(link), value);
+                }
+            }
+            EngineCommand::SetMetronome(enabled) => {
+                self.metronome = enabled;
+            }
             EngineCommand::SetBpm(bpm) => {
                 // V1 Perform holds one project tempo from the first
                 // Section transition until transport stop.
@@ -405,6 +450,7 @@ impl AudioEngine {
                 self.command_add_clip(
                     track_id,
                     EngineClip {
+                        audition: insertion.audition,
                         id: clip_id,
                         audio,
                         position,
@@ -646,8 +692,38 @@ impl AudioEngine {
                 bus_id,
                 amount,
             } => {
-                if let Some(track) = self.tracks.iter_mut().find(|t| t.id == track_id) {
-                    track.set_send(bus_id, amount.clamp(0.0, 1.0));
+                if let Some(channel) = self.channel_mut(track_id).filter(|_| !track_id.is_master())
+                {
+                    channel.set_send(bus_id, amount.clamp(0.0, 1.0));
+                }
+            }
+            EngineCommand::SetSendPreFader {
+                track_id,
+                bus_id,
+                pre_fader,
+            } => {
+                // Tracks and returns send; the master does not.
+                if let Some(channel) = self.channel_mut(track_id).filter(|_| !track_id.is_master())
+                {
+                    channel.set_send_pre_fader(bus_id, pre_fader);
+                }
+            }
+            EngineCommand::SetMidiEffects(id, effects) => {
+                if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
+                    track.midi_effects = effects;
+                    if let Some(instrument) = track.instrument.as_mut() {
+                        instrument.set_midi_effects(effects);
+                    }
+                }
+            }
+            EngineCommand::SetTrackFrozen(id, frozen) => {
+                if let Some(track) = self.tracks.iter_mut().find(|track| track.id == id) {
+                    if track.frozen != frozen {
+                        // Nothing may keep sounding across the change.
+                        track.flush_notes();
+                    }
+                    track.frozen = frozen;
+                    track.flush_notes();
                 }
             }
             EngineCommand::SetTrackSolo(id, solo) => {

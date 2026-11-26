@@ -489,6 +489,9 @@ impl DevicesState {
                     track.has_plugin_instrument_gui = false;
                 }
                 engine.set_built_in_instrument(track_id, instrument_kind);
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    crate::domains::modulation::drop_instrument_links(engine, track);
+                }
                 for (param_index, value) in instrument_params.into_iter().enumerate() {
                     engine.send(EngineCommand::SetInstrumentParam {
                         track_id,
@@ -519,6 +522,9 @@ impl DevicesState {
                     track.has_plugin_instrument_gui = false;
                 }
                 engine.send(EngineCommand::RemoveTrackInstrument(track_id));
+                if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
+                    crate::domains::modulation::drop_instrument_links(engine, track);
+                }
                 action.close_gui = Some(PluginGuiKey::Instrument { track_id });
                 action.status = Some("Removed instrument".to_string());
             }

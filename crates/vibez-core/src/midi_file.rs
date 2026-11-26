@@ -54,6 +54,138 @@ impl std::fmt::Display for MidiFileError {
 
 impl std::error::Error for MidiFileError {}
 
+/// Ticks a quarter note in written files.
+const WRITE_TICKS_PER_BEAT: u16 = 960;
+
+/// A track to write: its name, notes timed in beats, and whether it plays
+/// drums (written on the General MIDI percussion channel).
+pub struct MidiExportTrack {
+    pub name: String,
+    pub notes: Vec<MidiNote>,
+    pub drums: bool,
+}
+
+/// The notes an Arrangement note clip plays, timed on the timeline: loops
+/// unrolled over the clip's length and notes cut where the clip or loop
+/// stops them.
+pub fn timeline_notes(clip: &crate::midi::NoteClipInfo) -> Vec<MidiNote> {
+    let timeline = crate::clip_timeline::BeatClipTimeline::new(
+        clip.resolved_start_marker_beats(),
+        clip.loop_start_beats,
+        clip.loop_end_beats,
+        clip.duration_beats,
+        clip.loop_enabled,
+    );
+    let mut notes = Vec::new();
+    for note in &clip.notes {
+        for at in timeline.occurrences_of(note.start_beat) {
+            let mut length = note.duration_beats.min(clip.duration_beats - at);
+            if timeline.is_looping() {
+                length = length.min(clip.loop_end_beats - note.start_beat);
+            }
+            if length > 0.0 {
+                notes.push(MidiNote {
+                    start_beat: clip.position_beats + at,
+                    duration_beats: length,
+                    ..*note
+                });
+            }
+        }
+    }
+    notes.sort_by(|a, b| {
+        a.start_beat
+            .total_cmp(&b.start_beat)
+            .then(a.pitch.cmp(&b.pitch))
+    });
+    notes
+}
+
+/// A type 1 Standard MIDI File: a tempo track, then one track each.
+pub fn write(tracks: &[MidiExportTrack], bpm: f64) -> Result<Vec<u8>, MidiFileError> {
+    use midly::num::{u15, u24, u28, u4, u7};
+    use midly::{
+        Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
+    };
+
+    if tracks.iter().all(|track| track.notes.is_empty()) {
+        return Err(MidiFileError::NoNotes);
+    }
+    let event = |delta: u32, kind| TrackEvent {
+        delta: u28::new(delta),
+        kind,
+    };
+    let end = || TrackEventKind::Meta(MetaMessage::EndOfTrack);
+    let ticks = |beat: f64| (beat.max(0.0) * f64::from(WRITE_TICKS_PER_BEAT)).round() as u32;
+    let micros = (60_000_000.0 / bpm.max(1.0)).round() as u32;
+    let mut smf = Smf::new(Header::new(
+        Format::Parallel,
+        Timing::Metrical(u15::new(WRITE_TICKS_PER_BEAT)),
+    ));
+    smf.tracks.push(vec![
+        event(
+            0,
+            TrackEventKind::Meta(MetaMessage::Tempo(u24::new(micros.min(0x00FF_FFFF)))),
+        ),
+        event(
+            0,
+            TrackEventKind::Meta(MetaMessage::TimeSignature(4, 2, 24, 8)),
+        ),
+        event(0, end()),
+    ]);
+    for track in tracks.iter().filter(|track| !track.notes.is_empty()) {
+        let channel = u4::new(if track.drums { DRUM_CHANNEL } else { 0 });
+        // (tick, is a note-on, pitch, velocity): offs sort before ons.
+        let mut edges: Vec<(u32, bool, u8, u8)> = Vec::new();
+        let mut notes = track.notes.clone();
+        notes.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
+        for (index, note) in notes.iter().enumerate() {
+            let start = ticks(note.start_beat);
+            let mut stop = ticks(note.start_beat + note.duration_beats).max(start + 1);
+            // A repeat of the same key ends the one before it.
+            if let Some(next) = notes[index + 1..]
+                .iter()
+                .find(|next| next.pitch == note.pitch)
+            {
+                stop = stop.min(ticks(next.start_beat));
+            }
+            if stop > start {
+                edges.push((
+                    start,
+                    true,
+                    note.pitch.min(127),
+                    note.velocity.clamp(1, 127),
+                ));
+                edges.push((stop, false, note.pitch.min(127), 0));
+            }
+        }
+        edges.sort_unstable_by_key(|&(tick, on, pitch, _)| (tick, on, pitch));
+        let mut events = vec![event(
+            0,
+            TrackEventKind::Meta(MetaMessage::TrackName(track.name.as_bytes())),
+        )];
+        let mut last = 0;
+        for (tick, on, pitch, velocity) in edges {
+            let (key, vel) = (u7::new(pitch), u7::new(velocity));
+            let message = if on {
+                MidiMessage::NoteOn { key, vel }
+            } else {
+                MidiMessage::NoteOff { key, vel }
+            };
+            events.push(event(
+                tick - last,
+                TrackEventKind::Midi { channel, message },
+            ));
+            last = tick;
+        }
+        events.push(event(0, end()));
+        smf.tracks.push(events);
+    }
+    let mut bytes = Vec::new();
+    smf.write_std(&mut bytes)
+        .map_err(|error| MidiFileError::Malformed(error.to_string()))?;
+    Ok(bytes)
+}
+
 pub fn is_midi_file_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
@@ -210,3 +342,71 @@ impl TickTrack {
 #[cfg(test)]
 #[path = "midi_file_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+    use crate::id::{ClipId, TrackId};
+    use crate::midi::NoteClipInfo;
+
+    fn note(pitch: u8, start_beat: f64, duration_beats: f64) -> MidiNote {
+        MidiNote {
+            pitch,
+            velocity: 90,
+            start_beat,
+            duration_beats,
+        }
+    }
+
+    #[test]
+    fn a_looped_clip_is_unrolled_and_reads_back() {
+        let clip = NoteClipInfo {
+            id: ClipId::new(),
+            track_id: TrackId::new(),
+            name: "Loop".into(),
+            position_beats: 4.0,
+            duration_beats: 5.0,
+            notes: vec![note(60, 0.0, 1.0), note(64, 1.5, 2.0)],
+            start_marker_beats: None,
+            loop_enabled: true,
+            loop_start_beats: 0.0,
+            loop_end_beats: 2.0,
+            groove_grid: Default::default(),
+            scale: None,
+            color_index: None,
+        };
+        let notes = timeline_notes(&clip);
+        let timed: Vec<_> = notes
+            .iter()
+            .map(|n| (n.pitch, n.start_beat, n.duration_beats))
+            .collect();
+        assert_eq!(
+            timed,
+            [
+                (60, 4.0, 1.0),
+                (64, 5.5, 0.5),
+                (60, 6.0, 1.0),
+                (64, 7.5, 0.5),
+                (60, 8.0, 1.0),
+            ]
+        );
+        let bytes = write(
+            &[MidiExportTrack {
+                name: "Keys".into(),
+                notes: notes.clone(),
+                drums: false,
+            }],
+            100.0,
+        )
+        .unwrap();
+        let read = MidiFile::read(&bytes).unwrap();
+        assert_eq!(read.tracks.len(), 1);
+        assert_eq!(read.tracks[0].name.as_deref(), Some("Keys"));
+        assert_eq!(read.tracks[0].notes, notes);
+    }
+
+    #[test]
+    fn nothing_to_play_is_an_error() {
+        assert_eq!(write(&[], 120.0), Err(MidiFileError::NoNotes));
+    }
+}

@@ -48,6 +48,7 @@ fn channel(id: TrackId, effects: &[EffectId], bus: bool) -> RoutingChannel {
                 assignments: vec![],
             })
             .collect(),
+        output: None,
         midi_from: None,
     }
 }
@@ -79,6 +80,7 @@ fn clip(
         start_position: 0,
         source: Box::new(PreparedPlaybackSource::new(
             vec![EngineClip {
+                audition: false,
                 id,
                 audio: Arc::new(DecodedAudio {
                     channels: vec![vec![value; 16]; 2],

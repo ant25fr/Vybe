@@ -122,7 +122,8 @@ impl canvas::Program<Message> for EnvelopePlot<'_> {
             points.push(Point::new(x(attack), y(1.0)));
             for i in 1..=steps {
                 let t = attack + decay * i as f32 / steps as f32;
-                let level = sustain + (1.0 - sustain) * (-3.0 * (t - attack) / decay.max(1e-3)).exp();
+                let level =
+                    sustain + (1.0 - sustain) * (-3.0 * (t - attack) / decay.max(1e-3)).exp();
                 points.push(Point::new(x(t), y(level)));
             }
             points.push(Point::new(x(attack + decay + hold), y(sustain)));
@@ -164,7 +165,9 @@ impl canvas::Program<Message> for EnvelopePlot<'_> {
                 frame.fill(&canvas::Path::circle(p, 3.0), th::bg_dark());
                 frame.stroke(
                     &canvas::Path::circle(p, 3.0),
-                    canvas::Stroke::default().with_color(self.accent).with_width(1.5),
+                    canvas::Stroke::default()
+                        .with_color(self.accent)
+                        .with_width(1.5),
                 );
             }
         });
@@ -416,7 +419,10 @@ impl canvas::Program<Message> for PluckedStrings {
             frame.stroke(
                 &canvas::Path::line(Point::new(x, 2.0), Point::new(x, bounds.height - 2.0)),
                 canvas::Stroke::default()
-                    .with_color(th::with_alpha(th::border(), if strong { 0.55 } else { 0.28 }))
+                    .with_color(th::with_alpha(
+                        th::border(),
+                        if strong { 0.55 } else { 0.28 },
+                    ))
                     .with_width(if n == 12 { 1.6 } else { 1.0 }),
             );
         }

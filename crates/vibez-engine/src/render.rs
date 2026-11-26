@@ -101,6 +101,19 @@ pub fn render_offline_with_plugins(
     render_offline_inner(req, Some(plugins), progress)
 }
 
+/// Stems: the post-fader signal of each channel of `stems`, rendered
+/// together in one pass of the whole mix, each aligned to the timeline.
+/// `req` should be a [`BounceMode::Master`] request.
+pub fn render_stems_with_plugins(
+    req: &BounceRequest,
+    plugins: &mut OfflinePlugins,
+    stems: &[TrackId],
+    progress: impl FnMut(u8),
+) -> Result<(Vec<(TrackId, DecodedAudio)>, Vec<String>), String> {
+    execute::render_with_stems(req, Some(plugins), stems, progress)
+        .map(|(mix, stems)| (stems, mix.warnings))
+}
+
 #[path = "render_dependencies.rs"]
 mod dependencies;
 #[path = "render_prepare.rs"]

@@ -98,6 +98,7 @@ fn sampler_echo_fixture() -> (BounceRequest, Vec<Command>) {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: Default::default(),
+        scale: None,
         color_index: None,
         notes: vec![0.0, 0.07]
             .into_iter()
@@ -141,6 +142,7 @@ fn audio_echo_fixture() -> (BounceRequest, Vec<Command>) {
     commands.push(Command::add_track(tid));
     for position in [0, 1536] {
         let clip = ClipInfo {
+            take_lane: None,
             color_index: None,
             id: ClipId::new(),
             track_id: tid,
@@ -217,6 +219,7 @@ fn assert_export_preserves_insert_echo(
                 assignments: vec![],
                 inactive_inputs: vec![],
             }],
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -224,6 +227,7 @@ fn assert_export_preserves_insert_echo(
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];
@@ -345,6 +349,7 @@ fn strict_render_uses_plugin_effects_on_tracks_buses_and_master() {
     let master_fx = plugin_effect();
     master.effects.push(master_fx.clone());
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid,
         track_id: tid,
@@ -425,6 +430,7 @@ fn effect_chain_applied_during_bounce() {
     });
     let audio = audio_of(100, 1.0);
     let clip = ClipInfo {
+        take_lane: None,
         color_index: None,
         id: cid,
         track_id: tid,

@@ -24,6 +24,9 @@ pub struct PreparedNode {
     pub wet_fade_in: u32,
     pub incoming: Vec<usize>,
     pub samples: Vec<f32>,
+    /// On a fader node, the signal after mute and before fader and pan,
+    /// which pre-fader sends read.
+    pub pre_fader: Vec<f32>,
     pub inputs: Vec<PreparedInput>,
 }
 
@@ -265,6 +268,11 @@ impl PreparedRouting {
                     .filter_map(|(edge_index, edge)| (edge.to == index).then_some(edge_index))
                     .collect(),
                 samples: vec![0.0; max_frames * 2],
+                pre_fader: if node.stage == vibez_core::routing::NodeStage::AfterFader {
+                    vec![0.0; max_frames * 2]
+                } else {
+                    Vec::new()
+                },
                 inputs,
             });
         }
@@ -309,6 +317,7 @@ impl PreparedRouting {
                             source: !channel.is_bus && !channel.id.is_master(),
                             binding,
                             audible_return: false,
+                            carries_solo: false,
                             controls: 0..0,
                         }
                     })
@@ -493,6 +502,7 @@ pub struct PreparedChannel {
     pub direct_latency: u32,
     pub source: bool,
     pub(crate) audible_return: bool,
+    pub(crate) carries_solo: bool,
     pub(crate) controls: std::ops::Range<usize>,
 }
 

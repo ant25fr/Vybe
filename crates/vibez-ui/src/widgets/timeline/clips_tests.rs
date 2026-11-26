@@ -88,6 +88,7 @@ fn note_clip(position_beats: f64) -> crate::state::UiNoteClip {
         loop_start_beats: 0.0,
         loop_end_beats: 0.0,
         groove_grid: GrooveGrid::Off,
+        scale: None,
         color_index: None,
     }
 }
@@ -225,6 +226,7 @@ fn independently_constructed_ruler_and_lane_align_from_the_same_viewport() {
     lane.zoom_level = 3.0;
     lane.scroll_offset_beats = 9.5;
     let ruler = RulerWidget {
+        meter: Default::default(),
         wheel_zoom: Default::default(),
         playhead_beats: -1.0,
         play_start_beats: None,
@@ -408,6 +410,7 @@ fn physical_right_click_opens_clip_and_empty_arrange_context_menus() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        gain_db: 0.0,
         fade_in_frames: 0,
         fade_out_frames: 0,
         fade_in_curve: Default::default(),
@@ -497,6 +500,7 @@ fn audio_recording_waveform_is_visible_but_not_hit_testable() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        gain_db: 0.0,
         fade_in_frames: 0,
         fade_out_frames: 0,
         fade_in_curve: Default::default(),
@@ -528,6 +532,7 @@ fn selected_audio_fade_handle_drag_emits_realtime_edits_in_one_undo_gesture() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 44_100,
+        gain_db: 0.0,
         fade_in_frames: 11_025,
         fade_out_frames: 0,
         fade_in_curve: Default::default(),
@@ -601,6 +606,7 @@ fn fade_drag_snaps_to_an_overlapping_neighbour_across_pointer_moves() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 44_100,
+        gain_db: 0.0,
         fade_in_frames: 0,
         fade_out_frames: 0,
         fade_in_curve: Default::default(),
@@ -721,6 +727,7 @@ fn selected_audio_fade_curve_handle_drag_emits_vertical_curve_edits() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 44_100,
+        gain_db: 0.0,
         fade_in_frames: 22_050,
         fade_out_frames: 0,
         fade_in_curve: Default::default(),
@@ -843,6 +850,7 @@ fn overlapping_fade_controls_choose_the_handle_nearest_the_pointer() {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 44_100,
+        gain_db: 0.0,
         fade_in_frames: 11_025,
         fade_out_frames: 0,
         fade_in_curve: vibez_core::track::FadeCurve::new(100),
@@ -889,6 +897,7 @@ fn canvas_with_selected_audio_clip() -> (TrackClipCanvas, ClipId) {
         loop_enabled: false,
         loop_start: 0,
         loop_end: 0,
+        gain_db: 0.0,
         fade_in_frames: 0,
         fade_out_frames: 0,
         fade_in_curve: Default::default(),

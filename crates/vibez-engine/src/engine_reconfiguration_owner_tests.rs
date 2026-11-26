@@ -86,6 +86,7 @@ fn plan(
                     inactive_inputs: vec![],
                 })
                 .collect(),
+            output: None,
             midi_from: None,
         },
         RoutingChannel {
@@ -93,6 +94,7 @@ fn plan(
             is_bus: true,
             sends: vec![],
             effects: vec![],
+            output: None,
             midi_from: None,
         },
     ];

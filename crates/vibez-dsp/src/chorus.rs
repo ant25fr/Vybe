@@ -166,8 +166,8 @@ impl AudioEffect for ChorusEffect {
         let lines = &mut self.lines;
         let lfo = &mut self.lfo;
         for frame in buffer.chunks_exact_mut(channels) {
-            for (ch, sample) in frame.iter_mut().enumerate() {
-                let ch = ch.min(1);
+            // Channels past the second stay dry: they have no delay line.
+            for (ch, sample) in frame.iter_mut().enumerate().take(2) {
                 let line = &mut lines[ch];
                 let phase = lfo[ch];
                 let off0 = (base + sweep * phase.sin()).max(1.0);
@@ -267,5 +267,22 @@ mod tests {
             .iter()
             .fold(0.0_f32, |max, s| max.max(s.abs()));
         assert!(tail < 1e-6, "output after the input stopped: {tail}");
+    }
+
+    #[test]
+    fn channels_past_the_second_do_not_disturb_the_first_two() {
+        let signal = |i: usize| (i as f32 * 0.03).sin() * 0.5;
+        let render = |channels: usize| {
+            let mut fx = ChorusEffect::new(48_000.0);
+            let mut buf = vec![0.0_f32; 24_000 * channels];
+            for (i, frame) in buf.chunks_exact_mut(channels).enumerate() {
+                frame.fill(signal(i));
+            }
+            fx.process(&mut buf, channels);
+            buf.chunks_exact(channels)
+                .flat_map(|frame| [frame[0], frame[1]])
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(render(2), render(4));
     }
 }

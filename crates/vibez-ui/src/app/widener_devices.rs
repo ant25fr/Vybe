@@ -18,6 +18,8 @@ pub(super) struct WidenerDevices {
     pub spectrum_rx: Option<Consumer<EffectSpectrumSample>>,
     pub mid_rx: Option<Consumer<EffectSpectrumSample>>,
     pub target: Option<EffectSpectrumTarget>,
+    /// The widener last adjusted, which the analyser follows.
+    pub focus: Option<EffectId>,
     pub generation: u64,
     /// The output's side signal.
     pub analyser: SpectrumState,
@@ -35,19 +37,23 @@ impl WidenerDevices {
 }
 
 impl App {
-    /// The selected track's first native Stereo Widener, while the Devices
-    /// tab is showing.
+    /// The selected track's last adjusted Stereo Widener, else its first,
+    /// while the Devices tab is showing.
     fn wanted_widener_tap(&self) -> Option<(TrackId, EffectId)> {
         if self.state.view.detail_panel_tab != DetailPanelTab::Devices {
             return None;
         }
         let track_id = self.state.active_timeline_editor().selected_track?;
         let track = self.state.find_track(track_id)?;
-        let effect = track.effects.iter().find(|effect| {
+        let mut wideners = track.effects.iter().filter(|effect| {
             effect.effect_type == EffectType::StereoWidener
                 && effect.plugin_ref.is_none()
                 && effect.plugin_name.is_none()
-        })?;
+        });
+        let effect = wideners
+            .clone()
+            .find(|effect| Some(effect.id) == self.widener_devices.focus)
+            .or_else(|| wideners.next())?;
         Some((track_id, effect.id))
     }
 
@@ -132,5 +138,16 @@ mod tests {
         let target = app.widener_devices.target.expect("a tap for the widener");
         assert_eq!((target.track_id, target.effect_id), (id, effect));
         assert!(app.widener_devices.spectrum_for(effect).is_some());
+
+        // Adjusting a second widener moves the analyser to it.
+        let _ = app.update(Message::Devices(DevicesMsg::AddEffect(
+            id,
+            EffectType::StereoWidener,
+        )));
+        let second = app.state.find_track(id).unwrap().effects[1].id;
+        let _ = app.update(Message::set_effect_param(id, second, 0, 1.5));
+        app.poll_widener_devices();
+        assert!(app.widener_devices.spectrum_for(second).is_some());
+        assert!(app.widener_devices.spectrum_for(effect).is_none());
     }
 }

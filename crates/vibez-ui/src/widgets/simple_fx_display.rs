@@ -25,7 +25,9 @@ fn value(params: &[f32], descriptors: &[vibez_core::effect::ParamDescriptor], i:
 }
 
 fn stroke(color: Color, width: f32) -> canvas::Stroke<'static> {
-    canvas::Stroke::default().with_color(color).with_width(width)
+    canvas::Stroke::default()
+        .with_color(color)
+        .with_width(width)
 }
 
 fn dim(color: Color) -> Color {
@@ -192,11 +194,7 @@ fn comb_db(kind: Delayed, p: &Delays, spread: f32, frequency: f32) -> f32 {
     20.0 * (hr * hr + hi * hi).sqrt().max(1e-4).log10()
 }
 
-fn frequency_axis(
-    frame: &mut canvas::Frame,
-    plot: Rectangle,
-    labels: bool,
-) {
+fn frequency_axis(frame: &mut canvas::Frame, plot: Rectangle, labels: bool) {
     let named: &[f32] = if plot.width >= WIDE_AXIS_W {
         &[
             20.0, 50.0, 100.0, 200.0, 500.0, 1_000.0, 2_000.0, 5_000.0, 10_000.0, 20_000.0,
@@ -313,7 +311,10 @@ impl canvas::Program<Message> for PitchPlot<'_> {
         let x = |st: f32| plot.x + plot.width * (st.clamp(-12.0, 12.0) + 12.0) / 24.0;
         let mid = plot.y + plot.height * 0.62;
         frame.stroke(
-            &canvas::Path::line(Point::new(plot.x, mid), Point::new(plot.x + plot.width, mid)),
+            &canvas::Path::line(
+                Point::new(plot.x, mid),
+                Point::new(plot.x + plot.width, mid),
+            ),
             stroke(grid(), 1.0),
         );
         for st in -12..=12 {
@@ -410,10 +411,7 @@ impl canvas::Program<Message> for SidebandPlot<'_> {
                 &canvas::Path::line(Point::new(x(hz), base), Point::new(x(hz), top)),
                 stroke(color, width),
             );
-            frame.fill(
-                &canvas::Path::circle(Point::new(x(hz), top), 2.5),
-                color,
-            );
+            frame.fill(&canvas::Path::circle(Point::new(x(hz), top), 2.5), color);
         };
         // The test tone, as it goes in.
         line(&mut frame, TEST_HZ, 1.0, dim(th::text_dim()), 1.0);
@@ -423,7 +421,13 @@ impl canvas::Program<Message> for SidebandPlot<'_> {
                 let carrier = value(self.params, d, 0);
                 let mix = value(self.params, d, 1);
                 line(&mut frame, TEST_HZ, 1.0 - mix, th::text_muted(), 2.0);
-                line(&mut frame, (TEST_HZ - carrier).abs(), mix * 0.5, self.accent, 2.0);
+                line(
+                    &mut frame,
+                    (TEST_HZ - carrier).abs(),
+                    mix * 0.5,
+                    self.accent,
+                    2.0,
+                );
                 line(&mut frame, TEST_HZ + carrier, mix * 0.5, self.accent, 2.0);
             }
             Shifting::Frequency => {

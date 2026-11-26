@@ -13,6 +13,11 @@ use vibez_engine::commands::EngineCommand;
 use super::EngineHandle;
 use crate::state::{PlaybackPhase, TransportState};
 
+/// A pause longer than this between taps starts a new tempo.
+const TAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+/// Taps the tempo is averaged over: four intervals.
+const TAPS_AVERAGED: usize = 5;
+
 /// Messages the transport domain handles.
 #[derive(Debug, Clone)]
 pub enum TransportMsg {
@@ -31,6 +36,16 @@ pub enum TransportMsg {
     /// Increment/decrement project BPM by a whole beat-per-minute.
     NudgeBpm(f64),
     ToggleArrangementLoop,
+    /// Typing in the signature field.
+    SignatureChanged(String),
+    /// Put the typed signature into effect from the bar of the play start.
+    SignatureSubmit,
+    ToggleMetronome,
+    SetMetronomeVolume(f32),
+    /// Raise or lower the click level by a step.
+    NudgeMetronomeVolume(f32),
+    /// One press of Tap tempo, with when it happened.
+    TapTempo(std::time::Instant),
     SetArrangementLoopRegion {
         start_beats: f64,
         end_beats: f64,
@@ -55,6 +70,8 @@ pub struct TransportCtx {
     /// Perform owns the running playback source, so Stop must not seek the
     /// independent Arrange cursor back to zero.
     pub perform_playback_active: bool,
+    /// A tempo lane drives Arrange, so the project tempo cannot be edited.
+    pub tempo_automated: bool,
 }
 
 /// Cross-domain effects the transport cannot perform itself. The
@@ -70,6 +87,8 @@ pub enum TransportAction {
         new_bpm: f64,
     },
     TempoRejected,
+    TempoAutomated,
+    SignatureRejected,
 }
 
 impl TransportState {
@@ -138,7 +157,38 @@ impl TransportState {
         engine: &mut impl EngineHandle,
         ctx: TransportCtx,
     ) -> TransportAction {
+        if ctx.tempo_automated
+            && matches!(
+                msg,
+                TransportMsg::BpmSubmit | TransportMsg::NudgeBpm(_) | TransportMsg::TapTempo(_)
+            )
+        {
+            self.bpm_text = format!("{:.0}", self.bpm);
+            self.taps.clear();
+            return TransportAction::TempoAutomated;
+        }
         match msg {
+            TransportMsg::SignatureChanged(text) => {
+                self.signature_text = Some(text);
+                TransportAction::None
+            }
+            TransportMsg::SignatureSubmit => {
+                let valid = self
+                    .signature_text
+                    .as_deref()
+                    .is_none_or(|text| vibez_core::meter::TimeSignature::parse(text).is_some());
+                let edit = self.signature_edit();
+                self.signature_text = None;
+                if let Some(meter) = edit {
+                    self.meter = meter;
+                    engine.send(EngineCommand::SetMeterMap(meter));
+                }
+                if valid {
+                    TransportAction::None
+                } else {
+                    TransportAction::SignatureRejected
+                }
+            }
             TransportMsg::Play => {
                 if self.playback != PlaybackPhase::Playing {
                     self.playback = PlaybackPhase::Starting;
@@ -211,6 +261,29 @@ impl TransportState {
                 let bpm = self.bpm + delta;
                 self.set_bpm(bpm, engine)
             }
+            TransportMsg::ToggleMetronome => {
+                self.metronome = !self.metronome;
+                engine.send(EngineCommand::SetMetronome(self.metronome));
+                TransportAction::None
+            }
+            TransportMsg::SetMetronomeVolume(volume) => {
+                self.set_metronome_volume(volume, engine);
+                TransportAction::None
+            }
+            TransportMsg::NudgeMetronomeVolume(step) => {
+                self.set_metronome_volume(self.metronome_volume + step, engine);
+                TransportAction::None
+            }
+            TransportMsg::TapTempo(at) => {
+                if ctx.perform_tempo_locked {
+                    self.taps.clear();
+                    return TransportAction::TempoRejected;
+                }
+                match self.tapped_bpm(at) {
+                    Some(bpm) => self.set_bpm(bpm, engine),
+                    None => TransportAction::None,
+                }
+            }
             TransportMsg::ToggleArrangementLoop => {
                 self.loop_enabled = !self.loop_enabled;
                 engine.send(EngineCommand::SetArrangementLoop(self.loop_enabled));
@@ -251,6 +324,48 @@ impl TransportState {
                 TransportAction::None
             }
         }
+    }
+
+    /// The signatures the typed text would give, when it changes them. Typing
+    /// the signature already in effect before a change removes that change.
+    pub fn signature_edit(&self) -> Option<vibez_core::meter::MeterMap> {
+        let signature = vibez_core::meter::TimeSignature::parse(self.signature_text.as_deref()?)?;
+        let bar = self.meter.position_at(self.play_start_beats).bar;
+        let mut meter = self.meter;
+        let changed = if bar > 0 && meter.signature_at_bar(bar - 1) == signature {
+            meter.remove_change(bar)
+        } else {
+            meter.set_change(bar, signature)
+        };
+        changed.then_some(meter)
+    }
+
+    fn set_metronome_volume(&mut self, volume: f32, engine: &mut impl EngineHandle) {
+        if !volume.is_finite() {
+            return;
+        }
+        // Whole percents, so repeated steps land on round values.
+        self.metronome_volume = (volume.clamp(0.0, 2.0) * 100.0).round() / 100.0;
+        engine.send(EngineCommand::SetMetronomeVolume(self.metronome_volume));
+    }
+
+    /// Records a tap and returns the whole BPM the recent ones average, once
+    /// there are two. A pause longer than [`TAP_TIMEOUT`] starts over.
+    fn tapped_bpm(&mut self, at: std::time::Instant) -> Option<f64> {
+        if self
+            .taps
+            .last()
+            .is_some_and(|last| at.saturating_duration_since(*last) > TAP_TIMEOUT)
+        {
+            self.taps.clear();
+        }
+        self.taps.push(at);
+        if self.taps.len() > TAPS_AVERAGED {
+            self.taps.remove(0);
+        }
+        let (first, intervals) = (*self.taps.first()?, self.taps.len() - 1);
+        let span = at.saturating_duration_since(first).as_secs_f64();
+        (intervals > 0 && span > 0.0).then(|| (60.0 * intervals as f64 / span).round())
     }
 
     fn place_play_start(&mut self, beats: f64, engine: &mut impl EngineHandle) {
@@ -310,6 +425,73 @@ mod tests {
 
     fn transport() -> TransportState {
         TransportState::default()
+    }
+
+    #[test]
+    fn the_metronome_toggle_reaches_the_engine() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        t.update(
+            TransportMsg::ToggleMetronome,
+            &mut engine,
+            TransportCtx::default(),
+        );
+        assert!(t.metronome);
+        assert!(matches!(engine.0[0], EngineCommand::SetMetronome(true)));
+        t.update(
+            TransportMsg::ToggleMetronome,
+            &mut engine,
+            TransportCtx::default(),
+        );
+        assert!(matches!(engine.0[1], EngineCommand::SetMetronome(false)));
+    }
+
+    #[test]
+    fn taps_set_the_average_tempo_and_a_pause_starts_over() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        let start = std::time::Instant::now();
+        let mut tap = |t: &mut TransportState, ms: u64| {
+            t.update(
+                TransportMsg::TapTempo(start + std::time::Duration::from_millis(ms)),
+                &mut engine,
+                TransportCtx::default(),
+            )
+        };
+        assert_eq!(tap(&mut t, 0), TransportAction::None);
+        for ms in [600, 1_200, 1_800] {
+            tap(&mut t, ms);
+        }
+        assert_eq!(t.bpm, 100.0);
+        // After a long pause the first tap alone changes nothing.
+        assert_eq!(tap(&mut t, 10_000), TransportAction::None);
+        assert_eq!(t.bpm, 100.0);
+        tap(&mut t, 10_500);
+        assert_eq!(t.bpm, 120.0);
+    }
+
+    #[test]
+    fn the_click_volume_steps_stay_in_range() {
+        let mut t = transport();
+        let mut engine = RecordingEngine::default();
+        for _ in 0..30 {
+            t.update(
+                TransportMsg::NudgeMetronomeVolume(0.1),
+                &mut engine,
+                TransportCtx::default(),
+            );
+        }
+        assert_eq!(t.metronome_volume, 2.0);
+        t.update(
+            TransportMsg::SetMetronomeVolume(-1.0),
+            &mut engine,
+            TransportCtx::default(),
+        );
+        assert_eq!(t.metronome_volume, 0.0);
+        assert!(matches!(
+            engine.0.last(),
+            Some(EngineCommand::SetMetronomeVolume(v)) if *v == 0.0
+        ));
     }
 
     #[test]
@@ -826,3 +1008,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "transport_signature_tests.rs"]
+mod signature_tests;

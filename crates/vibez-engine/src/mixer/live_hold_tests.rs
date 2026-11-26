@@ -51,6 +51,7 @@ fn render(track: &mut EngineTrack, from: u64, to: u64) {
                 pos,
                 repeat_pos: pos,
                 frames: BLOCK,
+                positions: BLOCK,
                 channels: 1,
                 tempo_map: &tempo_map,
                 project_swing: SwingAmount::STRAIGHT,

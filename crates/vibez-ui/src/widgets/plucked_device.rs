@@ -63,8 +63,7 @@ impl<'a> PluckedView<'a> {
         let count = self.device.descriptors.len();
         let widths = vec![LINE_ITEM_W; count];
         let lines = pack(&widths, (width - PAD * 2.0).max(LINE_ITEM_W), LINE_GAP);
-        let height =
-            lines.len() as f32 * LINE_H + lines.len().saturating_sub(1) as f32 * 4.0 + 8.0;
+        let height = lines.len() as f32 * LINE_H + lines.len().saturating_sub(1) as f32 * 4.0 + 8.0;
         let mut body = column![].spacing(4).align_x(Alignment::Center);
         for range in lines {
             let mut line = row![].spacing(LINE_GAP).align_y(Alignment::Center);

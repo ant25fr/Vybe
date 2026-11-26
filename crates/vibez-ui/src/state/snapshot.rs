@@ -17,6 +17,7 @@ pub struct ProjectSnapshot {
     pub sections: Arc<crate::domains::perform::SectionStore>,
     pub launcher_clips: Arc<crate::domains::perform::ClipStore>,
     pub bpm: f64,
+    pub meter: vibez_core::meter::MeterMap,
     pub project_swing: vibez_core::perform::SwingAmount,
     pub loop_enabled: bool,
     pub loop_start_beats: f64,

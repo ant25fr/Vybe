@@ -164,10 +164,11 @@ pub(in crate::app) async fn load_project_async(
     let (project, container_path) = tokio::task::spawn_blocking(move || {
         if vibez_project::dawproject::is_dawproject(&load_path) {
             let archive = load_path.clone();
-            let imported = vibez_project::dawproject::import(&load_path, sample_rate, |name, bytes| {
-                vibez_project::dawproject::stage_imported_audio(&archive, name, bytes)
-            })
-            .map_err(|e| crate::message::ProjectLoadError::other(e.to_string()))?;
+            let imported =
+                vibez_project::dawproject::import(&load_path, sample_rate, |name, bytes| {
+                    vibez_project::dawproject::stage_imported_audio(&archive, name, bytes)
+                })
+                .map_err(|e| crate::message::ProjectLoadError::other(e.to_string()))?;
             return Ok((imported.project, None));
         }
         match vibez_project::project_format_v1::detect_project_format(&load_path)

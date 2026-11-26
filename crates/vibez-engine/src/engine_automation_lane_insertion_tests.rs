@@ -63,6 +63,7 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
     assert_eq!((lanes.len(), lanes.capacity()), (2, 2));
     let source = PreparedPlaybackSource::new(
         vec![EngineClip {
+            audition: false,
             id: audio_id,
             audio,
             position: 0,
@@ -125,6 +126,7 @@ fn appending_a_lane_at_full_capacity_preserves_audio_and_owners_without_callback
         is_bus: id.is_master(),
         sends: vec![],
         effects: vec![],
+        output: None,
         midi_from: None,
     });
     let mut routing = crate::routing::PreparedRouting::prepare(&channels, 64).unwrap();

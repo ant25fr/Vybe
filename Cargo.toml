@@ -2,6 +2,15 @@
 # (engine callback, synth/DSP inner loops, FFT and resampling) is compiled
 # optimized even in `cargo build`: those crates dominate CPU in debug, and
 # opt-level 3 without fast-math keeps floating-point results bit-identical.
+# Dependencies are built optimised even in development: text shaping, the
+# renderer and the GPU layer are what a debug build's opening waits on.
+[profile.dev.package."*"]
+opt-level = 3
+
+# Build scripts and macros run at compile time only.
+[profile.dev.build-override]
+opt-level = 0
+
 [profile.dev.package.vibez-core]
 opt-level = 3
 

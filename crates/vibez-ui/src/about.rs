@@ -5,8 +5,6 @@
 //! at runtime, so a binary that has been copied, packaged or renamed still
 //! reports the source tree it was actually built from.
 
-pub const APP_NAME: &str = "vibez";
-
 /// Matches the LICENSE file at the repository root and the `license` field
 /// in the workspace manifest; all three must be changed together.
 pub const LICENSE: &str = "GPL-3.0-or-later";
@@ -14,9 +12,9 @@ pub const LICENSE: &str = "GPL-3.0-or-later";
 /// What `build.rs` emits when `git` could not identify the build tree.
 pub const UNKNOWN_COMMIT: &str = "unknown";
 
-pub const REPOSITORY_URL: &str = "https://github.com/alexanderwanyoike/vibez";
-pub const WEBSITE_URL: &str = "https://alexanderwanyoike.github.io/vibez/";
-pub const RELEASES_URL: &str = "https://github.com/alexanderwanyoike/vibez/releases";
+pub const REPOSITORY_URL: &str = "https://github.com/ant25fr/Vybe";
+pub const WEBSITE_URL: &str = "https://github.com/ant25fr/Vybe";
+pub const RELEASES_URL: &str = "https://github.com/ant25fr/Vybe/releases";
 
 /// The version string shown in the About dialog.
 ///
