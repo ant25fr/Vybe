@@ -22,6 +22,11 @@ use super::meter_lines::metered_lane_grid;
 use super::note_marks::note_marks;
 use super::*;
 
+/// Half the side of a fade handle, and half the height of the gain handle.
+const FADE_HANDLE_HALF_SIZE: f32 = 3.5;
+const GAIN_HANDLE_HALF_HEIGHT: f32 = 2.5;
+const HANDLE_RADIUS: f32 = 2.5;
+
 /// How far a selected track's lane moves toward the text colour: enough
 /// to find the track, quiet enough that the clips stay the loudest thing.
 const SELECTED_LANE_LIFT: f32 = 0.035;
@@ -798,19 +803,26 @@ fn draw_clip_handles(frame: &mut canvas::Frame, clip: &TimelineClip, clip_x: f32
         .with_color(theme::bg_dark())
         .with_width(1.0);
     let mut mark = |center: iced::Point, half_width: f32, half_height: f32| {
-        let path = canvas::Path::rectangle(
-            iced::Point::new(center.x - half_width, center.y - half_height),
-            iced::Size::new(half_width * 2.0, half_height * 2.0),
-        );
+        let path = canvas::Path::new(|builder| {
+            builder.rounded_rectangle(
+                iced::Point::new(center.x - half_width, center.y - half_height),
+                iced::Size::new(half_width * 2.0, half_height * 2.0),
+                HANDLE_RADIUS.into(),
+            );
+        });
         frame.fill(&path, theme::accent());
         frame.stroke(&path, outline.clone());
     };
     let (fade_in_x, fade_out_x) = fade_handle_xs(clip_x, clip_w, clip);
     for x in [fade_in_x, fade_out_x] {
-        mark(iced::Point::new(x, FADE_HANDLE_Y), 3.5, 3.5);
+        mark(
+            iced::Point::new(x, FADE_HANDLE_Y),
+            FADE_HANDLE_HALF_SIZE,
+            FADE_HANDLE_HALF_SIZE,
+        );
     }
     if let Some(center) = gain_handle(clip_x, clip_w) {
-        mark(center, GAIN_HANDLE_HALF_WIDTH, 2.5);
+        mark(center, GAIN_HANDLE_HALF_WIDTH, GAIN_HANDLE_HALF_HEIGHT);
     }
 }
 
@@ -827,7 +839,7 @@ fn draw_gain_readout(
     };
     frame.fill_text(canvas::Text {
         content: format!("{gain_db:+.1} dB"),
-        position: iced::Point::new(handle.x, handle.y + 4.0),
+        position: iced::Point::new(handle.x, handle.y + GAIN_HANDLE_HALF_HEIGHT + 1.0),
         color: ink,
         size: 9.0.into(),
         font: crate::typography::PERFORM_TECH,

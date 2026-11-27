@@ -55,7 +55,7 @@ Structure et apparence des écrans. Dimensions en pixels logiques.
 - Sélection : titre éclairci de 33 % vers le blanc, contour `text` à 90 % de 1 px.
 - Piste muette : toutes les parties mêlées à 55 % vers le fond ; le contour de sélection reste entier.
 - Poignées de redimensionnement : 8 px (au plus 25 % du clip) ; fondu : rayon de prise 7.
-- Poignées visibles sur le clip sélectionné et sur le clip survolé : fondus (carrés d'accent de 7 aux deux extrémités, à partir de 28 px de large) et volume (barre d'accent de 16 × 5 au centre, sous le titre, à partir de 48 px), contour `bg_dark` de 1 px.
+- Poignées visibles sur le clip sélectionné et sur le clip survolé : fondus (carrés arrondis d'accent de 7 aux deux extrémités, à partir de 28 px de large) et volume (pastille d'accent de 16 × 5 au centre, sous le titre, à partir de 48 px), rayon 2,5 et contour `bg_dark` de 1 px.
 - Volume : glisser vers le haut ou le bas (0,25 dB par pixel, Maj 5 fois plus fin), double-clic = 0 dB ; la valeur s'affiche sous la poignée dès qu'elle n'est pas nulle et la forme d'onde suit le gain.
 - Panneau Clip : inspecteur de 388 de large ; sous Loop Start et Loop End, une rangée FADE IN / FADE OUT (course cubique) puis une rangée GAIN / PITCH, avec saisie de la valeur. Sur ce panneau, la hauteur minimale est de 430 pour montrer tous les potards, sans dépasser la hauteur maximale que la fenêtre autorise ; l'inspecteur défile quand le panneau est plus bas.
 - Au-delà de la fin du clip : voile `bg_dark` à 60 %.
@@ -110,7 +110,7 @@ Graduations affichées : 6, 0, −5, −10, −20, −40, −60.
 
 ### Carte Modulators
 
-En-tête commun, couleur de la piste. Large de 180 sans modulateur, 520 sinon. Première rangée : un onglet par modulateur, `On / Off`, corbeille, boutons d'ajout. En dessous, à gauche (232) les menus Shape et Rate, la courbe du LFO (un cycle, point de rayon 4 qui la parcourt, masquée sous 16 de haut) et des potards de 30 en colonnes de 54 ; à droite les cibles sur deux colonnes de rangées de 20, chacune avec un potard d'amount bipolaire de 18, le nom, la valeur et une croix.
+En-tête commun, couleur de la piste. Large de 180 sans modulateur, 620 sinon. Première rangée : un onglet par modulateur, `On / Off`, corbeille, boutons d'ajout. En dessous, à gauche (340) les menus Shape et Rate, la courbe (LFO : un cycle et un point de rayon 4 qui la parcourt ; enveloppe : ADSR remplie à 16 % avec trois poignées de rayon 4,5, la pointe réglant l'attaque, le coude le déclin et le maintien, le départ du relâchement sa durée ; la courbe occupe toute la largeur ; masquée sous 16 de haut) et des potards de 38 en colonnes de 60. À droite les cibles en rangées de 42, sur une colonne jusqu'à trois puis sur deux, qui défilent si le panneau est bas : potard d'amount bipolaire de 38, nom de l'appareil (10 px, numéroté s'il est en double) au-dessus du paramètre (12 px) et de la valeur (10 px), puis une croix ; l'infobulle donne le nom complet.
 
 ## Piano roll
 

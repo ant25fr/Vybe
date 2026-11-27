@@ -24,13 +24,11 @@ Synth MultiBand 3 et VIBE FM VST. L'ouverture depuis l'application et la saisie
 
 | Effet | Où | Statut |
 |---|---|---|
-| Ouvrir un menu, un dialogue ou glisser un échantillon changeait la racine de la vue : la chaîne d'appareils (et les autres zones défilantes) revenait à gauche | `app/views_shell.rs` | Corrigé, non compilé ni testé (consigne de session) |
+| Ouvrir un menu, un dialogue ou glisser un échantillon changeait la racine de la vue : la chaîne d'appareils (et les autres zones défilantes) revenait à gauche | `app/views_shell.rs` | Corrigé, testé le 27/11/2026 |
 
 ## Session fondus, volume de clip et courbe LFO (26/11/2026)
 
-À la demande de l'utilisateur, la session ne s'est pas terminée par une
-compilation : les tests n'ont pas été lancés et les derniers réglages de hauteur
-des poignées n'ont pas été compilés.
+Compilé et testé le 27/11/2026 (3606 tests réussis).
 
 | Effet | Où | Statut |
 |---|---|---|
@@ -70,6 +68,7 @@ Trouvés dans le code ajouté par la session, avant livraison.
 | Les potards d'un paramètre modulé montrent sa valeur centrale, sans animation | `widgets/device_controls.rs` | Limite connue |
 | Dans Perform, la modulation est mise à jour une fois par bloc audio | `engine_section_queue.rs`, `engine_clip_launcher.rs` | Limite connue |
 | Les plugins, sends, mute et swing ne sont pas modulables ; 4 modulateurs et 8 cibles par canal | `vibez-core/src/modulation.rs` | Limite connue |
+| Le relâchement dessiné par la courbe d'enveloppe part du maintien et dure le temps réglé, alors que le moteur le parcourt à la vitesse d'une course complète | `widgets/modulator_display.rs`, `mixer/modulation.rs` | Confirmé à la lecture |
 | La carte Modulators a une largeur fixe, sans les quatre largeurs de la charte | `app/modulator_devices.rs` | Écart à la charte |
 
 ## Corrigés le 26/11/2026 (session pistes gelées, renommage, démarrage)

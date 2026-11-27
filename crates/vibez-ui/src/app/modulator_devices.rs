@@ -3,6 +3,7 @@
 
 use iced::widget::{button, canvas, column, container, row, text, Space};
 use iced::{Alignment, Element, Length};
+use vibez_core::automation::AutomationTarget;
 use vibez_core::modulation::{
     can_modulate, ModDivision, ModShape, Modulator, ModulatorKind, ModulatorSettings,
     MAX_MODULATION_LINKS, MAX_MODULATORS,
@@ -17,19 +18,25 @@ use crate::typography;
 use crate::widgets::device_chrome::{shell, Header};
 use crate::widgets::device_controls::{dropdown, segmented, toggle, vertical_rule};
 use crate::widgets::effect_knob::{EffectKnobWidget, KnobTarget};
-use crate::widgets::modulator_display::LfoPlot;
+use crate::widgets::modulator_display::{EnvelopePlot, LfoPlot};
+use crate::widgets::quiet_scroll;
 
 use super::views_automation::LaneChoice;
 use super::*;
 
 /// Width of the card with no modulator, and with some.
 pub(super) const MODULATOR_EMPTY_W: f32 = 180.0;
-pub(super) const MODULATOR_CARD_W: f32 = 520.0;
-const SETTINGS_W: f32 = 232.0;
-const KNOB: f32 = 30.0;
-const KNOB_COL_W: f32 = 54.0;
-const LINK_KNOB: f32 = 18.0;
-const LINK_ROW_H: f32 = 20.0;
+pub(super) const MODULATOR_CARD_W: f32 = 620.0;
+const SETTINGS_W: f32 = 340.0;
+const KNOB: f32 = 38.0;
+const KNOB_COL_W: f32 = 60.0;
+const LINK_KNOB: f32 = 38.0;
+const LINK_ROW_H: f32 = 42.0;
+/// Room for a target's names beside its knob, in one column and in two.
+const LINK_NAME_W: f32 = 170.0;
+const NARROW_LINK_NAME_W: f32 = 62.0;
+/// Targets one column lists before they split into two.
+const ONE_COLUMN_LINKS: usize = 3;
 
 /// A menu entry naming a [`ModShape`] or [`ModDivision`].
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -60,6 +67,30 @@ fn field_text(field: ModField, value: f32) -> String {
                 format!("{value:.0} ms")
             }
         }
+    }
+}
+
+/// A target's device and parameter, numbering devices that share a name.
+fn target_names(target: &AutomationTarget, track: &UiTrack) -> (String, String) {
+    let label = crate::domains::automation::target_label(target, track);
+    let (device, parameter) = match label.split_once(": ") {
+        Some((device, parameter)) => (device.to_string(), parameter.to_string()),
+        None => ("Track".to_string(), label),
+    };
+    let AutomationTarget::EffectParam { effect_id, .. } = target else {
+        return (device, parameter);
+    };
+    let Some(effect) = track.effects.iter().find(|effect| effect.id == *effect_id) else {
+        return (device, parameter);
+    };
+    let same: Vec<_> = track
+        .effects
+        .iter()
+        .filter(|other| other.effect_type == effect.effect_type)
+        .collect();
+    match same.iter().position(|other| other.id == *effect_id) {
+        Some(index) if same.len() > 1 => (format!("{device} {}", index + 1), parameter),
+        _ => (device, parameter),
     }
 }
 
@@ -199,36 +230,35 @@ impl App {
             },
         );
         let free = settings.division == ModDivision::Free;
-        let (menus, fields): (Element<'a, Message>, Vec<(ModField, &str)>) = match settings.kind {
-            ModulatorKind::Lfo => (row![shape, division].spacing(4).into(), {
-                let mut fields = Vec::new();
-                if free {
-                    fields.push((ModField::Rate, "Rate"));
-                }
-                fields.push((ModField::Phase, "Phase"));
-                fields
-            }),
-            ModulatorKind::Random => (division, {
-                let mut fields = Vec::new();
-                if free {
-                    fields.push((ModField::Rate, "Rate"));
-                }
-                fields.push((ModField::Smooth, "Smooth"));
-                fields
-            }),
-            ModulatorKind::Envelope => (
-                text("Starts with the track's notes")
-                    .size(9)
-                    .color(th::text_muted())
-                    .into(),
-                vec![
-                    (ModField::Attack, "Attack"),
-                    (ModField::Decay, "Decay"),
-                    (ModField::Sustain, "Sustain"),
-                    (ModField::Release, "Release"),
-                ],
-            ),
-        };
+        let (menus, fields): (Option<Element<'a, Message>>, Vec<(ModField, &str)>) =
+            match settings.kind {
+                ModulatorKind::Lfo => (Some(row![shape, division].spacing(4).into()), {
+                    let mut fields = Vec::new();
+                    if free {
+                        fields.push((ModField::Rate, "Rate"));
+                    }
+                    fields.push((ModField::Phase, "Phase"));
+                    fields
+                }),
+                ModulatorKind::Random => (Some(division), {
+                    let mut fields = Vec::new();
+                    if free {
+                        fields.push((ModField::Rate, "Rate"));
+                    }
+                    fields.push((ModField::Smooth, "Smooth"));
+                    fields
+                }),
+                // An envelope starts with the track's notes: nothing to pick.
+                ModulatorKind::Envelope => (
+                    None,
+                    vec![
+                        (ModField::Attack, "Attack"),
+                        (ModField::Decay, "Decay"),
+                        (ModField::Sustain, "Sustain"),
+                        (ModField::Release, "Release"),
+                    ],
+                ),
+            };
 
         let mut knobs = row![];
         for (field, name) in fields {
@@ -246,18 +276,38 @@ impl App {
                 .align_x(Alignment::Center),
             );
         }
-        let mut column = column![menus].spacing(4);
-        if settings.kind == ModulatorKind::Lfo {
-            // The curve takes what height is left, and goes first.
-            column = column.push(
+        let mut column = column![].spacing(4);
+        if let Some(menus) = menus {
+            column = column.push(menus);
+        }
+        // The plot takes what height is left, and goes first.
+        let plot: Option<Element<'a, Message>> = match settings.kind {
+            ModulatorKind::Lfo => Some(
                 canvas(LfoPlot {
                     settings,
                     cycles: self.modulator_cycles(&settings),
                     accent,
                 })
                 .width(Length::Fill)
-                .height(Length::Fill),
-            );
+                .height(Length::Fill)
+                .into(),
+            ),
+            ModulatorKind::Envelope => Some(
+                canvas(EnvelopePlot {
+                    track_id: id,
+                    index,
+                    settings,
+                    accent,
+                })
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
+            ),
+            ModulatorKind::Random => None,
+        };
+        match plot {
+            Some(plot) => column = column.push(plot),
+            None => column = column.push(Space::with_height(Length::Fill)),
         }
         column.push(knobs).into()
     }
@@ -332,8 +382,7 @@ impl App {
             .into()
     }
 
-    /// The parameters the modulator moves, in two columns, and the menu that
-    /// adds one.
+    /// The parameters the modulator moves, and the menu that adds one.
     fn modulator_links<'a>(
         &'a self,
         track: &'a UiTrack,
@@ -342,9 +391,37 @@ impl App {
         accent: iced::Color,
     ) -> Element<'a, Message> {
         let id = track.id;
+        let split = modulator.links.len() > ONE_COLUMN_LINKS;
+        let name_w = if split {
+            NARROW_LINK_NAME_W
+        } else {
+            LINK_NAME_W
+        };
         let mut columns = [column![].spacing(2), column![].spacing(2)];
         for (position, link) in modulator.links.iter().enumerate() {
-            let label = crate::domains::automation::target_label(&link.target, track);
+            let (device, parameter) = target_names(&link.target, track);
+            let names = column![
+                text(typography::fit(&device, name_w, 10.0, iced::Font::DEFAULT))
+                    .size(10)
+                    .color(th::text_muted())
+                    .shaping(typography::USER_TEXT_SHAPING)
+                    .wrapping(text::Wrapping::None),
+                text(typography::fit(
+                    &parameter,
+                    name_w,
+                    12.0,
+                    iced::Font::DEFAULT
+                ))
+                .size(12)
+                .color(th::text())
+                .shaping(typography::USER_TEXT_SHAPING)
+                .wrapping(text::Wrapping::None),
+                text(field_text(ModField::Amount(position), link.amount))
+                    .font(typography::PERFORM_TECH)
+                    .size(10)
+                    .color(th::text_dim()),
+            ]
+            .width(Length::Fill);
             let line = row![
                 self.modulator_knob(
                     track,
@@ -354,16 +431,11 @@ impl App {
                     LINK_KNOB,
                     accent,
                 ),
-                text(typography::fit(&label, 64.0, 9.0, iced::Font::DEFAULT))
-                    .size(9)
-                    .color(th::text_dim())
-                    .shaping(typography::USER_TEXT_SHAPING)
-                    .wrapping(text::Wrapping::None)
-                    .width(Length::Fill),
-                text(field_text(ModField::Amount(position), link.amount))
-                    .font(typography::PERFORM_TECH)
-                    .size(9)
-                    .color(th::text()),
+                container(crate::widgets::hint::with_hint(
+                    names,
+                    format!("{device}: {parameter}"),
+                ))
+                .width(Length::Fill),
                 crate::widgets::hint::with_hint(
                     button(icons::icon(icons::X).size(10).color(th::text_dim()))
                         .on_press(Message::Modulation(ModulationMsg::RemoveLink(
@@ -377,11 +449,15 @@ impl App {
             .spacing(4)
             .height(Length::Fixed(LINK_ROW_H))
             .align_y(Alignment::Center);
-            let side = position % 2;
+            let side = if split { position % 2 } else { 0 };
             let taken = std::mem::replace(&mut columns[side], column![]);
             columns[side] = taken.push(line);
         }
         let [left, right] = columns;
+        let mut targets = row![left.width(Length::Fill)].spacing(8);
+        if split {
+            targets = targets.push(right.width(Length::Fill));
+        }
 
         let mut content = column![].spacing(4);
         if modulator.links.len() < MAX_MODULATION_LINKS {
@@ -422,8 +498,9 @@ impl App {
                 .style(crate::widgets::control_style::list(accent)),
             );
         }
+        // Many targets on a low panel scroll under the menu that adds one.
         content
-            .push(row![left.width(Length::Fill), right.width(Length::Fill)].spacing(8))
+            .push(quiet_scroll::vertical(targets).height(Length::Fill))
             .into()
     }
 }
