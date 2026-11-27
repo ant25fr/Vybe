@@ -219,6 +219,7 @@ mod export_tests {
         };
         let mut receiver = channel(bass, "Bass");
         receiver.effects.push(EffectInfo {
+            rack: None,
             id: EffectId::new(),
             effect_type: EffectType::Compressor,
             bypass: false,

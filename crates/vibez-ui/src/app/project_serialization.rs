@@ -53,6 +53,7 @@ impl App {
                     dev
                 });
                 vibez_core::effect::EffectInfo {
+                    rack: effect.rack.clone(),
                     inactive_sidechains: effect.inactive_sidechains.clone(),
                     sidechains: effect.sidechains.clone(),
                     id: effect.id,

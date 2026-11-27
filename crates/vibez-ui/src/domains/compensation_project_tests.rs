@@ -137,6 +137,7 @@ fn bypass_keeps_cached_device_reports_and_readouts_follow_current_sample_rate() 
     let effect_id = EffectId::new();
     track.instrument_latency_samples = Some(137);
     track.effects.push(UiEffect {
+        rack: None,
         reconfiguration_failed: false,
         latency_samples: Some(480),
         id: effect_id,

@@ -52,6 +52,7 @@ fn failed_restart_invalidates_cached_latency_without_removing_the_insert() {
     let mut track = crate::state::ProjectTrack::new(TrackId::new(), "Track".into(), 0);
     let id = EffectId::new();
     track.effects.push(crate::state::UiEffect {
+        rack: None,
         id,
         effect_type: EffectType::Gain,
         bypass: false,
@@ -132,6 +133,7 @@ async fn project_save_and_hydration_services_preserve_monitoring_and_bypass() {
         let mut track = TrackInfo::new("Track");
         let effect = EffectId::new();
         track.effects.push(EffectInfo {
+            rack: None,
             inactive_sidechains: vec![],
             id: effect,
             effect_type: EffectType::Gain,

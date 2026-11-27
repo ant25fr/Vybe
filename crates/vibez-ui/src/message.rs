@@ -160,6 +160,7 @@ pub enum Message {
     Browser(crate::domains::browser::BrowserMsg),
     Project(crate::domains::project::ProjectMsg),
     Modulation(crate::domains::modulation::ModulationMsg),
+    Rack(crate::domains::rack::RackMsg),
     Automation(crate::domains::automation::AutomationMsg),
     TrackHeight(crate::domains::track_heights::TrackHeightMsg),
     Perform(crate::domains::perform::PerformMsg),

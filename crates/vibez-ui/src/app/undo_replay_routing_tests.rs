@@ -10,6 +10,7 @@ use vibez_engine::engine::{AudioEngine, AudioProcessBlock};
 fn gain_effect() -> UiEffect {
     let device = vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0);
     UiEffect {
+        rack: None,
         reconfiguration_failed: false,
         latency_samples: Some(0),
         id: EffectId::new(),

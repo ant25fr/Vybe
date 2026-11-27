@@ -886,6 +886,7 @@ pub struct AppState {
     pub warp_confidence_threshold: f32,
     pub automation_ui: crate::domains::automation::AutomationState,
     pub modulation_ui: crate::domains::modulation::ModulationState,
+    pub rack_ui: crate::domains::rack::RackUiState,
     /// Arrange lane heights, saved with the project but outside undo.
     pub track_heights: crate::domains::track_heights::TrackHeights,
 
@@ -942,6 +943,7 @@ impl Default for AppState {
             warp_confidence_threshold: 0.6,
             automation_ui: crate::domains::automation::AutomationState::default(),
             modulation_ui: Default::default(),
+            rack_ui: Default::default(),
             track_heights: Default::default(),
             browser: BrowserState::default(),
             current_theme_name: "Charcoal".to_string(),

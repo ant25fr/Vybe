@@ -46,6 +46,7 @@ enum Flexible {
     PitchShifter,
     RingModulator,
     FrequencyShifter,
+    Rack,
 }
 
 /// A built-in instrument whose card takes a flexible share like the
@@ -122,6 +123,12 @@ impl Flexible {
                 simple_fx_device::SimpleKind::widths(count)
             }
             Self::StereoWidener => stereo_widener_device::WIDTHS,
+            Self::Rack => crate::widgets::device_chrome::CardWidths {
+                compact: crate::widgets::rack_device::RACK_CARD_W,
+                medium: crate::widgets::rack_device::RACK_CARD_W,
+                expanded: crate::widgets::rack_device::RACK_CARD_W,
+                max: crate::widgets::rack_device::RACK_CARD_W,
+            },
         }
         .chain_width(share, available)
     }
@@ -357,6 +364,8 @@ impl App {
                 Some(Flexible::RingModulator)
             } else if is_native_type(effect, vibez_core::effect::EffectType::FrequencyShifter) {
                 Some(Flexible::FrequencyShifter)
+            } else if is_native_type(effect, vibez_core::effect::EffectType::Rack) {
+                Some(Flexible::Rack)
             } else {
                 None
             };
@@ -450,6 +459,27 @@ impl App {
                     }
                     Flexible::MultibandDynamics => {
                         self.multiband_dynamics_device_body(track_id, effect, track_color, width)
+                    }
+                    Flexible::Rack => {
+                        let rack = effect.rack.as_ref();
+                        DeviceBody {
+                            content: rack.map_or_else(
+                                || iced::widget::Space::new(0, 0).into(),
+                                |rack| {
+                                    crate::widgets::rack_device::body(
+                                        track_id,
+                                        effect,
+                                        rack,
+                                        track_color,
+                                        self.state.rack_ui.selected(effect.id, rack),
+                                    )
+                                },
+                            ),
+                            width,
+                            padding: iced::Padding::ZERO,
+                            preset: None,
+                            advanced: None,
+                        }
                     }
                     kind => {
                         let Some(simple) = kind.simple_kind() else {

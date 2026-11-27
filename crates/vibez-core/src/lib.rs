@@ -20,6 +20,7 @@ pub mod modulation;
 pub mod note_output;
 pub mod onset;
 pub mod perform;
+pub mod rack;
 pub mod routing;
 pub mod scale;
 pub mod tempo;

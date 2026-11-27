@@ -605,6 +605,7 @@ fn loaded_plugins_preserve_trigger_history_in_selected_track_bounce() {
             ghost.plugin_instrument = Some(identity(source_format, "Pulse"));
             let effect = EffectId::new();
             bass.effects.push(EffectInfo {
+                rack: None,
                 id: effect,
                 effect_type: EffectType::Gain,
                 bypass: false,

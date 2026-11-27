@@ -59,10 +59,9 @@ pub(super) fn render_with_stems(
                             .iter()
                             .find(|info| info.id == effect.id)
                             .map_or(0, |info| {
-                                vibez_dsp::factory::create_effect_with_params(
-                                    info.effect_type,
+                                vibez_dsp::factory::create_effect_from_info(
+                                    info,
                                     req.sample_rate as f32,
-                                    &info.params,
                                 )
                                 .latency_samples()
                             })

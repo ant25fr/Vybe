@@ -106,6 +106,7 @@ pub fn swap_changed_controls(
     }
     for (effect, current_effect) in effects.iter().zip(&current.effects) {
         let UiEffect {
+            rack,
             id: effect_id,
             bypass,
             params,
@@ -120,6 +121,31 @@ pub fn swap_changed_controls(
             inactive_sidechains: _,
             external_inputs: _,
         } = effect;
+        if let (Some(rack), Some(current_rack)) = (rack, &current_effect.rack) {
+            for (chain, (devices, current_devices)) in
+                rack.chains.iter().zip(&current_rack.chains).enumerate()
+            {
+                for (device, (slot, current_slot)) in devices
+                    .devices
+                    .iter()
+                    .zip(&current_devices.devices)
+                    .enumerate()
+                {
+                    for (param, (&value, &current_value)) in
+                        slot.params.iter().zip(&current_slot.params).enumerate()
+                    {
+                        if value != current_value {
+                            engine.send(EngineCommand::SetEffectParam {
+                                track_id,
+                                effect_id: *effect_id,
+                                param_index: vibez_core::rack::inner_param(chain, device, param),
+                                value,
+                            });
+                        }
+                    }
+                }
+            }
+        }
         if current_effect.bypass != *bypass {
             engine.send(EngineCommand::SetEffectBypass {
                 track_id,

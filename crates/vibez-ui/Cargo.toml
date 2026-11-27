@@ -66,6 +66,10 @@ name = "native_plugin_gui"
 harness = false
 
 [[example]]
+name = "rack_device"
+required-features = ["dev-gallery"]
+
+[[example]]
 name = "gain_device"
 required-features = ["dev-gallery"]
 

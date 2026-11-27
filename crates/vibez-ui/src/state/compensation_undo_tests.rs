@@ -6,6 +6,7 @@ use vibez_core::{effect::EffectType, id::EffectId};
 
 fn effect() -> UiEffect {
     UiEffect {
+        rack: None,
         id: EffectId::new(),
         effect_type: EffectType::Gain,
         bypass: false,

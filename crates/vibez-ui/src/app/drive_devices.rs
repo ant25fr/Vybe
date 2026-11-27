@@ -75,6 +75,7 @@ mod tests {
         let track_id = track.id;
         let effect_id = EffectId::new();
         track.effects.push(EffectInfo {
+            rack: None,
             id: effect_id,
             effect_type: EffectType::Drive,
             bypass: false,

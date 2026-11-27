@@ -34,6 +34,12 @@ pub enum KnobTarget {
     Effect(EffectId),
     GainDb(EffectId),
     Instrument,
+    /// A parameter of a device inside an Effect Rack.
+    Rack {
+        effect_id: EffectId,
+        chain: usize,
+        device: usize,
+    },
     /// A control of a modulator card.
     Modulator {
         modulator: usize,
@@ -184,6 +190,20 @@ impl EffectKnobWidget {
             KnobTarget::Instrument => {
                 Message::set_instrument_param(self.track_id, self.param_index, value)
             }
+            KnobTarget::Rack {
+                effect_id,
+                chain,
+                device,
+            } => Message::Rack(crate::domains::rack::RackMsg {
+                track_id: self.track_id,
+                effect_id,
+                edit: crate::domains::rack::RackEdit::SetDeviceParam {
+                    chain,
+                    device,
+                    param: self.param_index,
+                    value,
+                },
+            }),
             KnobTarget::Modulator { modulator, field } => {
                 Message::Modulation(crate::domains::modulation::ModulationMsg::SetField(
                     self.track_id,
@@ -507,6 +527,7 @@ impl canvas::Program<Message> for EffectKnobWidget {
                         KnobTarget::Device(slot) => Some(slot),
                         KnobTarget::Send { .. }
                         | KnobTarget::AudioClip { .. }
+                        | KnobTarget::Rack { .. }
                         | KnobTarget::Modulator { .. } => None,
                     };
                     if let Some(slot) = slot {

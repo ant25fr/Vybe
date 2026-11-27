@@ -27,6 +27,8 @@ pub enum EffectType {
     PitchShifter,
     RingModulator,
     FrequencyShifter,
+    /// Parallel chains of other effects: see [`crate::rack`].
+    Rack,
 }
 
 impl EffectType {
@@ -53,6 +55,7 @@ impl EffectType {
             EffectType::PitchShifter => "Pitch Shifter",
             EffectType::RingModulator => "Ring Modulator",
             EffectType::FrequencyShifter => "Frequency Shifter",
+            EffectType::Rack => "Effect Rack",
         }
     }
 
@@ -79,6 +82,7 @@ impl EffectType {
             EffectType::PitchShifter,
             EffectType::RingModulator,
             EffectType::FrequencyShifter,
+            EffectType::Rack,
         ]
     }
 }
@@ -156,6 +160,9 @@ pub struct EffectInfo {
     pub sidechains: Vec<crate::routing::SidechainAssignment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inactive_sidechains: Vec<crate::routing::ExternalInputId>,
+    /// The chains of an [`EffectType::Rack`] slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<crate::rack::RackState>,
 }
 
 /// Identity and state of a third-party plugin device, as persisted in
@@ -187,12 +194,13 @@ mod tests {
     #[test]
     fn effect_type_all() {
         let all = EffectType::all();
-        assert_eq!(all.len(), 21);
+        assert_eq!(all.len(), 22);
     }
 
     #[test]
     fn effect_info_serde_roundtrip() {
         let info = EffectInfo {
+            rack: None,
             id: EffectId::new(),
             effect_type: EffectType::Delay,
             bypass: false,

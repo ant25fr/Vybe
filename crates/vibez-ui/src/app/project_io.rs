@@ -202,10 +202,9 @@ impl App {
                 out.push(UiEffect::unavailable_plugin(effect_info));
                 continue;
             }
-            let fx = vibez_dsp::factory::create_effect_with_params(
-                effect_info.effect_type,
+            let fx = vibez_dsp::factory::create_effect_from_info(
+                effect_info,
                 self.state.transport.sample_rate as f32,
-                &effect_info.params,
             );
             out.push(UiEffect {
                 reconfiguration_failed: false,
@@ -222,8 +221,10 @@ impl App {
                 plugin_name: None,
                 has_plugin_gui: false,
                 plugin_ref: None,
+                rack: crate::domains::rack::loaded_rack(effect_info),
             });
-            self.insert_built_in_effect(chan_id, effect_info.id, effect_info.effect_type);
+            let slot = out.last().expect("the slot just pushed").clone();
+            self.insert_ui_effect(chan_id, &slot);
             for (idx, value) in effect_info.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: chan_id,
@@ -735,10 +736,9 @@ impl App {
                         .push(UiEffect::unavailable_plugin(effect_info));
                     continue;
                 }
-                let fx = vibez_dsp::factory::create_effect_with_params(
-                    effect_info.effect_type,
+                let fx = vibez_dsp::factory::create_effect_from_info(
+                    effect_info,
                     self.state.transport.sample_rate as f32,
-                    &effect_info.params,
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
@@ -756,8 +756,10 @@ impl App {
                     plugin_name: None,
                     has_plugin_gui: false,
                     plugin_ref: None,
+                    rack: crate::domains::rack::loaded_rack(effect_info),
                 });
-                self.insert_built_in_effect(track_info.id, effect_info.id, effect_info.effect_type);
+                let slot = track.effects.last().expect("the slot just pushed").clone();
+                self.insert_ui_effect(track_info.id, &slot);
                 for (idx, value) in effect_info.params.iter().copied().enumerate() {
                     self.send_command(EngineCommand::SetEffectParam {
                         track_id: track_info.id,
@@ -787,6 +789,7 @@ impl App {
                 );
                 let descriptors = fx.param_descriptors();
                 track.effects.push(UiEffect {
+                    rack: None,
                     reconfiguration_failed: false,
                     latency_samples: Some(0),
                     inactive_sidechains: Default::default(),

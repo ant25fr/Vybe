@@ -649,6 +649,7 @@ fn parameter_keys(device: &DeviceParams) -> Result<Vec<PresetParam>, String> {
         EffectType::PitchShifter => Ok(PITCH_SHIFTER_KEYS.to_vec()),
         EffectType::RingModulator => Ok(RING_MODULATOR_KEYS.to_vec()),
         EffectType::FrequencyShifter => Ok(FREQUENCY_SHIFTER_KEYS.to_vec()),
+        EffectType::Rack => Err("Racks have no presets yet".into()),
     }
 }
 
@@ -1339,6 +1340,7 @@ pub fn factory_presets(effect_type: EffectType) -> Vec<DevicePreset> {
         EffectType::PitchShifter => pitch_shifter_factory_presets(),
         EffectType::RingModulator => ring_modulator_factory_presets(),
         EffectType::FrequencyShifter => frequency_shifter_factory_presets(),
+        EffectType::Rack => Vec::new(),
     }
 }
 
@@ -2758,6 +2760,7 @@ mod presentation_tests {
         let descriptors =
             vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0).param_descriptors();
         UiEffect {
+            rack: None,
             reconfiguration_failed: false,
             latency_samples: Some(0),
             id: EffectId::new(),

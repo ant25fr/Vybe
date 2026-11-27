@@ -350,6 +350,8 @@ impl DevicesState {
 
                 if let Some(track) = find_track_mut(tracks, master, buses, track_id) {
                     track.effects.push(UiEffect {
+                        rack: (effect_type == vibez_core::effect::EffectType::Rack)
+                            .then(Default::default),
                         reconfiguration_failed: false,
                         latency_samples: Some(fx.latency_samples()),
                         inactive_sidechains: Default::default(),
@@ -762,6 +764,7 @@ mod tests {
         );
         let effect_id = EffectId::new();
         track.effects.push(UiEffect {
+            rack: None,
             reconfiguration_failed: false,
             latency_samples: Some(0),
             inactive_sidechains: Default::default(),

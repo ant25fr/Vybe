@@ -444,6 +444,7 @@ mod tests {
         let mut receiver = TrackInfo::new("Bass");
         let deleted_source = serde_json::from_str::<TrackId>("999999").unwrap();
         receiver.effects.push(EffectInfo {
+            rack: None,
             id: EffectId::new(),
             effect_type: EffectType::Compressor,
             bypass: false,
@@ -536,6 +537,7 @@ mod tests {
         };
         let mut track = TrackInfo::new("FX");
         track.effects.push(EffectInfo {
+            rack: None,
             inactive_sidechains: Default::default(),
             sidechains: Default::default(),
             id: vibez_core::id::EffectId::new(),
@@ -900,6 +902,7 @@ mod tests {
 
         let mut track = TrackInfo::new("FX Track");
         track.effects.push(EffectInfo {
+            rack: None,
             inactive_sidechains: Default::default(),
             sidechains: Default::default(),
             id: EffectId::new(),

@@ -107,6 +107,7 @@ fn fully_compensated_bounce_replays_heard_section_and_live_note_relationship_wit
         track.id = id;
         let effect = EffectId::new();
         track.effects.push(EffectInfo {
+            rack: None,
             inactive_sidechains: vec![],
             id: effect,
             effect_type: EffectType::Gain,

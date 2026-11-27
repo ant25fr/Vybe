@@ -1252,6 +1252,7 @@ mod tests {
         let mut track = ProjectTrack::new(TrackId::new(), "T".into(), 0);
         let native_id = EffectId::new();
         track.effects.push(UiEffect {
+            rack: None,
             id: native_id,
             effect_type: EffectType::Gain,
             bypass: false,
@@ -1268,6 +1269,7 @@ mod tests {
         });
         let plugin_id = EffectId::new();
         track.effects.push(UiEffect {
+            rack: None,
             id: plugin_id,
             effect_type: EffectType::Gain,
             bypass: false,

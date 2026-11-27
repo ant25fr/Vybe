@@ -53,6 +53,7 @@ pub mod phaser;
 pub mod piano_roll;
 pub mod plucked;
 pub mod project;
+pub mod rack;
 pub mod reverb;
 pub mod sampler;
 pub mod saturator;

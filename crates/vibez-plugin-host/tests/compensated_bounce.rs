@@ -50,6 +50,7 @@ fn render(
     detector.plugin_instrument = Some(identity(source_format));
     let effect = EffectId::new();
     main.effects.push(EffectInfo {
+        rack: None,
         inactive_sidechains: vec![],
         id: effect,
         effect_type: EffectType::Gain,

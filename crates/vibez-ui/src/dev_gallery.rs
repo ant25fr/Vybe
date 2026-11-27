@@ -82,6 +82,7 @@ fn effect(
         sidechains,
         inactive_sidechains: Vec::new(),
         external_inputs,
+        rack: None,
     }
 }
 
@@ -3181,4 +3182,97 @@ pub fn run_fm() -> iced::Result {
     .antialiasing(true)
     .window_size((1900.0, 1500.0))
     .run_with(|| (FmGallery::new(), iced::Task::none()))
+}
+
+/// The Effect Rack with two chains and a mapped macro.
+struct RackGallery {
+    track: TrackId,
+    effect: UiEffect,
+}
+
+impl RackGallery {
+    fn new() -> Self {
+        use vibez_core::rack::{MacroMapping, RackChain, RackDevice, RackState, RACK_PARAMS};
+        let device = |effect_type| RackDevice {
+            effect_type,
+            params: Vec::new(),
+            bypass: false,
+        };
+        let mut effect = effect(EffectType::Rack, None, false, false, None, 0);
+        effect.params = RACK_PARAMS.iter().map(|d| d.default).collect();
+        effect.params[0] = 0.6;
+        effect.rack = Some(RackState {
+            chains: vec![
+                RackChain {
+                    devices: vec![device(EffectType::Compressor), device(EffectType::Delay)],
+                },
+                RackChain::default(),
+            ],
+            mappings: vec![MacroMapping {
+                macro_index: 0,
+                chain: 0,
+                device: 0,
+                param: 0,
+                min: -60.0,
+                max: 0.0,
+            }],
+        });
+        Self {
+            track: TrackId::new(),
+            effect,
+        }
+    }
+
+    fn scene(&self, label: &'static str, height: f32) -> Element<'_, Message> {
+        use crate::widgets::rack_device::{body, RACK_CARD_W};
+        let accent = th::track_color(2);
+        let rack = self.effect.rack.as_ref().expect("the gallery's rack");
+        let content = body(self.track, &self.effect, rack, accent, (0, 0));
+        let card = view_effect_slot(
+            self.track,
+            &self.effect,
+            accent,
+            Some(crate::widgets::effect_slot::DeviceBody {
+                content,
+                width: RACK_CARD_W,
+                padding: iced::Padding::ZERO,
+                preset: None,
+                advanced: None,
+            }),
+            None,
+            48_000,
+        );
+        gallery_section(label, (RACK_CARD_W + 16.0, height), card)
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        container(
+            column![
+                self.scene("Normal height", 320.0),
+                self.scene("Minimum height", 220.0),
+            ]
+            .spacing(16),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .style(|_theme: &Theme| container::Style {
+            background: Some(th::bg_surface().into()),
+            ..Default::default()
+        })
+        .into()
+    }
+}
+
+pub fn run_rack() -> iced::Result {
+    crate::typography::load_bundled_fonts();
+    iced::application(
+        "Rack device gallery",
+        |_: &mut RackGallery, _: Message| {},
+        RackGallery::view,
+    )
+    .theme(|_| th::vibez_theme())
+    .antialiasing(true)
+    .window_size((620.0, 640.0))
+    .run_with(|| (RackGallery::new(), iced::Task::none()))
 }

@@ -523,6 +523,24 @@ impl App {
         );
     }
 
+    /// Put a built-in effect at the end of a channel's chain, racks with
+    /// their chains.
+    pub(super) fn insert_ui_effect(&mut self, track_id: TrackId, effect: &crate::state::UiEffect) {
+        match &effect.rack {
+            Some(rack) => {
+                let (command, _) = crate::domains::rack::insert_command(
+                    track_id,
+                    effect,
+                    rack,
+                    self.state.transport.sample_rate,
+                    None,
+                );
+                self.send_command(command);
+            }
+            None => self.insert_built_in_effect(track_id, effect.id, effect.effect_type),
+        }
+    }
+
     /// Replay a channel's built-in effect chain to the engine
     /// (add, params, bypass). Plugin devices reload through the
     /// async pipeline instead.
@@ -531,7 +549,7 @@ impl App {
             if effect.plugin_ref.is_some() {
                 continue;
             }
-            self.insert_built_in_effect(track.id, effect.id, effect.effect_type);
+            self.insert_ui_effect(track.id, effect);
             for (idx, value) in effect.params.iter().copied().enumerate() {
                 self.send_command(EngineCommand::SetEffectParam {
                     track_id: track.id,

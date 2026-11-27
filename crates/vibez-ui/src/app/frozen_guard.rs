@@ -71,6 +71,12 @@ impl App {
             {
                 Some(*track_id)
             }
+            Message::Rack(msg)
+                if !matches!(msg.edit, crate::domains::rack::RackEdit::Select { .. })
+                    && self.is_frozen(msg.track_id) =>
+            {
+                Some(msg.track_id)
+            }
             Message::Modulation(msg)
                 if !matches!(msg, crate::domains::modulation::ModulationMsg::Select(..))
                     && self.is_frozen(msg.track_id()) =>

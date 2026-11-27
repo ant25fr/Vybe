@@ -30,6 +30,7 @@ fn plugin_effect() -> UiEffect {
         state_b64: None,
     };
     UiEffect {
+        rack: None,
         reconfiguration_failed: false,
         latency_samples: None,
         id: EffectId::new(),
@@ -155,6 +156,7 @@ fn undoing_a_clip_move_swaps_only_that_clip() {
 fn built_in_gain() -> UiEffect {
     let device = vibez_dsp::factory::create_effect(EffectType::Gain, 44_100.0);
     UiEffect {
+        rack: None,
         reconfiguration_failed: false,
         latency_samples: Some(0),
         id: EffectId::new(),

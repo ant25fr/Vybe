@@ -246,6 +246,7 @@ mod tests {
 
     fn effect(plugin: Option<PluginDeviceInfo>) -> UiEffect {
         UiEffect {
+            rack: None,
             reconfiguration_failed: false,
             latency_samples: Some(0),
             inactive_sidechains: Default::default(),

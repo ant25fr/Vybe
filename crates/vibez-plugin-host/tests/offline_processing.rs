@@ -23,6 +23,7 @@ fn a_loadable_processing_failure_is_not_successful_silent_audio_and_returns_its_
     let mut track = TrackInfo::new("Bass");
     let effect = vibez_core::id::EffectId::new();
     track.effects.push(EffectInfo {
+        rack: None,
         id: effect,
         effect_type: EffectType::Gain,
         params: vec![],
@@ -87,6 +88,7 @@ fn loadable_wrong_rate_bounce_rejects_before_dsp_and_returns_a_valid_original_ow
         let mut track = TrackInfo::new("Wrong rate");
         let effect = EffectId::new();
         track.effects.push(EffectInfo {
+            rack: None,
             id: effect,
             effect_type: EffectType::Gain,
             params: vec![],

@@ -74,6 +74,7 @@ fn setup() -> (
     };
     let mut track = ProjectTrack::new(track_id, "Bass".into(), 0);
     track.effects.push(UiEffect {
+        rack: None,
         reconfiguration_failed: false,
         latency_samples: None,
         id: effect_id,

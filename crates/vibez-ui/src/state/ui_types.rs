@@ -571,6 +571,8 @@ pub struct UiEffect {
     pub sidechains: Vec<vibez_core::routing::SidechainAssignment>,
     pub inactive_sidechains: Vec<vibez_core::routing::ExternalInputId>,
     pub external_inputs: Vec<vibez_core::routing::ExternalInputDescriptor>,
+    /// The chains of an Effect Rack.
+    pub rack: Option<vibez_core::rack::RackState>,
 }
 
 impl UiEffect {
@@ -586,6 +588,7 @@ impl UiEffect {
             plugin_name: info.plugin.as_ref().map(|plugin| plugin.name.clone()),
             has_plugin_gui: false,
             plugin_ref: info.plugin.clone(),
+            rack: info.rack.clone(),
             inactive_sidechains: info.inactive_sidechains.clone(),
             sidechains: info.sidechains.clone(),
             external_inputs: Vec::new(),

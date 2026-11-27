@@ -30,6 +30,7 @@ fn legacy_json_and_current_container_roundtrip_monitoring_mode_and_host_bypass()
         let mut track = TrackInfo::new("Bass");
         let effect_id = EffectId::new();
         track.effects.push(EffectInfo {
+            rack: None,
             id: effect_id,
             effect_type: EffectType::Gain,
             bypass: true,

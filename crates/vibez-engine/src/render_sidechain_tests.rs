@@ -36,6 +36,7 @@ fn clip(
 }
 fn receiving_effect(source: TrackId, tap: SourceTap) -> EffectInfo {
     EffectInfo {
+        rack: None,
         id: EffectId::new(),
         effect_type: EffectType::Gate,
         bypass: false,
@@ -188,6 +189,7 @@ fn before_effects_dependency_does_not_require_an_unreached_source_plugin() {
     let mut source = bare_track("Ghost");
     source.mute = true;
     source.effects.push(EffectInfo {
+        rack: None,
         id: EffectId::new(),
         effect_type: EffectType::Gain,
         bypass: false,

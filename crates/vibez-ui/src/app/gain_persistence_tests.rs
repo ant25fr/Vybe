@@ -19,6 +19,7 @@ async fn legacy_gain_project_keeps_its_level_and_accepts_new_stereo_controls() {
         let track_id = track.id;
         let effect_id = EffectId::new();
         track.effects.push(EffectInfo {
+            rack: None,
             id: effect_id,
             effect_type: EffectType::Gain,
             bypass: false,

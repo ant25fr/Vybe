@@ -66,6 +66,7 @@ mod playhead;
 pub mod plucked_device;
 pub mod plucked_display;
 pub mod quiet_scroll;
+pub mod rack_device;
 pub mod reverb_device;
 pub mod reverb_display;
 pub mod sampler_device;

@@ -47,6 +47,24 @@ pub fn create_effect(effect_type: EffectType, sample_rate: f32) -> Box<dyn Audio
         EffectType::PitchShifter => Box::new(PitchShifterEffect::new(sample_rate)),
         EffectType::RingModulator => Box::new(RingModulatorEffect::new(sample_rate)),
         EffectType::FrequencyShifter => Box::new(FrequencyShifterEffect::new(sample_rate)),
+        EffectType::Rack => Box::new(crate::rack::RackEffect::new(
+            &Default::default(),
+            sample_rate,
+            &[],
+        )),
+    }
+}
+
+/// The effect a saved built-in slot describes, with a rack's chains.
+pub fn create_effect_from_info(
+    info: &vibez_core::effect::EffectInfo,
+    sample_rate: f32,
+) -> Box<dyn AudioEffect> {
+    match &info.rack {
+        Some(rack) if info.effect_type == EffectType::Rack => Box::new(
+            crate::rack::RackEffect::new(rack, sample_rate, &info.params),
+        ),
+        _ => create_effect_with_params(info.effect_type, sample_rate, &info.params),
     }
 }
 

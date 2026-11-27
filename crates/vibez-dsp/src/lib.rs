@@ -21,6 +21,7 @@ mod oversampled;
 pub mod oversampling;
 pub mod phaser;
 pub mod pitch_shifter;
+pub mod rack;
 pub mod reverb;
 pub mod ring_modulator;
 pub mod saturator;

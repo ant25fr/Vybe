@@ -95,6 +95,7 @@ fn same_track(track: &ProjectTrack, other: &ProjectTrack) -> bool {
 
 fn same_effect(effect: &UiEffect, other: &UiEffect) -> bool {
     let UiEffect {
+        rack,
         reconfiguration_failed,
         latency_samples: _,
         id,
@@ -109,7 +110,14 @@ fn same_effect(effect: &UiEffect, other: &UiEffect) -> bool {
         inactive_sidechains,
         external_inputs,
     } = effect;
-    *reconfiguration_failed == other.reconfiguration_failed
+    // Inner knob values are sent as controls; anything else rebuilds.
+    let same_rack = match (rack, &other.rack) {
+        (Some(rack), Some(other)) => rack.same_structure(other),
+        (None, None) => true,
+        _ => false,
+    };
+    same_rack
+        && *reconfiguration_failed == other.reconfiguration_failed
         && *id == other.id
         && *effect_type == other.effect_type
         && (plugin_ref.is_none() || *params == other.params)

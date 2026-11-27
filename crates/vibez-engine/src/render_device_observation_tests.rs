@@ -419,6 +419,7 @@ fn request() -> (BounceRequest, EffectId) {
     master.gain = 0.5;
     let effect = EffectId::new();
     first.effects.push(EffectInfo {
+        rack: None,
         id: effect,
         effect_type: EffectType::Gain,
         bypass: false,

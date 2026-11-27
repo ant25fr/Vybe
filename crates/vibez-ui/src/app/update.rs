@@ -321,6 +321,9 @@ impl App {
                 && self.state.transport.signature_edit().is_some())
                 || matches!(&message, Message::Modulation(m)
                 if m.edit(&self.state.project_tracks).is_some())
+                || matches!(&message, Message::Rack(m)
+                if m.edited(&self.state.project_tracks)
+                    .is_some())
                 || matches!(&message, Message::Devices(m) if m.marks_dirty())
                 || matches!(&message, Message::Arrangement(m) if m.marks_dirty())
                 || matches!(&message, Message::PianoRoll(m) if m.marks_dirty())
@@ -332,6 +335,18 @@ impl App {
         }
 
         match message {
+            Message::Rack(message) => {
+                let rebuilt = self.state.rack_ui.update(
+                    message,
+                    &mut crate::domains::EngineTx(&mut self.cmd_tx),
+                    &mut self.state.project_tracks,
+                    self.state.transport.sample_rate,
+                );
+                // The engine waits for a routing plan after a chain edit.
+                if rebuilt {
+                    self.state.devices.last_routing = None;
+                }
+            }
             Message::Modulation(message) => self.state.modulation_ui.update(
                 message,
                 &mut crate::domains::EngineTx(&mut self.cmd_tx),

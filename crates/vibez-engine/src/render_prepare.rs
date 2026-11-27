@@ -190,11 +190,7 @@ fn effects(
                     }
                 }
             } else {
-                vibez_dsp::factory::create_effect_with_params(
-                    info.effect_type,
-                    sample_rate as f32,
-                    &info.params,
-                )
+                vibez_dsp::factory::create_effect_from_info(info, sample_rate as f32)
             };
             Some(EffectSlot {
                 levels: Default::default(),

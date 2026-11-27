@@ -37,6 +37,7 @@ fn returned_device_event_reconfigures_on_main_and_publishes_resume_or_reject_wit
         let mut track = ProjectTrack::new(TrackId::new(), "Track".into(), 0);
         let id = EffectId::new();
         track.effects.push(UiEffect {
+            rack: None,
             id,
             effect_type: EffectType::Gain,
             bypass: false,
@@ -159,6 +160,7 @@ fn queued_replacement_or_project_reset_revokes_old_event_before_main_activation(
         let track_id = track.id;
         let effect_id = EffectId::new();
         let mut ui_effect = UiEffect {
+            rack: None,
             id: effect_id,
             effect_type: EffectType::Gain,
             bypass: false,
