@@ -62,6 +62,13 @@ Les familles servent à ce document ; elles ne changent pas la couleur : un effe
 | Pitch Shifter | 380 | 380 | 480 | 840 |
 | Ring Modulator | 380 | 380 | 480 | 840 |
 | Frequency Shifter | 380 | 380 | 480 | 840 |
+| Effect Rack | 560 | 560 | 560 | 560 |
+
+L'Effect Rack garde une largeur fixe et se lit de haut en bas : les 8 macros
+(potards 34), l'onglet des chaînes avec l'interrupteur et le volume de la chaîne
+choisie, les effets en série de cette chaîne, puis leurs paramètres (potards 30,
+7 par rangée, menu de macro sous chacun) dans une zone défilante. Un paramètre
+pris par une macro est grisé.
 
 ## Contrôles
 

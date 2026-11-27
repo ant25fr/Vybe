@@ -852,6 +852,20 @@ a value written by anyone else becomes the new centre, so manual edits and
 automation need no separate path. Any active modulator also splits Arrange
 rendering into slices.
 
+### Effect Rack and follow actions
+
+An Effect Rack is one built-in effect holding parallel chains of built-in
+effects (`vibez-core/src/rack.rs`, `vibez-dsp/src/rack.rs`). Its own parameters
+are the macros and the chain volumes and switches, so automation, modulation and
+MIDI mapping reach them like any other device. Inner knobs are sent as encoded
+parameter indices; any change of chains, devices or mappings builds a new rack
+on the UI thread and swaps it into the same chain position, then republishes the
+routing plan.
+
+Follow actions are saved with each clip's launch options. The Perform domain
+decides when one is due from the transport position and queues an ordinary
+quantized launch, so the engine needs nothing new and Capture records it.
+
 ## Projects, undo, and warping
 
 - Projects are JSON (`vibez-project`): Project Tracks remain in the existing

@@ -70,6 +70,7 @@ Courbe à la couleur de la piste, points circulaires évidés, point saisi en `a
 - Grille de 16 pads (4 × 4). Un pad : numéro en Plex Mono dans la couleur de piste correspondant à son rang, position `R1 · C1`, nom centré, état en bas (`PLAYING`, `AVAILABLE`, `EMPTY`), bord coloré. Relief par `perform_pad_highlight()` et `perform_pad_lowlight()`.
 - Pad en lecture : bord `accent`, dégradé de progression.
 - Pad vide : « + SECTION » en `text_dim`.
+- Options du clip choisi : le follow action (FOLLOW, action A, chance « A:B », action B, moment) suit la quantification et le mode.
 - Clips : une colonne par piste ; tuiles rayon 6, écart 6, boutons de 20 ; anneau `accent` sur la tuile sélectionnée.
 - Minimums : surface des pads 320, construction de Section 460, gouttière de pistes 112.
 

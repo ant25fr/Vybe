@@ -1,5 +1,29 @@
 # Suivi des bugs
 
+## Corrigés le 27/11/2026 (session racks et follow actions)
+
+Trouvés dans le code ajouté par la session, avant livraison.
+
+| Effet | Où |
+|---|---|
+| Un paramètre mappé sur une macro à zéro affichait la valeur de la macro mais le moteur jouait l'ancienne | `vibez-dsp/src/rack.rs` |
+| La carte du rack construisait un effet à chaque image pour lire ses paramètres | `domains/rack.rs`, `descriptors` |
+| Un rack d'un fichier abîmé pouvait dépasser les limites de la carte | `app/project_io.rs`, `loaded_rack` |
+
+## Limites connues des racks et des follow actions
+
+| Effet | Piste | Statut |
+|---|---|---|
+| Un rack ne contient que des effets intégrés : ni plugins, ni instruments, ni racks imbriqués | `vibez-core/src/rack.rs` | Limite connue |
+| Ajouter, retirer ou contourner un effet du rack, ou changer un mapping, reconstruit le rack : les queues de delay et de reverb sont coupées | `domains/rack.rs` | Limite connue (écart avec Live) |
+| Après le retrait d'une chaîne, l'automation, la modulation et le mapping MIDI des volumes des chaînes suivantes restent sur l'ancien numéro | `domains/rack.rs`, `RemoveChain` | Confirmé à la lecture |
+| Seuls les macros et les volumes de chaîne sont automatisables, pas les paramètres internes | `domains/rack.rs` | Limite connue |
+| Une macro couvre toute la plage du paramètre : pas de réglage de plage | `domains/rack.rs`, `Map` | Limite connue |
+| La latence du rack est fixée à sa construction : un paramètre interne qui la change ne la met pas à jour | `vibez-dsp/src/rack.rs` | Probable |
+| Pas de sidechain ni d'indicateurs de réduction de gain pour les effets d'un rack, pas de préréglages de rack | `app/views_devices.rs` | Limite connue |
+| Les follow actions sont déclenchées par le rafraîchissement de l'interface : une interface bloquée peut les retarder d'un pas | `domains/perform/follow_actions.rs` | Limite connue |
+| Les réglages de follow action ajoutent une rangée chargée à l'en-tête du clip, non vérifiée à l'écran | `app/views_clip_launcher.rs` | À vérifier dans l'application |
+
 ## Interfaces des plugins isolés sous Linux (26/11/2026)
 
 Vérifiées en pilotant `vibez-plugin-bridge` avec Surge XT, Vital, ZL Splitter,
@@ -113,6 +137,7 @@ pistes dans Mix.
 | La voie d'un groupe ne montre ni les prises en cours d'enregistrement ni la sélection de temps, et n'accepte pas de dépôt d'échantillon | `widgets/group_lane.rs` | Limite connue |
 | Le README, le site et l'installateur Windows renvoient encore au dépôt d'origine | `README.md`, `site/index.html`, `packaging/windows/vibez.iss` | Confirmé à la lecture |
 | Pas de prises MIDI : Arrange n'enregistre que l'audio | `app/audio_recording.rs` | Limite connue |
+| Une autosauvegarde qui échoue n'est pas retentée avant la modification suivante | `app/update_project.rs` | Confirmé à la lecture |
 | Les parties montées se raccordent par deux fondus de 4 ms, pas par un fondu enchaîné | `domains/arrangement/takes.rs` | Limite connue |
 | Une version antérieure de vibez ouvrant le projet jouerait les prises par-dessus le montage | champ `take_lane` du fichier de projet | Limite connue |
 | Coller des clips de plusieurs pistes sous un groupe replié peut viser ses pistes masquées | `domains/arrangement/clipboard.rs` | Probable |
@@ -122,9 +147,12 @@ pistes dans Mix.
 ## Zones relues
 
 Export DAWproject, effets intégrés, entrée MIDI, tags du navigateur, sends,
-groupes, freeze, démarrage, transport du moteur, rendu hors ligne, métronome.
+groupes, freeze, démarrage, transport du moteur, rendu hors ligne, métronome,
+autosauvegarde (27/11/2026).
 
 ## Pas encore relues
 
 Perform et lanceur de clips, enregistrement audio, pont de plugins isolés,
-warping, autosauvegarde.
+warping.
+
+Lanceur de clips : seuls les follow actions et le lancement ont été relus.

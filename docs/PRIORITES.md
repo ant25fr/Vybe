@@ -18,15 +18,28 @@
 | 12 | 2 | Prises multiples et comping | Élevé | Fait pour l’audio : prises en boucle, voies de prises, montage par glisser, écoute d’une prise (pas de MIDI) |
 | 13 | 2 | Automation du tempo et signatures rythmiques | Élevé | Fait pour Arrange, avec limites (voir BUGS.md) : l’audio change de hauteur avec le tempo, Perform reste en 4/4 au tempo du projet |
 | 14 | 3 | Modulateurs (LFO, enveloppe, aléatoire) | Élevé | Fait pour le volume, le panoramique et les appareils intégrés (pas les plugins ni les sends) |
-| 15 | 3 | Racks avec macros et chaînes parallèles | Élevé | À faire |
-| 16 | 3 | Follow actions des clips | Moyen | À faire |
+| 15 | 3 | Racks avec macros et chaînes parallèles | Élevé | Fait pour les effets intégrés : 4 chaînes, 8 macros (voir BUGS.md) |
+| 16 | 3 | Follow actions des clips | Moyen | Fait (voir BUGS.md) |
 | 17 | 3 | Ableton Link (licence à vérifier) | Moyen à élevé | À faire |
 | 18 | 3 | MPE et expression par note | Moyen à élevé | À faire |
-| 19 | Ajout | Séparateur de stems (voix, batterie, basse, autres) | Élevé | À faire |
+| 19 | Ajout | Séparateur de stems (voix, batterie, basse, autres) | Élevé | À faire | https://github.com/stemdeckapp/stemdeck
 | 20 | Ajout | Prise en charge d'ARA (ARA 2, type Melodyne) pour les plugins | Élevé | À faire |
+| 21 | Bitwig | Probabilité et répétitions par note | Moyen | À faire |
+| 22 | Bitwig | Repères d'arrangement | Faible à moyen | À faire |
+| 23 | Bitwig | Export 24 bits et 32 bits flottant | Faible | À faire |
+| 24 | Bitwig | Tonalité du projet | Faible à moyen | À faire |
+| 25 | Bitwig | Saisie des notes pas à pas | Faible à moyen | À faire |
+| 26 | Bitwig | Sauvegardes versionnées du projet | Faible | À faire |
+| 27 | Bitwig | Mesure LUFS sur le master | Moyen | À faire |
+| 28 | Bitwig | Clips liés | Moyen à élevé | À faire |
+| 29 | Bitwig | Clips d'automation | Élevé | À faire |
+| 30 | Bitwig | Sampler multi-échantillons | Élevé | À faire |
+| 31 | Bitwig | Environnement modulaire | Très élevé | À faire |
 
 ## Notes
 
+- **21 à 31** : issus de la comparaison avec Bitwig Studio 6, détaillée dans
+  `COMPARAISON_BITWIG.md`. Ordre conseillé : 23, 22, 21.
 - **19, séparateur de stems** : demande un modèle d'apprentissage (par exemple
   Demucs ou un modèle ONNX). Le choix du modèle, sa licence, sa taille et son
   téléchargement sont à valider avant de commencer.
