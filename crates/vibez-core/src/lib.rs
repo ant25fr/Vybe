@@ -7,6 +7,7 @@ pub mod constants;
 pub mod device_preset;
 pub mod drum_kit;
 pub mod effect;
+pub mod follow_action;
 pub mod id;
 pub mod level;
 pub mod meter;

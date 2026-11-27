@@ -6,6 +6,7 @@ use iced::widget::{
     text, text_input, tooltip,
 };
 use iced::{Color, Element, Length, Theme};
+use vibez_core::follow_action::{FollowAction, FollowKind, FollowTime};
 use vibez_project::PerformLayout;
 
 use crate::domains::arrangement::ArrangementMsg;
@@ -52,6 +53,16 @@ fn choice_style(selected: bool, status: button::Status) -> button::Style {
             radius: 4.0.into(),
         },
         ..Default::default()
+    }
+}
+
+/// The chance of follow action A, shown as A against B.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Chance(u8);
+
+impl std::fmt::Display for Chance {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}:{}", self.0, 100u8.saturating_sub(self.0))
     }
 }
 
@@ -344,6 +355,39 @@ impl App {
             return iced::widget::Space::new(0, 0).into();
         };
         let clip_id = clip.id;
+        let follow = clip.launch.follow.unwrap_or_default();
+        // A follow action doing nothing is not saved.
+        let set_follow = move |follow: FollowAction| {
+            Message::Perform(PerformMsg::Clips(ClipMsg::SetFollowAction {
+                clip_id,
+                follow: (follow != FollowAction::default()).then_some(follow),
+            }))
+        };
+        let follow_controls = row![
+            text("FOLLOW")
+                .font(PERFORM_TECH)
+                .size(9)
+                .color(th::text_dim()),
+            track_launch_picker(FollowKind::ALL, follow.a, move |a| set_follow(
+                FollowAction { a, ..follow }
+            )),
+            track_launch_picker(
+                [100u8, 90, 75, 50, 25, 10, 0].map(Chance),
+                Chance(follow.chance_a),
+                move |chance: Chance| set_follow(FollowAction {
+                    chance_a: chance.0,
+                    ..follow
+                })
+            ),
+            track_launch_picker(FollowKind::ALL, follow.b, move |b| set_follow(
+                FollowAction { b, ..follow }
+            )),
+            track_launch_picker(FollowTime::ALL, follow.time, move |time| set_follow(
+                FollowAction { time, ..follow }
+            )),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
         row![
             container(
                 text(clip.name())
@@ -380,6 +424,7 @@ impl App {
                     }))
                 },
             ),
+            follow_controls,
         ]
         .spacing(6)
         .padding([0, 10])

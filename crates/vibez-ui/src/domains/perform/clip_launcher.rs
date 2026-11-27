@@ -13,8 +13,11 @@ use crate::state::{
 
 use super::{PerformAction, PerformCtx, PerformEditorFocus, PerformState};
 
+#[path = "follow_actions.rs"]
+mod follow_actions;
 #[path = "clip_launch_options.rs"]
 mod launch_options;
+
 pub(crate) use launch_options::TrackLaunchOptions;
 
 #[derive(Debug, Clone)]
@@ -105,6 +108,10 @@ pub struct ClipEditor {
     /// launched again when it starts.
     pub resume: HashMap<TrackId, ClipId>,
     pub started_at: HashMap<TrackId, u64>,
+    /// The follow action last fired on each track: its clip, that launch's
+    /// start and the period it ended.
+    pub followed: HashMap<TrackId, (ClipId, u64, u64)>,
+    pub follow_draws: u64,
     pub selected: Option<ClipId>,
     /// The cell paste targets: the selected clip's, or an empty one.
     pub slot: Option<(TrackId, u32)>,
@@ -298,6 +305,10 @@ pub enum ClipMsg {
         clip_id: ClipId,
         mode: Option<ClipLaunchMode>,
     },
+    SetFollowAction {
+        clip_id: ClipId,
+        follow: Option<vibez_core::follow_action::FollowAction>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -329,6 +340,7 @@ impl ClipMsg {
                 | Self::SetClipLaunchQuantization { .. }
                 | Self::SetLaunchMode { .. }
                 | Self::SetClipLaunchMode { .. }
+                | Self::SetFollowAction { .. }
         )
     }
 }
@@ -664,6 +676,9 @@ impl PerformState {
             }
             ClipMsg::SetClipLaunchMode { clip_id, mode } => {
                 self.edit_clip_launch(clip_id, |launch| launch.mode = mode)
+            }
+            ClipMsg::SetFollowAction { clip_id, follow } => {
+                self.edit_clip_launch(clip_id, |launch| launch.follow = follow)
             }
             ClipMsg::MoveWindow { tracks, rows } => {
                 self.clip_editor.first_track = self

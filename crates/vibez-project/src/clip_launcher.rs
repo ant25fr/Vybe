@@ -48,6 +48,13 @@ pub struct ClipLaunchOverrides {
         skip_serializing_if = "Option::is_none"
     )]
     pub mode: Option<ClipLaunchMode>,
+    /// What the Clip does by itself after a while.
+    #[serde(
+        rename = "follow_action",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub follow: Option<vibez_core::follow_action::FollowAction>,
 }
 
 /// A Project Track's Clip launch options. Tracks on the defaults are not written.
@@ -72,6 +79,7 @@ mod tests {
         let set = ClipLaunchOverrides {
             quantization: Some(MusicalBoundary::Eighth),
             mode: Some(ClipLaunchMode::Legato),
+            follow: None,
         };
         let json = serde_json::to_value(set).unwrap();
         assert_eq!(

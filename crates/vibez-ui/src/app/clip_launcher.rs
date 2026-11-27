@@ -97,6 +97,31 @@ impl App {
 
 impl App {
     pub(super) fn launch_clips(&mut self, request: crate::domains::perform::ClipLaunchRequest) {
+        self.queue_clip_launch(request, None);
+    }
+
+    /// Launch the follow actions whose time is coming up.
+    pub(super) fn run_follow_actions(&mut self) {
+        if self.state.perform.layout != PerformLayout::Clips {
+            return;
+        }
+        let position = self.state.perform.performance_position_samples;
+        let samples_per_beat = self.state.transport.samples_per_beat();
+        for due in self
+            .state
+            .perform
+            .due_follow_actions(position, samples_per_beat)
+        {
+            self.queue_clip_launch(due.request, Some(due.boundary));
+        }
+    }
+
+    /// Queue `request` on `boundary`, or on each Clip's own quantization.
+    fn queue_clip_launch(
+        &mut self,
+        request: crate::domains::perform::ClipLaunchRequest,
+        boundary: Option<MusicalBoundary>,
+    ) {
         use crate::domains::perform::ClipLaunchRequest;
         use vibez_engine::{commands::EngineCommand, playback_source::PreparedClipPlayback};
         if self.state.perform.layout != PerformLayout::Clips {
@@ -145,7 +170,7 @@ impl App {
         {
             if self.state.perform.clip_record.pending_audio_arm.is_some() {
                 self.cancel_clip_record();
-                self.launch_clips(request);
+                self.queue_clip_launch(request, boundary);
                 return;
             }
             self.state.perform.clip_record.notes.request_stop();
@@ -173,10 +198,10 @@ impl App {
         let samples_per_beat = self.state.transport.samples_per_beat();
         let mut batches: Vec<(MusicalBoundary, Vec<_>)> = Vec::new();
         for (track_id, clip) in targets {
-            let quantization = match &clip {
+            let quantization = boundary.unwrap_or_else(|| match &clip {
                 Some(clip) => self.state.perform.clips.clip_launch_quantization(clip),
                 None => self.state.perform.stop_quantization(track_id),
-            };
+            });
             let batch = match batches.iter().position(|(q, _)| *q == quantization) {
                 Some(index) => index,
                 None => {

@@ -657,6 +657,7 @@ impl App {
         }
         self.poll_device_meters();
         self.poll_engine_events();
+        self.run_follow_actions();
         self.state
             .view
             .prune_drum_pad_flashes(std::time::Instant::now());
